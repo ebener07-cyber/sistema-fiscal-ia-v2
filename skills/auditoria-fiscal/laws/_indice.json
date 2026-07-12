@@ -1,0 +1,74 @@
+[
+  {
+    "id": "l isr",
+    "nombre": "Ley del Impuesto Sobre la Renta",
+    "abreviatura": "LISR",
+    "archivo": "LISR.pdf",
+    "articulos": 337,
+    "caracteres": 1144481
+  },
+  {
+    "id": "l iva",
+    "nombre": "Ley del Impuesto al Valor Agregado",
+    "abreviatura": "LIVA",
+    "archivo": "LIVA.pdf",
+    "articulos": 221,
+    "caracteres": 363775
+  },
+  {
+    "id": "cff",
+    "nombre": "Código Fiscal de la Federación",
+    "abreviatura": "CFF",
+    "archivo": "CFF.pdf",
+    "articulos": 635,
+    "caracteres": 1206081
+  },
+  {
+    "id": "lft",
+    "nombre": "Ley Federal del Trabajo",
+    "abreviatura": "LFT",
+    "archivo": "LFT140526.pdf",
+    "articulos": 1412,
+    "caracteres": 1366018
+  },
+  {
+    "id": "lss",
+    "nombre": "Ley del Seguro Social",
+    "abreviatura": "LSS",
+    "archivo": "LSS_15-01-26.pdf",
+    "articulos": 356,
+    "caracteres": 533423
+  },
+  {
+    "id": "linfonavit",
+    "nombre": "Ley del INFONAVIT",
+    "abreviatura": "LINFONAVIT",
+    "archivo": "LIFNVT-21-02-2025.pdf",
+    "articulos": 95,
+    "caracteres": 276762
+  },
+  {
+    "id": "lfprh",
+    "nombre": "Ley Federal de Protección de Datos Personales en Posesión de Particulares",
+    "abreviatura": "LFPDPPP",
+    "archivo": "LFPRH.pdf",
+    "articulos": 120,
+    "caracteres": 394865
+  },
+  {
+    "id": "lga",
+    "nombre": "Ley General de Asentamientos Humanos",
+    "abreviatura": "LGA",
+    "archivo": "LGA+14.11.25.pdf",
+    "articulos": 123,
+    "caracteres": 123012
+  },
+  {
+    "id": "dof",
+    "nombre": "Diario Oficial de la Federación",
+    "abreviatura": "DOF",
+    "archivo": "DOF - Diario Oficial de la Federación.pdf",
+    "articulos": 2,
+    "caracteres": 49163
+  }
+]

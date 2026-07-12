@@ -1,0 +1,29 @@
+{
+  "id": "dof",
+  "nombre": "Diario Oficial de la Federación",
+  "abreviatura": "DOF",
+  "archivo": "DOF - Diario Oficial de la Federación.pdf",
+  "paginas": 8,
+  "caracteres": 49163,
+  "articulosCount": 2,
+  "indiceTemas": [
+    "IVA",
+    "traslación",
+    "acreditamiento",
+    "CFDI",
+    "comprobantes",
+    "obligaciones fiscales",
+    "datos personales",
+    "privacidad"
+  ],
+  "articulos": [
+    {
+      "numero": "1o",
+      "texto": "que, todas las\npersonas gozarán de los derechos humanos reconocidos en la Constitución y en los tratados internacionales de los que el Estado\nMexicano sea parte, así como de las garantías para su protección, cuyo ejercicio no podrá restringirse ni suspenderse, salvo en\nlos casos y bajo las condiciones que la Constitución establece.\nEn esa virtud, las normas relativas a los derechos humanos se interpretarán de conformidad con la CONSTITUCIÓN y con los\ntratados internacionales de la materia favoreciendo en todo tiempo a las personas la protección más amplia.\nPor tanto, todas las autoridades, en el ámbito de sus competencias, tienen la obligación de promover, respetar, proteger y\ngarantizar los derechos humanos de conformidad con los principios de universalidad, interdependencia, indivisibilidad y\nprogresividad. En consecuencia, el Estado deberá prevenir, investigar, sancionar y reparar las violaciones a los derechos\nhumanos, en los términos que establezca la ley.\nEl quinto párrafo del"
+    },
+    {
+      "numero": "4o",
+      "texto": "de la CONSTITUCIÓN dispone que toda persona tiene derecho a un medio ambiente sano\npara su desarrollo y bienestar. El Estado garantizará el respeto a este derecho.\nEn el mismo sentido, México ha suscrito diversos instrumentos y tratados internacionales en materia de derechos humanos de\nlas mujeres y particularmente el de una vida libre de violencia, tales como la Convención sobre la Eliminación de todas las Formas\nde Discriminación contra la Mujer (CEDAW, por sus siglas en inglés) y su Protocolo Facultativo, así como las recomendaciones de\nsu Comité; la Convención Interamericana para Prevenir, Sancionar y Erradicar la Violencia contra la Mujer (Convención de Belem\ndo Pará); la Declaración y Plataforma de Acción de Beijing; la Declaración sobre la eliminación de la violencia contra la mujer; el\nManual para la Investigación y Documentación eficaces de la Tortura y otros Tratos o Penas crueles, inhumanos o degradantes\n(Protocolo de Estambul); la Convención Americana sobre Derechos Humanos (Pacto de San José); la Convención sobre los\nDerechos del Niño (CDN); la Declaración Universal de Derechos Humanos (DUDH); la Declaración del Milenio de las Naciones\nUnidas y los Objetivos de Desarrollo Sostenible (ODS), en particular se hace referencia al objetivo \"Lograr la igualdad entre los\ngéneros y empoderar a todas las mujeres y las niñas\", en lo que concierne a las siguientes metas:\n1) \"Poner fin a todas las formas de discriminación contra todas las mujeres y las niñas en todo el mundo\",\n2) \"Eliminar todas las formas de violencia contra todas las mujeres y las niñas en los ámbitos público y privado, incluidas la\ntrata y la explotación sexual y otros tipos de explotación\" y,\n3) \"Apoyar y fortalecer políticas acertadas y leyes aplicables para promover la igualdad entre los géneros y el empoderamiento\nde las mujeres y las niñas a todos los niveles\".\nEn ese tenor, el gobierno federal creó el Programa de Apoyo a las Instancias de Mujeres en las Entidades Federativas\n(PAIMEF), como una respuesta específica para promover la formulación e implementación de políticas públicas a nivel local para\nque, en un marco de derechos humanos y desde la perspectiva de género, se buscara la prevención y atención de la violencia\ncontra las mujeres, así como proporcionarles herramientas para su empoderamiento. Asimismo, busca establecer vínculos entre\nlos tres órdenes de gobierno, a través de las Instancias de Mujeres en la Entidades Federativas para que, como ejecutoras de\ndicho Programa, propongan, implementen y promuevan acciones interinstitucionales a nivel estatal en coordinación con los\nmunicipios, con los tres poderes y actores sociales, desde un abordaje integral de esta problemática.\nDe esta manera, el PAIMEF contribuye a la generación de condiciones para el desarrollo humano, el ejercicio de derechos, el\nempoderamiento y la plena inclusión social de mujeres, en el entendimiento de que la violencia de género en su contra son un\nfactor que atenta contra el ejercicio de los"
+    }
+  ]
+}

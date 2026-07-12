@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sistema Fiscal IA · ERP Completo</title>
+<style>
+  :root {
+    --bg-light: #f8fafc;
+    --bg-card: #ffffff;
+    --bg-sidebar: #0f172a;
+    --text: #1e293b;
+    --text-sidebar: #cbd5e1;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --border-dark: #1e293b;
+    --violet: #7c3aed;
+    --violet-dark: #5b21b6;
+    --fuchsia: #c026d3;
+    --cyan: #06b6d4;
+    --green: #10b981;
+    --green-dark: #047857;
+    --red: #ef4444;
+    --orange: #f97316;
+    --amber: #f59e0b;
+    --blue: #3b82f6;
+    --purple: #8b5cf6;
+  }
+  .dark {
+    --bg-light: #020617;
+    --bg-card: #1e293b;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg-light);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    transition: background 0.3s, color 0.3s;
+  }
+  .app { display: grid; grid-template-columns: 256px 1fr; min-height: 100vh; }
+  @media (max-width: 900px) { .app { grid-template-columns: 1fr; } .sidebar { display: none; } }
+
+  /* SIDEBAR */
+  .sidebar {
+    background: var(--bg-sidebar); color: var(--text-sidebar);
+    padding: 20px 16px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  .brand-sidebar {
+    display: flex; align-items: center; gap: 10px; padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px;
+  }
+  .brand-logo {
+    width: 36px; height: 36px; background: linear-gradient(135deg, var(--violet), var(--fuchsia));
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700; font-size: 16px;
+  }
+  .brand-name { color: white; font-weight: 700; font-size: 15px; }
+  .brand-sub { font-size: 10px; color: #94a3b8; }
+  .nav-section { margin-top: 16px; margin-bottom: 8px; font-size: 10px; text-transform: uppercase; color: #64748b; letter-spacing: 0.06em; font-weight: 600; padding-left: 8px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    color: #94a3b8; padding: 8px 12px; border-radius: 6px;
+    cursor: pointer; transition: all 0.15s; font-size: 13px; text-decoration: none;
+  }
+  .nav-item:hover { background: rgba(124,58,237,0.15); color: white; }
+  .nav-item.active { background: var(--violet); color: white; font-weight: 600; }
+  .nav-item .ico { width: 18px; height: 18px; flex-shrink: 0; text-align: center; }
+
+  /* MAIN */
+  .main { padding: 0; max-width: 100%; }
+  .topbar {
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+    padding: 12px 24px; display: flex; justify-content: space-between; align-items: center;
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar-left h1 { font-size: 18px; font-weight: 700; }
+  .topbar-left p { font-size: 11px; color: var(--muted); }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+  .search-top {
+    padding: 6px 10px 6px 32px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg-light); color: var(--text); font-size: 13px;
+    width: 220px;
+  }
+  .search-wrap { position: relative; }
+  .search-wrap .ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; }
+  .icon-btn {
+    width: 32px; height: 32px; border: 1px solid var(--border); background: var(--bg-card);
+    border-radius: 6px; cursor: pointer; color: var(--text); font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .user-chip {
+    display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+    background: rgba(124,58,237,0.1); border-radius: 999px;
+  }
+  .user-avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--violet); color: white; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+  .user-name { font-size: 12px; font-weight: 600; }
+
+  .content { padding: 24px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* Page header */
+  .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  .page-title h2 { font-size: 22px; font-weight: 700; }
+  .page-title p { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  .btn {
+    background: var(--violet); color: white; border: none;
+    padding: 8px 16px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: var(--violet-dark); }
+  .btn.secondary { background: rgba(124,58,237,0.1); color: var(--violet); }
+  .btn.secondary:hover { background: rgba(124,58,237,0.2); }
+  .btn.success { background: var(--green); }
+  .btn.danger { background: var(--red); }
+
+  /* KPI cards */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  .kpi-card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; border-left: 3px solid var(--violet);
+  }
+  .kpi-card.green { border-left-color: var(--green); }
+  .kpi-card.red { border-left-color: var(--red); }
+  .kpi-card.orange { border-left-color: var(--orange); }
+  .kpi-card.blue { border-left-color: var(--blue); }
+  .kpi-card.purple { border-left-color: var(--purple); }
+  .kpi-card.cyan { border-left-color: var(--cyan); }
+  .kpi-label { font-size: 11px; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+  .kpi-value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+  .kpi-value.green { color: var(--green-dark); }
+  .kpi-value.red { color: var(--red); }
+  .kpi-value.orange { color: var(--orange); }
+  .kpi-value.blue { color: var(--blue); }
+  .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* Tables */
+  .table-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; margin-bottom: 20px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: rgba(124,58,237,0.05); text-align: left; padding: 10px 14px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(124,58,237,0.04); }
+
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.green { background: rgba(16,185,129,0.15); color: var(--green-dark); }
+  .badge.red { background: rgba(239,68,68,0.15); color: var(--red); }
+  .badge.yellow { background: rgba(245,158,11,0.15); color: #92400e; }
+  .badge.blue { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .badge.gray { background: rgba(100,116,139,0.15); color: var(--muted); }
+  .badge.purple { background: rgba(139,92,246,0.15); color: var(--purple); }
+
+  /* Cards */
+  .cards-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
+  @media (max-width: 900px) { .cards-grid { grid-template-columns: 1fr; } }
+  .module-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px; cursor: pointer;
+    border-left: 4px solid var(--violet); transition: all 0.2s;
+  }
+  .module-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+  .module-card .ico-big { font-size: 28px; margin-bottom: 8px; }
+  .module-card h3 { font-size: 15px; font-weight: 700; }
+  .module-card p { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* Two columns */
+  .two-col { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 20px; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* Chart */
+  .chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .chart-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .chart-bars { display: flex; align-items: flex-end; gap: 8px; height: 180px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .chart-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; justify-content: flex-end; height: 100%; }
+  .chart-bar { width: 80%; background: var(--violet); border-radius: 4px 4px 0 0; min-height: 4px; transition: all 0.3s; }
+  .chart-bar.green { background: var(--green); }
+  .chart-bar.orange { background: var(--orange); }
+  .chart-label { font-size: 10px; color: var(--muted); }
+
+  /* Alerts */
+  .alert-list { display: flex; flex-direction: column; gap: 8px; }
+  .alert {
+    border-radius: 8px; padding: 10px 12px; font-size: 12px; border: 1px solid;
+  }
+  .alert.warn { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); color: #92400e; }
+  .alert.danger { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.3); color: #991b1b; }
+  .alert.info { background: rgba(59,130,246,0.08); border-color: rgba(59,130,246,0.3); color: #1e40af; }
+  .alert.success { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.3); color: var(--green-dark); }
+
+  /* Form */
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .form-control { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); font-size: 13px; }
+
+  /* Upload zone */
+  .upload-zone {
+    border: 2px dashed var(--border); border-radius: 10px; padding: 36px;
+    text-align: center; background: var(--bg-card); cursor: pointer; transition: all 0.2s;
+  }
+  .upload-zone:hover { border-color: var(--violet); background: rgba(124,58,237,0.04); }
+  .upload-zone .ico { font-size: 40px; color: var(--muted); }
+
+  /* Chat panel (Abbax) */
+  .abbax-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; height: 600px; display: flex; flex-direction: column;
+  }
+  .abbax-header {
+    background: linear-gradient(135deg, var(--violet-dark) 0%, var(--fuchsia) 100%);
+    color: white; padding: 14px 18px; display: flex; align-items: center; gap: 12px;
+  }
+  .abbax-reactor {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, #fff 0%, var(--cyan) 25%, var(--cyan) 40%, rgba(6,182,212,0.4) 60%, transparent 90%);
+    animation: pulse 2s ease-in-out infinite;
+    border: 1px solid rgba(34,211,238,0.5);
+  }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+  .abbax-title { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+  .abbax-badge { font-size: 10px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 999px; }
+  .abbax-subtitle { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+
+  .abbax-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .abbax-msg { max-width: 85%; padding: 10px 14px; border-radius: 16px; font-size: 13px; line-height: 1.5; }
+  .abbax-msg.user { align-self: flex-end; background: var(--violet); color: white; border-bottom-right-radius: 4px; }
+  .abbax-msg.assistant { align-self: flex-start; background: rgba(124,58,237,0.08); border-bottom-left-radius: 4px; }
+  .abbax-msg.assistant strong { color: var(--violet); }
+  .tool-badge { display: inline-block; background: rgba(16,185,129,0.15); color: var(--green-dark); font-size: 10px; padding: 2px 8px; border-radius: 999px; margin-top: 6px; border: 1px solid rgba(16,185,129,0.3); }
+
+  .abbax-input { padding: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .abbax-input input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text); font-size: 13px; }
+  .abbax-mic, .abbax-send { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--violet); color: white; cursor: pointer; font-size: 14px; }
+
+  /* Progress bars */
+  .progress { background: rgba(124,58,237,0.1); border-radius: 999px; height: 8px; overflow: hidden; margin-top: 4px; }
+  .progress-fill { background: var(--violet); height: 100%; border-radius: 999px; }
+  .progress-fill.green { background: var(--green); }
+  .progress-fill.orange { background: var(--orange); }
+  .progress-fill.red { background: var(--red); }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .empty .ico { font-size: 40px; opacity: 0.5; margin-bottom: 8px; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--bg-card); border-radius: 12px; padding: 24px; max-width: 500px; width: 100%; border: 1px solid var(--border); }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .modal-header h3 { font-size: 16px; font-weight: 700; }
+  .modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand-sidebar">
+      <div class="brand-logo">SF</div>
+      <div>
+        <div class="brand-name">Sistema Fiscal IA</div>
+        <div class="brand-sub">ERP Completo · v2.0</div>
+      </div>
+    </div>
+
+    <div class="nav-section">Principal</div>
+    <a class="nav-item active" data-view="dashboard"><span class="ico">📊</span> Dashboard</a>
+
+    <div class="nav-section">Catálogos</div>
+    <a class="nav-item" data-view="empresas"><span class="ico">🏢</span> Empresas</a>
+    <a class="nav-item" data-view="clientes"><span class="ico">👥</span> Clientes</a>
+    <a class="nav-item" data-view="proveedores"><span class="ico">🚚</span> Proveedores</a>
+    <a class="nav-item" data-view="usuarios"><span class="ico">👤</span> Usuarios</a>
+    <a class="nav-item" data-view="empleados"><span class="ico">👷</span> Empleados</a>
+
+    <div class="nav-section">Operación</div>
+    <a class="nav-item" data-view="facturacion"><span class="ico">🧾</span> Facturación CFDI</a>
+    <a class="nav-item" data-view="nomina"><span class="ico">💵</span> Nómina</a>
+    <a class="nav-item" data-view="compras"><span class="ico">🛒</span> Compras</a>
+    <a class="nav-item" data-view="inventario"><span class="ico">📦</span> Inventario</a>
+    <a class="nav-item" data-view="bancos"><span class="ico">🏦</span> Bancos</a>
+    <a class="nav-item" data-view="contabilidad"><span class="ico">📒</span> Contabilidad</a>
+
+    <div class="nav-section">Fiscal</div>
+    <a class="nav-item" data-view="sat"><span class="ico">📡</span> SAT / Descarga</a>
+    <a class="nav-item" data-view="ia-fiscal"><span class="ico">🤖</span> IA Fiscal</a>
+    <a class="nav-item" data-view="tributario"><span class="ico">⚖️</span> Tributario</a>
+    <a class="nav-item" data-view="diot"><span class="ico">📋</span> DIOT</a>
+
+    <div class="nav-section">Análisis</div>
+    <a class="nav-item" data-view="finanzas"><span class="ico">💰</span> Reestructura Financiera</a>
+    <a class="nav-item" data-view="crm"><span class="ico">📈</span> CRM</a>
+    <a class="nav-item" data-view="reportes"><span class="ico">📑</span> Reportes</a>
+
+    <div class="nav-section">Asistente IA</div>
+    <a class="nav-item" data-view="abbax"><span class="ico">⚡</span> Abbax (Stark)</a>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <h1 id="page-title">Dashboard</h1>
+        <p id="page-subtitle">Resumen general del sistema</p>
+      </div>
+      <div class="topbar-right">
+        <div class="search-wrap">
+          <span class="ico">🔍</span>
+          <input class="search-top" placeholder="Buscar... (Ctrl+K)" id="search-global" />
+        </div>
+        <button class="icon-btn" onclick="toggleDark()" id="theme-btn" title="Modo oscuro">🌙</button>
+        <button class="icon-btn" title="Notificaciones">🔔</button>
+        <div class="user-chip">
+          <div class="user-avatar">HE</div>
+          <span class="user-name">Hernández</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ============ DASHBOARD ============ -->
+      <div class="view active" id="view-dashboard">
+        <div class="page-header">
+          <div class="page-title">
+            <h2>Dashboard general</h2>
+            <p>Resumen completo del negocio · Julio 2026</p>
+          </div>
+          <div>
+            <button class="btn secondary">📥 Exportar</button>
+            <button class="btn">+ Nuevo registro</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card green">
+            <div class="kpi-label">Ingresos del mes</div>
+            <div class="kpi-value green">$378,250</div>
+            <div class="kpi-sub">+12% vs junio</div>
+          </div>
+          <div class="kpi-card red">
+            <div class="kpi-label">Egresos del mes</div>
+            <div class="kpi-value red">$60,399</div>
+            <div class="kpi-sub">+5% vs junio</div>
+          </div>
+          <div class="kpi-card blue">
+            <div class="kpi-label">Utilidad bruta</div>
+            <div class="kpi-value blue">$317,851</div>
+            <div class="kpi-sub">Margen 84%</div>
+          </div>
+          <div class="kpi-card orange">
+            <div class="kpi-label">IVA por pagar</div>
+            <div class="kpi-value orange">$36,497</div>
+            <div class="kpi-sub">Vence 17/ago</div>
+          </div>
+          <div class="kpi-card purple">
+            <div class="kpi-label">Facturas emitidas</div>
+            <div class="kpi-value">7</div>
+            <div class="kpi-sub">$54,036 promedio</div>
+          </div>
+          <div class="kpi-card cyan">
+            <div class="kpi-label">Facturas recibidas</div>
+            <div class="kpi-value">7</div>
+            <div class="kpi-sub">$8,628 promedio</div>
+          </div>
+          <div class="kpi-card green">
+            <div class="kpi-label">Clientes activos</div>
+            <div class="kpi-value">3</div>
+            <div class="kpi-sub">2 sin saldo</div>
+          </div>
+          <div class="kpi-card purple">
+            <div class="kpi-label">Empleados</div>
+            <div class="kpi-value">5</div>
+            <div class="kpi-sub">Nómina al corriente</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="chart-card">
+            <div class="chart-title">📈 Ingresos vs Egresos (6 meses)</div>
+            <div class="chart-bars">
+              <div class="chart-col"><div class="chart-bar green" style="height:55%"></div><div class="chart-bar orange" style="height:38%"></div><div class="chart-label">Feb</div></div>
+              <div class="chart-col"><div class="chart-bar green" style="height:70%"></div><div class="chart-bar orange" style="height:42%"></div><div class="chart-label">Mar</div></div>
+              <div class="chart-col"><div class="chart-bar green" style="height:60%"></div><div class="chart-bar orange" style="height:35%"></div><div class="chart-label">Abr</div></div>
+              <div class="chart-col"><div class="chart-bar green" style="height:78%"></div><div class="chart-bar orange" style="height:48%"></div><div class="chart-label">May</div></div>
+              <div class="chart-col"><div class="chart-bar green" style="height:68%"></div><div class="chart-bar orange" style="height:40%"></div><div class="chart-label">Jun</div></div>
+              <div class="chart-col"><div class="chart-bar green" style="height:90%"></div><div class="chart-bar orange" style="height:32%"></div><div class="chart-label">Jul</div></div>
+            </div>
+            <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--muted)">
+              <span>🟢 Ingresos</span>
+              <span>🟠 Egresos</span>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-title">⚠️ Alertas activas</div>
+            <div class="alert-list">
+              <div class="alert warn"><strong>IVA vence en 7 días</strong><br>$36,497 MXN · 17/agosto</div>
+              <div class="alert danger"><strong>2 tareas urgentes pendientes</strong><br>Auditar facturas SAT · Llamar contador</div>
+              <div class="alert info"><strong>3 facturas por cobrar</strong><br>$87,000 MXN vencidas</div>
+              <div class="alert success"><strong>Nómina pagada</strong><br>$78,500 MXN · 5 empleados</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cards-grid">
+          <div class="module-card" style="border-left-color:var(--violet)" onclick="switchView('facturacion')">
+            <div class="ico-big">🧾</div>
+            <h3>Facturación CFDI</h3>
+            <p>Emite y recibe facturas electrónicas del SAT.</p>
+          </div>
+          <div class="module-card" style="border-left-color:var(--green)" onclick="switchView('sat')">
+            <div class="ico-big">📡</div>
+            <h3>Descarga SAT</h3>
+            <p>Descarga masiva de XML del SAT.</p>
+          </div>
+          <div class="module-card" style="border-left-color:var(--purple)" onclick="switchView('ia-fiscal')">
+            <div class="ico-big">🤖</div>
+            <h3>IA Fiscal</h3>
+            <p>Simuladores ISR, IVA, PTU y chat con IA.</p>
+          </div>
+          <div class="module-card" style="border-left-color:var(--red)" onclick="switchView('finanzas')">
+            <div class="ico-big">💰</div>
+            <h3>Reestructura Financiera</h3>
+            <p>Plan 3 fases para salir de deudas.</p>
+          </div>
+          <div class="module-card" style="border-left-color:var(--amber)" onclick="switchView('nomina')">
+            <div class="ico-big">💵</div>
+            <h3>Nómina</h3>
+            <p>Recibos CFDI de nómina y empleados.</p>
+          </div>
+          <div class="module-card" style="border-left-color:var(--cyan)" onclick="switchView('abbax')">
+            <div class="ico-big">⚡</div>
+            <h3>Abbax · Asistente IA</h3>
+            <p>Habla con Abbax por voz. Ejecuta tareas con IA Stark.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ EMPRESAS ============ -->
+      <div class="view" id="view-empresas">
+        <div class="page-header">
+          <div class="page-title"><h2>Empresas</h2><p>Gestión de empresas y RFCs</p></div>
+          <button class="btn">+ Nueva empresa</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Total empresas</div><div class="kpi-value">2</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Activas</div><div class="kpi-value green">2</div></div>
+          <div class="kpi-card"><div class="kpi-label">Con certificado vigente</div><div class="kpi-value">1</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Nombre</th><th>RFC</th><th>Régimen</th><th>Contacto</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Construcciones Hernández SAC</strong></td><td>HEH850415ABC</td><td>Persona Moral</td><td>admin@hernandez.mx</td><td><span class="badge green">Activa</span></td><td><button class="btn secondary">Ver</button></td></tr>
+              <tr><td><strong>Ingeniería y Diseño del Norte</strong></td><td>IIN920714XYZ</td><td>Persona Física</td><td>contacto@norte.mx</td><td><span class="badge green">Activa</span></td><td><button class="btn secondary">Ver</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ CLIENTES ============ -->
+      <div class="view" id="view-clientes">
+        <div class="page-header">
+          <div class="page-title"><h2>Clientes</h2><p>Gestión de clientes</p></div>
+          <button class="btn">+ Nuevo cliente</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Total clientes</div><div class="kpi-value">3</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Activos</div><div class="kpi-value green">3</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Saldo pendiente</div><div class="kpi-value red">$0</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Nombre</th><th>RFC</th><th>Uso CFDI</th><th>Email</th><th>Facturas</th><th>Total</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Tania García López</strong></td><td>GALT850415AB1</td><td>G03</td><td>tania@example.com</td><td>3</td><td>$86,250</td><td><span class="badge green">Activo</span></td></tr>
+              <tr><td><strong>Constructora Norte SA</strong></td><td>CNO8501012A1</td><td>G03</td><td>contacto@norte.com</td><td>3</td><td>$126,600</td><td><span class="badge green">Activo</span></td></tr>
+              <tr><td><strong>Desarrollo Urbano del Bajío</strong></td><td>DUB9509203K9</td><td>G03</td><td>urban@bajio.mx</td><td>2</td><td>$211,000</td><td><span class="badge green">Activo</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ PROVEEDORES ============ -->
+      <div class="view" id="view-proveedores">
+        <div class="page-header">
+          <div class="page-title"><h2>Proveedores</h2><p>Gestión de proveedores y acreedores</p></div>
+          <button class="btn">+ Nuevo proveedor</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Total proveedores</div><div class="kpi-value">7</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Activos</div><div class="kpi-value green">7</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Por pagar</div><div class="kpi-value red">$60,399</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">Vencidos</div><div class="kpi-value orange">0</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Proveedor</th><th>RFC</th><th>Servicio</th><th>Facturas</th><th>Total comprado</th><th>Saldo</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Oficina del Centro</strong></td><td>OCE8001014M1</td><td>Renta oficina</td><td>1</td><td>$3,200</td><td>$0</td><td><span class="badge green">Al corriente</span></td></tr>
+              <tr><td><strong>Ferretería Industrial</strong></td><td>FIN8205063A2</td><td>Material construcción</td><td>1</td><td>$18,750</td><td>$0</td><td><span class="badge green">Al corriente</span></td></tr>
+              <tr><td><strong>Gasolina Estación 45</strong></td><td>GEH9509118P3</td><td>Combustible</td><td>1</td><td>$5,500</td><td>$0</td><td><span class="badge green">Al corriente</span></td></tr>
+              <tr><td><strong>CFE Suministro</strong></td><td>CFE0405173J2</td><td>Electricidad</td><td>1</td><td>$4,200</td><td>$0</td><td><span class="badge green">Al corriente</span></td></tr>
+              <tr><td><strong>AT&T Telecom</strong></td><td>ATE0201176J1</td><td>Internet y teléfono</td><td>1</td><td>$1,299</td><td>$0</td><td><span class="badge green">Al corriente</span></td></tr>
+              <tr><td><strong>Home Depot México</strong></td><td>HDM9508229I8</td><td>Herramientas</td><td>1</td><td>$25,600</td><td>$0</td><td><span class="badge green">Al corriente</span></td></tr>
+              <tr><td><strong>Papelería La Economic</strong></td><td>PLE7103155T7</td><td>Papelería</td><td>1</td><td>$1,850</td><td>$0</td><td><span class="badge green">Al corriente</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ USUARIOS ============ -->
+      <div class="view" id="view-usuarios">
+        <div class="page-header">
+          <div class="page-title"><h2>Usuarios</h2><p>Usuarios del sistema</p></div>
+          <button class="btn">+ Nuevo usuario</button>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Empresa</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Hernández (Admin)</strong></td><td>admin@hernandez.mx</td><td><span class="badge purple">admin</span></td><td>Construcciones Hernández SAC</td><td><span class="badge green">Activo</span></td></tr>
+              <tr><td><strong>María López</strong></td><td>maria@hernandez.mx</td><td><span class="badge blue">contador</span></td><td>Construcciones Hernández SAC</td><td><span class="badge green">Activo</span></td></tr>
+              <tr><td><strong>Juan Pérez</strong></td><td>juan@hernandez.mx</td><td><span class="badge gray">usuario</span></td><td>Ingeniería y Diseño del Norte</td><td><span class="badge green">Activo</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ EMPLEADOS ============ -->
+      <div class="view" id="view-empleados">
+        <div class="page-header">
+          <div class="page-title"><h2>Empleados</h2><p>Recursos humanos y nómina</p></div>
+          <button class="btn">+ Nuevo empleado</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Empleados activos</div><div class="kpi-value">5</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Nómina mensual</div><div class="kpi-value red">$92,000</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Recibos timbrados</div><div class="kpi-value green">10</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">IMSS</div><div class="kpi-value orange">$8,450</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Nombre</th><th>RFC</th><th>Puesto</th><th>Departamento</th><th>Salario mensual</th><th>Alta</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Juan Pérez González</strong></td><td>PEGJ850101AB1</td><td>Supervisor de obra</td><td>Operación</td><td>$22,000</td><td>15/01/2024</td><td><span class="badge green">Activo</span></td></tr>
+              <tr><td><strong>María López Ruiz</strong></td><td>LORM900215CDE</td><td>Administradora</td><td>Administración</td><td>$18,000</td><td>01/03/2024</td><td><span class="badge green">Activo</span></td></tr>
+              <tr><td><strong>Carlos Ramírez Soto</strong></td><td>RASC880712HDF</td><td>Arquitecto</td><td>Diseño</td><td>$25,000</td><td>10/06/2024</td><td><span class="badge green">Activo</span></td></tr>
+              <tr><td><strong>Ana Torres Vega</strong></td><td>TOVA920815MDF</td><td>Diseñadora</td><td>Diseño</td><td>$15,000</td><td>05/09/2024</td><td><span class="badge green">Activo</span></td></tr>
+              <tr><td><strong>Luis Mora Díaz</strong></td><td>MODL800101HDF</td><td>Oficial</td><td>Operación</td><td>$12,000</td><td>20/02/2025</td><td><span class="badge green">Activo</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ FACTURACIÓN ============ -->
+      <div class="view" id="view-facturacion">
+        <div class="page-header">
+          <div class="page-title"><h2>Facturación CFDI</h2><p>Facturas emitidas y recibidas</p></div>
+          <div>
+            <button class="btn secondary">📥 Cargar XML</button>
+            <button class="btn">+ Nueva factura</button>
+          </div>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-card green"><div class="kpi-label">Emitidas (mes)</div><div class="kpi-value green">7</div><div class="kpi-sub">$378,250 MXN</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">Recibidas (mes)</div><div class="kpi-value">7</div><div class="kpi-sub">$60,399 MXN</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">Pendientes cobro</div><div class="kpi-value orange">3</div><div class="kpi-sub">$87,000 MXN</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Canceladas</div><div class="kpi-value red">0</div><div class="kpi-sub">Este mes</div></div>
+        </div>
+        <div class="upload-zone" style="margin-bottom:20px">
+          <div class="ico">📤</div>
+          <h3 style="margin-top:8px">Arrastra archivos XML o ZIP aquí</h3>
+          <p style="color:var(--muted);margin-top:4px">o haz clic para seleccionar</p>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Folio</th><th>Fecha</th><th>Cliente/Emisor</th><th>RFC</th><th>Tipo</th><th>Subtotal</th><th>IVA</th><th>Total</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td>A-001</td><td>01/07/2026</td><td>Tania García López</td><td>GALT850415AB1</td><td><span class="badge green">Emitida</span></td><td>$39,655</td><td>$5,345</td><td><strong>$45,000</strong></td><td><span class="badge green">Timbrada</span></td></tr>
+              <tr><td>A-002</td><td>03/07/2026</td><td>Constructora Norte SA</td><td>CNO8501012A1</td><td><span class="badge green">Emitida</span></td><td>$55,088</td><td>$7,412</td><td><strong>$62,500</strong></td><td><span class="badge green">Timbrada</span></td></tr>
+              <tr><td>A-003</td><td>05/07/2026</td><td>Desarrollo Urbano Bajío</td><td>DUB9509203K9</td><td><span class="badge green">Emitida</span></td><td>$76,726</td><td>$10,274</td><td><strong>$87,000</strong></td><td><span class="badge yellow">Pendiente</span></td></tr>
+              <tr><td>A-004</td><td>07/07/2026</td><td>Tania García López</td><td>GALT850415AB1</td><td><span class="badge green">Emitida</span></td><td>$28,672</td><td>$3,828</td><td><strong>$32,500</strong></td><td><span class="badge green">Timbrada</span></td></tr>
+              <tr><td>A-005</td><td>08/07/2026</td><td>Constructora Norte SA</td><td>CNO8501012A1</td><td><span class="badge green">Emitida</span></td><td>$16,328</td><td>$2,172</td><td><strong>$18,500</strong></td><td><span class="badge green">Timbrada</span></td></tr>
+              <tr><td>A-006</td><td>09/07/2026</td><td>Desarrollo Urbano Bajío</td><td>DUB9509203K9</td><td><span class="badge green">Emitida</span></td><td>$109,389</td><td>$14,611</td><td><strong>$124,000</strong></td><td><span class="badge green">Timbrada</span></td></tr>
+              <tr><td>REC-001</td><td>02/07/2026</td><td>Oficina del Centro</td><td>OCE8001014M1</td><td><span class="badge blue">Recibida</span></td><td>$2,768</td><td>$432</td><td><strong>$3,200</strong></td><td><span class="badge green">Timbrada</span></td></tr>
+              <tr><td>REC-002</td><td>04/07/2026</td><td>Ferretería Industrial</td><td>FIN8205063A2</td><td><span class="badge blue">Recibida</span></td><td>$16,222</td><td>$2,528</td><td><strong>$18,750</strong></td><td><span class="badge green">Timbrada</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ NÓMINA ============ -->
+      <div class="view" id="view-nomina">
+        <div class="page-header">
+          <div class="page-title"><h2>Nómina</h2><p>Recibos CFDI de nómina</p></div>
+          <div>
+            <button class="btn secondary">📥 Importar</button>
+            <button class="btn">+ Generar recibo</button>
+          </div>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Empleados activos</div><div class="kpi-value">5</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Nómina quincenal</div><div class="kpi-value red">$46,000</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Recibos timbrados</div><div class="kpi-value green">10</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">ISR retenido</div><div class="kpi-value orange">$6,820</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Empleado</th><th>RFC</th><th>Puesto</th><th>Salario mensual</th><th>Percepciones</th><th>Deducciones</th><th>Neto</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Juan Pérez González</strong></td><td>PEGJ850101AB1</td><td>Supervisor de obra</td><td>$22,000</td><td>$22,000</td><td>$3,200</td><td><strong>$18,800</strong></td><td><span class="badge green">Pagado</span></td></tr>
+              <tr><td><strong>María López Ruiz</strong></td><td>LORM900215CDE</td><td>Administradora</td><td>$18,000</td><td>$18,000</td><td>$2,400</td><td><strong>$15,600</strong></td><td><span class="badge green">Pagado</span></td></tr>
+              <tr><td><strong>Carlos Ramírez Soto</strong></td><td>RASC880712HDF</td><td>Arquitecto</td><td>$25,000</td><td>$25,000</td><td>$3,750</td><td><strong>$21,250</strong></td><td><span class="badge green">Pagado</span></td></tr>
+              <tr><td><strong>Ana Torres Vega</strong></td><td>TOVA920815MDF</td><td>Diseñadora</td><td>$15,000</td><td>$15,000</td><td>$1,800</td><td><strong>$13,200</strong></td><td><span class="badge green">Pagado</span></td></tr>
+              <tr><td><strong>Luis Mora Díaz</strong></td><td>MODL800101HDF</td><td>Oficial</td><td>$12,000</td><td>$12,000</td><td>$1,200</td><td><strong>$10,800</strong></td><td><span class="badge green">Pagado</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ COMPRAS ============ -->
+      <div class="view" id="view-compras">
+        <div class="page-header">
+          <div class="page-title"><h2>Compras</h2><p>Órdenes de compra a proveedores</p></div>
+          <button class="btn">+ Nueva orden de compra</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Órdenes del mes</div><div class="kpi-value">7</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Total comprado</div><div class="kpi-value red">$60,399</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Recibidas</div><div class="kpi-value green">7</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">Pendientes</div><div class="kpi-value orange">0</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Folio</th><th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Monto</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td>OC-001</td><td>02/07/2026</td><td>Oficina del Centro</td><td>Renta oficina julio</td><td>$3,200</td><td><span class="badge green">Recibida</span></td></tr>
+              <tr><td>OC-002</td><td>04/07/2026</td><td>Ferretería Industrial</td><td>Material construcción</td><td>$18,750</td><td><span class="badge green">Recibida</span></td></tr>
+              <tr><td>OC-003</td><td>05/07/2026</td><td>Gasolina Estación 45</td><td>Combustible</td><td>$5,500</td><td><span class="badge green">Recibida</span></td></tr>
+              <tr><td>OC-004</td><td>06/07/2026</td><td>Papelería La Economic</td><td>Papelería</td><td>$1,850</td><td><span class="badge green">Recibida</span></td></tr>
+              <tr><td>OC-005</td><td>08/07/2026</td><td>CFE Suministro</td><td>Electricidad</td><td>$4,200</td><td><span class="badge green">Recibida</span></td></tr>
+              <tr><td>OC-006</td><td>09/07/2026</td><td>AT&T Telecom</td><td>Internet y teléfono</td><td>$1,299</td><td><span class="badge green">Recibida</span></td></tr>
+              <tr><td>OC-007</td><td>10/07/2026</td><td>Home Depot México</td><td>Herramientas</td><td>$25,600</td><td><span class="badge green">Recibida</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ INVENTARIO ============ -->
+      <div class="view" id="view-inventario">
+        <div class="page-header">
+          <div class="page-title"><h2>Inventario</h2><p>Productos y existencias</p></div>
+          <button class="btn">+ Nuevo producto</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Productos</div><div class="kpi-value">12</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Valor inventario</div><div class="kpi-value green">$185,000</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Stock bajo</div><div class="kpi-value red">2</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Existencia</th><th>Mínimo</th><th>Precio unitario</th><th>Valor</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td>P001</td><td>Cemento gris 50kg</td><td>Construcción</td><td>120</td><td>20</td><td>$185</td><td>$22,200</td><td><span class="badge green">Stock</span></td></tr>
+              <tr><td>P002</td><td>Varilla 3/8"</td><td>Construcción</td><td>8</td><td>20</td><td>$95</td><td>$760</td><td><span class="badge red">Bajo</span></td></tr>
+              <tr><td>P003</td><td>Block 15x20x40</td><td>Construcción</td><td>500</td><td>100</td><td>$15</td><td>$7,500</td><td><span class="badge green">Stock</span></td></tr>
+              <tr><td>P004</td><td>Martillo carpintero</td><td>Herramientas</td><td>5</td><td>3</td><td>$280</td><td>$1,400</td><td><span class="badge green">Stock</span></td></tr>
+              <tr><td>P005</td><td>Taladro 1/2"</td><td>Herramientas</td><td>2</td><td>5</td><td>$1,800</td><td>$3,600</td><td><span class="badge red">Bajo</span></td></tr>
+              <tr><td>P006</td><td>Papel bond carta</td><td>Papelería</td><td>50</td><td>10</td><td>$85</td><td>$4,250</td><td><span class="badge green">Stock</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ BANCOS ============ -->
+      <div class="view" id="view-bancos">
+        <div class="page-header">
+          <div class="page-title"><h2>Bancos</h2><p>Cuentas bancarias y conciliación</p></div>
+          <button class="btn">+ Nueva cuenta</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr)">
+          <div class="kpi-card green"><div class="kpi-label">Banorte ****4521</div><div class="kpi-value green">$716,000</div><div class="kpi-sub">Cuenta de operaciones</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">Santander ****8830</div><div class="kpi-value blue">$65,000</div><div class="kpi-sub">Fondo de emergencia</div></div>
+        </div>
+        <h3 style="margin:20px 0 12px;font-size:16px">Movimientos recientes</h3>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Fecha</th><th>Cuenta</th><th>Concepto</th><th>Monto</th><th>Tipo</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td>10/07/2026</td><td>Banorte</td><td>Depósito cliente - Tania García</td><td style="color:var(--green-dark);font-weight:600">+$45,000</td><td><span class="badge green">Ingreso</span></td><td><span class="badge green">Conciliado</span></td></tr>
+              <tr><td>09/07/2026</td><td>Banorte</td><td>Pago nómina quincenal</td><td style="color:var(--red);font-weight:600">−$46,000</td><td><span class="badge red">Egreso</span></td><td><span class="badge green">Conciliado</span></td></tr>
+              <tr><td>08/07/2026</td><td>Santander</td><td>Aporte fondo emergencia</td><td style="color:var(--green-dark);font-weight:600">+$15,000</td><td><span class="badge blue">Transferencia</span></td><td><span class="badge green">Conciliado</span></td></tr>
+              <tr><td>07/07/2026</td><td>Banorte</td><td>Home Depot - herramientas</td><td style="color:var(--red);font-weight:600">−$25,600</td><td><span class="badge red">Egreso</span></td><td><span class="badge green">Conciliado</span></td></tr>
+              <tr><td>05/07/2026</td><td>Banorte</td><td>CFE - electricidad</td><td style="color:var(--red);font-weight:600">−$4,200</td><td><span class="badge red">Egreso</span></td><td><span class="badge green">Conciliado</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ CONTABILIDAD ============ -->
+      <div class="view" id="view-contabilidad">
+        <div class="page-header">
+          <div class="page-title"><h2>Contabilidad</h2><p>Pólizas y libro diario</p></div>
+          <button class="btn">+ Nueva póliza</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Pólizas del mes</div><div class="kpi-value">142</div></div>
+          <div class="kpi-card"><div class="kpi-label">Cuentas activas</div><div class="kpi-value">87</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Conciliadas</div><div class="kpi-value green">138</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">Pendientes</div><div class="kpi-value orange">4</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Folio</th><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Cargo</th><th>Abono</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td>P-2026-142</td><td>10/07/2026</td><td>Ingreso</td><td>Venta factura A-007</td><td>$8,750</td><td>—</td><td><span class="badge green">Conciliada</span></td></tr>
+              <tr><td>P-2026-141</td><td>09/07/2026</td><td>Egreso</td><td>Nómina quincenal</td><td>$46,000</td><td>—</td><td><span class="badge green">Conciliada</span></td></tr>
+              <tr><td>P-2026-140</td><td>08/07/2026</td><td>Egreso</td><td>Compra herramientas Home Depot</td><td>$25,600</td><td>—</td><td><span class="badge green">Conciliada</span></td></tr>
+              <tr><td>P-2026-139</td><td>07/07/2026</td><td>Egreso</td><td>Electricidad CFE</td><td>$4,200</td><td>—</td><td><span class="badge yellow">Pendiente</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ SAT ============ -->
+      <div class="view" id="view-sat">
+        <div class="page-header">
+          <div class="page-title"><h2>SAT · Descarga Masiva</h2><p>Descarga automática de CFDIs del SAT</p></div>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Descargas este mes</div><div class="kpi-value">3</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">XML descargados</div><div class="kpi-value blue">412</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Procesados</div><div class="kpi-value green">387</div></div>
+        </div>
+        <h3 style="margin:20px 0 12px;font-size:16px">Nueva solicitud</h3>
+        <div class="chart-card" style="margin-bottom:20px">
+          <div class="form-row">
+            <div class="form-group"><label>RFC a consultar</label><input class="form-control" value="HEH850415ABC" /></div>
+            <div class="form-group"><label>Tipo de comprobante</label><select class="form-control"><option>Recibidos</option><option>Emitidos</option></select></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Fecha inicial</label><input class="form-control" type="date" value="2026-06-01" /></div>
+            <div class="form-group"><label>Fecha final</label><input class="form-control" type="date" value="2026-07-10" /></div>
+          </div>
+          <button class="btn">📡 Solicitar descarga</button>
+        </div>
+        <h3 style="margin:20px 0 12px;font-size:16px">Historial</h3>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Fecha</th><th>Tipo</th><th>Periodo</th><th>XMLs</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td>09/07/2026</td><td>Recibidos</td><td>01/06 - 30/06</td><td>156</td><td><span class="badge green">Procesado</span></td></tr>
+              <tr><td>08/07/2026</td><td>Emitidos</td><td>01/06 - 30/06</td><td>47</td><td><span class="badge green">Procesado</span></td></tr>
+              <tr><td>05/07/2026</td><td>Recibidos</td><td>01/05 - 31/05</td><td>209</td><td><span class="badge yellow">En proceso</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ IA FISCAL ============ -->
+      <div class="view" id="view-ia-fiscal">
+        <div class="page-header">
+          <div class="page-title"><h2>IA Fiscal</h2><p>Simuladores y recomendaciones inteligentes</p></div>
+        </div>
+        <div class="cards-grid">
+          <div class="module-card" style="border-left-color:var(--purple)"><div class="ico-big">🧮</div><h3>Simulador ISR</h3><p>Calcula ISR mensual y anual según régimen.</p></div>
+          <div class="module-card" style="border-left-color:var(--blue)"><div class="ico-big">📊</div><h3>Simulador IVA</h3><p>Proyecta IVA trasladado y acreditable.</p></div>
+          <div class="module-card" style="border-left-color:var(--green)"><div class="ico-big">💵</div><h3>Simulador PTU</h3><p>Calcula Participación de Utilidades.</p></div>
+          <div class="module-card" style="border-left-color:var(--amber)"><div class="ico-big">📅</div><h3>Cierre Mensual</h3><p>Asistente de cierre con IA.</p></div>
+          <div class="module-card" style="border-left-color:var(--red)"><div class="ico-big">📋</div><h3>Cierre Anual</h3><p>Declaración anual automatizada.</p></div>
+          <div class="module-card" style="border-left-color:var(--cyan)"><div class="ico-big">💬</div><h3>Recomendaciones</h3><p>Sugerencias personalizadas de IA.</p></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">💬 Chat con IA Fiscal</div>
+          <div style="background:rgba(124,58,237,0.04);padding:14px;border-radius:8px;margin-bottom:12px">
+            <strong>IA:</strong> Hola, soy tu asistente fiscal. ¿En qué puedo ayudarte?
+          </div>
+          <div style="background:rgba(59,130,246,0.08);padding:14px;border-radius:8px;margin-bottom:12px;margin-left:40px">
+            <strong>Tú:</strong> ¿Cuánto debo de ISR este mes?
+          </div>
+          <div style="background:rgba(124,58,237,0.04);padding:14px;border-radius:8px;margin-bottom:12px">
+            <strong>IA:</strong> Según tus facturas de julio 2026, tu base gravable es $271,742 MXN (utilidad - deducciones). Aplicando tarifa Art. 96 LISR, tu ISR a cargo es <strong>$40,800 MXN</strong>. Te recomiendo hacer tu pago antes del 17 de agosto para evitar recargos.
+          </div>
+          <div style="display:flex;gap:8px">
+            <input class="form-control" placeholder="Escribe tu pregunta..." />
+            <button class="btn">Enviar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ TRIBUTARIO ============ -->
+      <div class="view" id="view-tributario">
+        <div class="page-header">
+          <div class="page-title"><h2>Calendario Tributario</h2><p>Obligaciones fiscales</p></div>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="kpi-card orange"><div class="kpi-label">IVA por pagar</div><div class="kpi-value orange">$36,497</div><div class="kpi-sub">Vence 17/ago</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">ISR mensual</div><div class="kpi-value orange">$40,800</div><div class="kpi-sub">Vence 17/ago</div></div>
+          <div class="kpi-card red"><div class="kpi-label">DIOT</div><div class="kpi-value red">Pendiente</div><div class="kpi-sub">Vence 31/jul</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Obligación</th><th>Periodo</th><th>Vencimiento</th><th>Monto</th><th>Estado</th></tr></thead>
+            <tbody>
+              <tr><td>IVA mensual</td><td>Junio 2026</td><td>17/07/2026</td><td>$8,200</td><td><span class="badge green">Pagado</span></td></tr>
+              <tr><td>ISR mensual</td><td>Junio 2026</td><td>17/07/2026</td><td>$32,100</td><td><span class="badge green">Pagado</span></td></tr>
+              <tr><td>Nómina IMSS</td><td>Junio 2026</td><td>17/07/2026</td><td>$8,450</td><td><span class="badge green">Pagado</span></td></tr>
+              <tr><td>IVA mensual</td><td>Julio 2026</td><td>17/08/2026</td><td>$36,497</td><td><span class="badge yellow">Pendiente</span></td></tr>
+              <tr><td>ISR mensual</td><td>Julio 2026</td><td>17/08/2026</td><td>$40,800</td><td><span class="badge yellow">Pendiente</span></td></tr>
+              <tr><td>DIOT</td><td>Julio 2026</td><td>31/07/2026</td><td>—</td><td><span class="badge red">Urgente</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ DIOT ============ -->
+      <div class="view" id="view-diot">
+        <div class="page-header">
+          <div class="page-title"><h2>DIOT</h2><p>Declaración Informativa de Operaciones con Terceros</p></div>
+          <button class="btn"> Generar DIOT</button>
+        </div>
+        <div class="empty">
+          <div class="ico">📋</div>
+          <h3>DIOT de Julio 2026 pendiente</h3>
+          <p>Vence el 31 de julio. Genera la declaración a partir de tus facturas recibidas.</p>
+        </div>
+      </div>
+
+      <!-- ============ FINANZAS (Reestructura) ============ -->
+      <div class="view" id="view-finanzas">
+        <div class="page-header">
+          <div class="page-title"><h2>Reestructura Financiera</h2><p>Plan 3 fases: diagnóstico → deudas → crecimiento</p></div>
+          <span class="badge red" style="padding:6px 12px;font-size:12px">FASE 1 — Diagnóstico</span>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-card red"><div class="kpi-label">Patrimonio neto</div><div class="kpi-value red">−$1,164,000</div><div class="kpi-sub">Activo − Pasivo</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Activo total</div><div class="kpi-value green">$1,836,000</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Pasivo total</div><div class="kpi-value red">$3,000,000</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">Tasa de ahorro</div><div class="kpi-value orange">8.5%</div><div class="kpi-sub">Meta ≥ 20%</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Ratio endeudamiento</div><div class="kpi-value red">89.7%</div><div class="kpi-sub">Meta < 36%</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">Fondo emergencia</div><div class="kpi-value orange">32.5%</div><div class="kpi-sub">$65K / $200K</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">Cobertura caja</div><div class="kpi-value orange">18 días</div><div class="kpi-sub">Meta ≥ 60</div></div>
+          <div class="kpi-card"><div class="kpi-label">Deudas activas</div><div class="kpi-value">3</div></div>
+        </div>
+
+        <h3 style="margin:20px 0 12px;font-size:16px">🎯 Avalancha de deudas</h3>
+        <div class="chart-card" style="border-left:4px solid var(--red);background:rgba(239,68,68,0.04);margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <strong style="font-size:15px">#1 Préstamo Familiar</strong> <span class="badge red" style="margin-left:8px">ATACAR PRIMERO</span>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px">Familiar (papá) · 4.00% mensual · Avalancha</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:20px;font-weight:700;color:var(--red)">$100,000</div>
+              <div style="font-size:11px;color:var(--muted)">Pago mín: $46,000/mes</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">
+            <div style="background:var(--bg-card);padding:8px;border-radius:6px;border:1px solid var(--border)">
+              <div style="font-size:10px;color:var(--muted)">Meses para pagar</div>
+              <div style="font-weight:700">3 meses</div>
+            </div>
+            <div style="background:var(--bg-card);padding:8px;border-radius:6px;border:1px solid var(--border)">
+              <div style="font-size:10px;color:var(--muted)">Interés total</div>
+              <div style="font-weight:700;color:var(--orange)">$5,520</div>
+            </div>
+            <div style="background:var(--bg-card);padding:8px;border-radius:6px;border:1px solid var(--border)">
+              <div style="font-size:10px;color:var(--muted)">Costo total</div>
+              <div style="font-weight:700">$105,520</div>
+            </div>
+          </div>
+        </div>
+        <div class="chart-card" style="border-left:4px solid var(--border);margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div><strong>#2 Banorte Credilínea PyME</strong><div style="font-size:12px;color:var(--muted);margin-top:4px">Banorte · 1.50% mensual</div></div>
+            <div style="text-align:right"><div style="font-size:20px;font-weight:700;color:var(--red)">$2,800,000</div></div>
+          </div>
+        </div>
+        <div class="chart-card" style="border-left:4px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div><strong>#3 Santander PyME</strong><div style="font-size:12px;color:var(--muted);margin-top:4px">Santander · 1.20% mensual</div></div>
+            <div style="text-align:right"><div style="font-size:20px;font-weight:700;color:var(--red)">$100,000</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ CRM ============ -->
+      <div class="view" id="view-crm">
+        <div class="page-header">
+          <div class="page-title"><h2>CRM</h2><p>Gestión de relaciones con clientes</p></div>
+          <button class="btn">+ Nueva oportunidad</button>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="kpi-card"><div class="kpi-label">Oportunidades activas</div><div class="kpi-value">7</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Pipeline</div><div class="kpi-value green">$450,000</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">Tasa conversión</div><div class="kpi-value blue">32%</div></div>
+        </div>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Oportunidad</th><th>Cliente</th><th>Etapa</th><th>Monto</th><th>Probabilidad</th><th>Cierre estimado</th></tr></thead>
+            <tbody>
+              <tr><td>Supervisión obra Polanco</td><td>Desarrollo Urbano Bajío</td><td><span class="badge yellow">Negociación</span></td><td>$180,000</td><td>60%</td><td>15/08/2026</td></tr>
+              <tr><td>Diseño plaza</td><td>Constructora Norte</td><td><span class="badge blue">Propuesta</span></td><td>$95,000</td><td>40%</td><td>30/08/2026</td></tr>
+              <tr><td>Auditoría estructural</td><td>Tania García</td><td><span class="badge green">Cerrada</span></td><td>$45,000</td><td>100%</td><td>10/07/2026</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ REPORTES ============ -->
+      <div class="view" id="view-reportes">
+        <div class="page-header">
+          <div class="page-title"><h2>Reportes</h2><p>Reportes financieros y fiscales</p></div>
+          <button class="btn">📥 Exportar Excel</button>
+        </div>
+        <div class="cards-grid">
+          <div class="module-card" style="border-left-color:var(--blue)"><div class="ico-big">⚖️</div><h3>Balanza</h3><p>Estado de cuenta mensual.</p></div>
+          <div class="module-card" style="border-left-color:var(--green)"><div class="ico-big">📊</div><h3>Estado de Resultados</h3><p>Ingresos, costos y utilidad.</p></div>
+          <div class="module-card" style="border-left-color:var(--amber)"><div class="ico-big">💵</div><h3>Flujo de Efectivo</h3><p>Entradas y salidas.</p></div>
+          <div class="module-card" style="border-left-color:var(--purple)"><div class="ico-big">📋</div><h3>DIOT</h3><p>Operaciones con terceros.</p></div>
+          <div class="module-card" style="border-left-color:var(--red)"><div class="ico-big">📑</div><h3>Declaración Anual</h3><p>Resumen anual ISR.</p></div>
+          <div class="module-card" style="border-left-color:var(--cyan)"><div class="ico-big">👤</div><h3>Por Cliente</h3><p>Detalle por cliente.</p></div>
+        </div>
+        <h3 style="margin:20px 0 12px;font-size:16px">📊 Resumen mensual</h3>
+        <div class="table-card">
+          <table>
+            <thead><tr><th>Mes</th><th>Ingresos</th><th>Egresos</th><th>Utilidad</th><th>ISR</th><th>IVA</th></tr></thead>
+            <tbody>
+              <tr><td>Febrero 2026</td><td>$265,000</td><td>$245,000</td><td style="color:var(--green-dark);font-weight:600">$20,000</td><td>$3,000</td><td>$8,500</td></tr>
+              <tr><td>Marzo 2026</td><td>$298,000</td><td>$267,000</td><td style="color:var(--green-dark);font-weight:600">$31,000</td><td>$4,650</td><td>$9,300</td></tr>
+              <tr><td>Abril 2026</td><td>$278,000</td><td>$259,000</td><td style="color:var(--green-dark);font-weight:600">$19,000</td><td>$2,850</td><td>$7,800</td></tr>
+              <tr><td>Mayo 2026</td><td>$310,000</td><td>$278,000</td><td style="color:var(--green-dark);font-weight:600">$32,000</td><td>$4,800</td><td>$9,500</td></tr>
+              <tr><td>Junio 2026</td><td>$305,000</td><td>$285,000</td><td style="color:var(--green-dark);font-weight:600">$20,000</td><td>$3,000</td><td>$8,200</td></tr>
+              <tr style="background:rgba(245,158,11,0.08)"><td><strong>Julio 2026</strong></td><td><strong>$378,250</strong></td><td><strong>$60,399</strong></td><td style="color:var(--green-dark);font-weight:700">$317,851</td><td>$40,800</td><td>$36,497</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ ABBAX ============ -->
+      <div class="view" id="view-abbax">
+        <div class="page-header">
+          <div class="page-title">
+            <h2>⚡ Abbax · Asistente IA Stark</h2>
+            <p>Asistente IA con personalidad Tony Stark · 22 tools · Voz con ElevenLabs</p>
+          </div>
+          <span class="badge purple" style="padding:6px 12px;font-size:12px">🔊 TTS activo</span>
+        </div>
+
+        <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+          <div class="kpi-card"><div class="kpi-label">Tareas pendientes</div><div class="kpi-value">2</div><div class="kpi-sub">2 urgentes</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Notas activas</div><div class="kpi-value green">2</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">Recordatorios</div><div class="kpi-value orange">0</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">Conversaciones hoy</div><div class="kpi-value blue">8</div></div>
+        </div>
+
+        <div class="two-col">
+          <div class="abbax-card">
+            <div class="abbax-header">
+              <div class="abbax-reactor"></div>
+              <div style="flex:1">
+                <div class="abbax-title">ABBAX <span class="abbax-badge">🔊 TTS</span></div>
+                <div class="abbax-subtitle">En línea · Lista para trabajar</div>
+              </div>
+              <button class="icon-btn" style="background:rgba(255,255,255,0.2);color:white;border:none">🔊</button>
+              <button class="icon-btn" style="background:rgba(255,255,255,0.2);color:white;border:none">⚙️</button>
+            </div>
+
+            <div class="abbax-messages" id="abbax-messages">
+              <div class="abbax-msg assistant">
+                ⚡ <strong>Abbax en línea</strong>. A ver, Jefe, qué desastre tenemos hoy. Yo puedo calcular la órbita de un satélite mientras reviso tus pendientes.
+              </div>
+              <div class="abbax-msg user">Dame el resumen fiscal de este mes</div>
+              <div class="abbax-msg assistant">
+                <strong>Resumen Fiscal - Julio 2026:</strong><br>
+                📊 7 facturas emitidas por <strong>$378,250 MXN</strong><br>
+                📥 7 recibidas por <strong>$60,399 MXN</strong><br>
+                💰 <strong>IVA por pagar:</strong> $36,497 MXN<br>
+                📊 <strong>Utilidad bruta:</strong> $317,851 MXN<br><br>
+                No está mal, Jefe. Tu utilidad es sólida, pero ese IVA pendiente está gritando tu nombre.
+                <div class="tool-badge">✓ resumen_fiscal</div>
+              </div>
+              <div class="abbax-msg user">Calcula 15% de 2500</div>
+              <div class="abbax-msg assistant">
+                Ni siquiera tuve que esforzarme. Son <strong>375</strong>. ¿Algo más o ya puedo volver a salvar el mundo fiscal?
+                <div class="tool-badge">✓ calcular</div>
+              </div>
+              <div class="abbax-msg user">Dame una frase motivacional</div>
+              <div class="abbax-msg assistant">
+                ⚡ <strong>"Yo construí esto en una cueva. Tú puedes construir lo que sea en tu oficina."</strong>
+                <div class="tool-badge">✓ frase_motivacional</div>
+              </div>
+            </div>
+
+            <div style="padding:8px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px">
+              <span class="badge purple" style="cursor:pointer" onclick="sendAbbax('Crea tarea urgente: Llamar contador')">Crea tarea urgente</span>
+              <span class="badge blue" style="cursor:pointer" onclick="sendAbbax('Calcula IVA de 5000')">Calcula IVA</span>
+              <span class="badge green" style="cursor:pointer" onclick="sendAbbax('Cómo voy con mis estadísticas')">Mis stats</span>
+              <span class="badge gray" style="cursor:pointer" onclick="sendAbbax('Convierte 100 USD a MXN')">Convierte moneda</span>
+            </div>
+
+            <div class="abbax-input">
+              <button class="abbax-mic">🎤</button>
+              <input placeholder="Escribe o toca el micrófono" id="abbax-input" onkeypress="if(event.key==='Enter')sendAbbax(this.value)" />
+              <button class="abbax-send" onclick="sendAbbax(document.getElementById('abbax-input').value)">→</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="chart-card" style="margin-bottom:14px">
+              <div class="chart-title">✅ Tareas (2)</div>
+              <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px">
+                <div style="font-size:13px;font-weight:500">auditar facturas del SAT</div>
+                <div style="margin-top:4px"><span class="badge red">urgente</span> <span class="voice-tag" style="font-size:10px">🎤</span></div>
+              </div>
+              <div style="border:1px solid var(--border);border-radius:8px;padding:10px">
+                <div style="font-size:13px;font-weight:500">Llamar al contador</div>
+                <div style="margin-top:4px"><span class="badge red">urgente</span> <span style="font-size:10px">🎤</span></div>
+              </div>
+            </div>
+
+            <div class="chart-card" style="margin-bottom:14px">
+              <div class="chart-title">🔔 Recordatorios</div>
+              <div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">
+                Sin recordatorios próximos
+              </div>
+            </div>
+
+            <div class="chart-card">
+              <div class="chart-title">📝 Notas (2)</div>
+              <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px;margin-bottom:6px">
+                <div style="font-weight:700;font-size:13px">🛒 Lista de compras (5)</div>
+                <div style="font-size:11px;white-space:pre-wrap">1. pan
+2. leche
+3. huevos
+4. jabon
+5. fruta</div>
+              </div>
+              <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px">
+                <div style="font-weight:700;font-size:13px">Compras del supermercado</div>
+                <div style="font-size:11px">comprar leche y pan</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  const VIEWS = {
+    dashboard: { title: 'Dashboard', subtitle: 'Resumen general del sistema' },
+    empresas: { title: 'Empresas', subtitle: 'Gestión de empresas y RFCs' },
+    clientes: { title: 'Clientes', subtitle: 'Gestión de clientes' },
+    proveedores: { title: 'Proveedores', subtitle: 'Gestión de proveedores' },
+    usuarios: { title: 'Usuarios', subtitle: 'Usuarios del sistema' },
+    empleados: { title: 'Empleados', subtitle: 'Recursos humanos y nómina' },
+    facturacion: { title: 'Facturación CFDI', subtitle: 'Facturas emitidas y recibidas' },
+    nomina: { title: 'Nómina', subtitle: 'Recibos CFDI de nómina' },
+    compras: { title: 'Compras', subtitle: 'Órdenes de compra' },
+    inventario: { title: 'Inventario', subtitle: 'Productos y existencias' },
+    bancos: { title: 'Bancos', subtitle: 'Cuentas y conciliación' },
+    contabilidad: { title: 'Contabilidad', subtitle: 'Pólizas y libro diario' },
+    sat: { title: 'SAT · Descarga Masiva', subtitle: 'Descarga automática de CFDIs' },
+    'ia-fiscal': { title: 'IA Fiscal', subtitle: 'Simuladores y recomendaciones' },
+    tributario: { title: 'Calendario Tributario', subtitle: 'Obligaciones fiscales' },
+    diot: { title: 'DIOT', subtitle: 'Declaración con terceros' },
+    finanzas: { title: 'Reestructura Financiera', subtitle: 'Plan 3 fases' },
+    crm: { title: 'CRM', subtitle: 'Relaciones con clientes' },
+    reportes: { title: 'Reportes', subtitle: 'Reportes financieros y fiscales' },
+    abbax: { title: 'Abbax · Asistente IA', subtitle: 'Asistente Stark con 22 tools' },
+  };
+
+  function switchView(viewName) {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const navItem = document.querySelector(`[data-view="${viewName}"]`);
+    const view = document.getElementById(`view-${viewName}`);
+    if (navItem) navItem.classList.add('active');
+    if (view) view.classList.add('active');
+    const meta = VIEWS[viewName] || { title: viewName, subtitle: '' };
+    document.getElementById('page-title').textContent = meta.title;
+    document.getElementById('page-subtitle').textContent = meta.subtitle;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  document.querySelectorAll('.nav-item[data-view]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchView(item.dataset.view);
+    });
+  });
+
+  function toggleDark() {
+    document.body.classList.toggle('dark');
+    const btn = document.getElementById('theme-btn');
+    btn.textContent = document.body.classList.contains('dark') ? '☀️' : '🌙';
+    localStorage.setItem('erp-theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+  }
+
+  function sendAbbax(text) {
+    if (!text || !text.trim()) return;
+    const msgs = document.getElementById('abbax-messages');
+    const userMsg = document.createElement('div');
+    userMsg.className = 'abbax-msg user';
+    userMsg.textContent = text;
+    msgs.appendChild(userMsg);
+    document.getElementById('abbax-input').value = '';
+
+    setTimeout(() => {
+      const resp = document.createElement('div');
+      resp.className = 'abbax-msg assistant';
+      const lower = text.toLowerCase();
+      if (lower.includes('tarea') || lower.includes('crea')) {
+        resp.innerHTML = 'Listo, agregado al arsenal. Próximo objetivo. <div class="tool-badge">✓ crear_tarea</div>';
+      } else if (lower.includes('iva')) {
+        resp.innerHTML = '🧮 <strong>$5,000 + IVA 16% ($800) = $5,800 MXN</strong>. Ni siquiera tuve que esforzarme. <div class="tool-badge">✓ calcular_iva</div>';
+      } else if (lower.includes('stats') || lower.includes('estadístic') || lower.includes('como voy')) {
+        resp.innerHTML = '📊 Stats: <strong>2 pendientes</strong> (2 urgentes), 0 completadas, 2 notas. Productividad: <strong>0%</strong>. <div class="tool-badge">✓ estadisticas</div>';
+      } else if (lower.includes('convierte') || lower.includes('dolar')) {
+        resp.innerHTML = '💱 Fácil. <strong>$100 USD = $1,750 MXN</strong>. Ojalá todos tus impuestos fueran tan directos. <div class="tool-badge">✓ convertir_moneda</div>';
+      } else {
+        resp.innerHTML = 'Consideralo resuelto, Jefe. ¿Algo más o ya puedo volver a salvar el mundo fiscal?';
+      }
+      msgs.appendChild(resp);
+      msgs.scrollTop = msgs.scrollHeight;
+    }, 600);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      document.getElementById('search-global').focus();
+    }
+  });
+
+  if (localStorage.getItem('erp-theme') === 'dark') {
+    document.body.classList.add('dark');
+    document.getElementById('theme-btn').textContent = '☀️';
+  }
+</script>
+
+</body>
+</html>

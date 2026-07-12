@@ -1,0 +1,341 @@
+// ============================================================================
+// SISTEMA FISCAL IA · ERP COMPLETO
+// Schema Prisma — funciona con SQLite (dev) y PostgreSQL (Vercel prod)
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// CATÁLOGOS
+// ============================================================================
+
+model Empresa {
+  id            String   @id @default(cuid())
+  nombre        String
+  rfc           String   @unique
+  regimenFiscal String?
+  email         String?
+  telefono      String?
+  direccion     String?
+  status        String   @default("activo")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  clientes    Cliente[]
+  proveedores Proveedor[]
+  facturas    Factura[]
+  empleados   Empleado[]
+  usuarios    Usuario[]
+  cuentas     CuentaBancaria[]
+  productos   Producto[]
+}
+
+model Usuario {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  nombre    String
+  password  String
+  rol       String   @default("usuario")
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Cliente {
+  id           String   @id @default(cuid())
+  nombre       String
+  rfc          String
+  usoCfdi      String   @default("G03")
+  email        String?
+  telefono     String?
+  saldo        Float    @default(0)
+  empresaId    String
+  empresa      Empresa  @relation(fields: [empresaId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  facturas Factura[]
+  oportunidades Oportunidad[]
+
+  @@index([empresaId])
+}
+
+model Proveedor {
+  id           String   @id @default(cuid())
+  nombre       String
+  rfc          String
+  servicio     String?
+  email        String?
+  telefono     String?
+  saldo        Float    @default(0)
+  empresaId    String
+  empresa      Empresa  @relation(fields: [empresaId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  facturas   Factura[]
+  ordenesCompra OrdenCompra[]
+
+  @@index([empresaId])
+}
+
+model Empleado {
+  id           String   @id @default(cuid())
+  nombre       String
+  rfc          String
+  curp         String?
+  nss          String?
+  puesto       String?
+  departamento String?
+  salarioMensual Float  @default(0)
+  tipoContrato String   @default("base")
+  fechaAlta    DateTime @default(now())
+  fechaBaja    DateTime?
+  status       String   @default("activo")
+  empresaId    String
+  empresa      Empresa  @relation(fields: [empresaId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  recibosNomina ReciboNomina[]
+
+  @@index([empresaId])
+}
+
+// ============================================================================
+// FACTURACIÓN CFDI
+// ============================================================================
+
+model Factura {
+  id              String   @id @default(cuid())
+  folio           String
+  serie           String?
+  fecha           DateTime @default(now())
+  subtotal        Float
+  totalImpuestos  Float    @default(0)
+  total           Float
+  moneda          String   @default("MXN")
+  tipoComprobante String   @default("I")
+  metodoPago      String   @default("PUE")
+  formaPago       String   @default("01")
+  uuid            String?  @unique
+  direccion       String   @default("emitida")
+  estado          String   @default("timbrada")
+  empresaId       String
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  clienteId       String?
+  cliente         Cliente? @relation(fields: [clienteId], references: [id])
+  proveedorId     String?
+  proveedor       Proveedor? @relation(fields: [proveedorId], references: [id])
+  receptorRfc     String?
+  receptorNombre  String?
+  emisorRfc       String?
+  emisorNombre    String?
+  concepto        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([empresaId])
+  @@index([clienteId])
+  @@index([proveedorId])
+  @@index([fecha])
+  @@index([direccion])
+  @@index([estado])
+}
+
+// ============================================================================
+// NÓMINA
+// ============================================================================
+
+model ReciboNomina {
+  id                String   @id @default(cuid())
+  folio             String
+  fecha             DateTime @default(now())
+  periodo           String?
+  totalPercepciones Float    @default(0)
+  totalDeducciones  Float    @default(0)
+  neto              Float
+  isr               Float    @default(0)
+  imss              Float    @default(0)
+  uuid              String?  @unique
+  estado            String   @default("timbrado")
+  empleadoId        String
+  empleado          Empleado @relation(fields: [empleadoId], references: [id])
+  empresaId         String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([empleadoId])
+  @@index([fecha])
+}
+
+// ============================================================================
+// COMPRAS E INVENTARIO
+// ============================================================================
+
+model OrdenCompra {
+  id          String   @id @default(cuid())
+  folio       String
+  fecha       DateTime @default(now())
+  concepto    String
+  monto       Float
+  estado      String   @default("recibida")
+  proveedorId String
+  proveedor   Proveedor @relation(fields: [proveedorId], references: [id])
+  empresaId   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([proveedorId])
+}
+
+model Producto {
+  id          String   @id @default(cuid())
+  codigo      String   @unique
+  nombre      String
+  categoria   String?
+  existencia  Int      @default(0)
+  minimo      Int      @default(0)
+  precio      Float    @default(0)
+  empresaId   String
+  empresa     Empresa  @relation(fields: [empresaId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([empresaId])
+}
+
+// ============================================================================
+// BANCOS Y CONTABILIDAD
+// ============================================================================
+
+model CuentaBancaria {
+  id          String   @id @default(cuid())
+  banco       String
+  cuenta      String
+  saldo       Float    @default(0)
+  tipo        String   @default("operaciones")
+  empresaId   String
+  empresa     Empresa  @relation(fields: [empresaId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  movimientos MovimientoBanco[]
+}
+
+model MovimientoBanco {
+  id          String   @id @default(cuid())
+  fecha       DateTime @default(now())
+  concepto    String
+  monto       Float
+  tipo        String   // ingreso, egreso, transferencia
+  estado      String   @default("conciliado")
+  cuentaId    String
+  cuenta      CuentaBancaria @relation(fields: [cuentaId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([cuentaId])
+  @@index([fecha])
+}
+
+model Poliza {
+  id          String   @id @default(cuid())
+  folio       String
+  fecha       DateTime @default(now())
+  tipo        String   // ingreso, egreso, diario
+  concepto    String
+  cargo       Float    @default(0)
+  abono       Float    @default(0)
+  estado      String   @default("conciliada")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([fecha])
+}
+
+// ============================================================================
+// CRM
+// ============================================================================
+
+model Oportunidad {
+  id            String   @id @default(cuid())
+  nombre        String
+  etapa         String   @default("prospecto")
+  monto         Float    @default(0)
+  probabilidad  Int      @default(0)
+  fechaCierre   DateTime?
+  clienteId     String
+  cliente       Cliente  @relation(fields: [clienteId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([clienteId])
+}
+
+// ============================================================================
+// ABBAX · Asistente IA
+// ============================================================================
+
+model Tarea {
+  id          String   @id @default(cuid())
+  titulo      String
+  descripcion String?
+  prioridad   String   @default("media")
+  estado      String   @default("pendiente")
+  categoria   String?
+  fechaLimite DateTime?
+  completadaEn DateTime?
+  origen      String   @default("voz")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([estado])
+  @@index([prioridad])
+}
+
+model Nota {
+  id        String   @id @default(cuid())
+  titulo    String
+  contenido String
+  color     String   @default("amarillo")
+  fijada    Boolean  @default(false)
+  archivada Boolean  @default(false)
+  origen    String   @default("voz")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([fijada])
+}
+
+model Recordatorio {
+  id          String   @id @default(cuid())
+  titulo      String
+  descripcion String?
+  recurrencia String   @default("unica")
+  fechaHora   DateTime
+  estado      String   @default("pendiente")
+  origen      String   @default("voz")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([fechaHora])
+  @@index([estado])
+}
+
+model Conversacion {
+  id        String   @id @default(cuid())
+  rol       String
+  contenido String
+  toolsInvocadas String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

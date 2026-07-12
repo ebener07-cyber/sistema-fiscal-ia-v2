@@ -1,0 +1,37 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "prisma generate && next build",
+  "installCommand": "bun install",
+  "functions": {
+    "src/app/api/assistant/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/auditoria-fiscal/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/speak/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/upload-cfdi/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/upload-constancia-fiscal/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/upload-imss/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/upload-infonavit/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/upload-estado-cuenta/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/export/facturas/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/export/nomina/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}

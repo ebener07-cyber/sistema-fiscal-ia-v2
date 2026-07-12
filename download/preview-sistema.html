@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>nuevo-proyecto · Sistema Fiscal IA — Vista previa completa</title>
+<style>
+  :root {
+    --bg: #f9fafb;
+    --card: #ffffff;
+    --text: #111827;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --blue: #3b82f6;
+    --blue-dark: #1e40af;
+    --green: #10b981;
+    --green-dark: #047857;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --purple: #8b5cf6;
+    --purple-dark: #6d28d9;
+    --orange: #f97316;
+    --sidebar-bg: #071124;
+    --sidebar-purple: #a855f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .app { display: grid; grid-template-columns: 224px 1fr; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    background: var(--sidebar-bg);
+    color: #cbd5e1;
+    padding: 24px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  .sidebar h1 {
+    color: var(--sidebar-purple);
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 32px;
+    white-space: nowrap;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 12px;
+    color: #9ca3af;
+    text-decoration: none;
+    padding: 8px 0;
+    font-size: 14px;
+    transition: color .15s;
+    cursor: pointer;
+  }
+  .nav-item:hover { color: var(--sidebar-purple); }
+  .nav-item.active { color: var(--sidebar-purple); font-weight: 600; }
+  .nav-item .ico { width: 18px; height: 18px; flex-shrink: 0; }
+  .nav-section { margin-top: 16px; margin-bottom: 8px; font-size: 11px; text-transform: uppercase; color: #4b5563; letter-spacing: 0.06em; font-weight: 600; }
+
+  /* Main */
+  .main { padding: 24px 32px; max-width: 1400px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .topbar h1 { font-size: 28px; font-weight: 700; color: var(--text); }
+  .topbar .subtitle { color: var(--muted); margin-top: 4px; font-size: 14px; }
+  .fase-badge { padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 14px; border: 1px solid; }
+  .fase-1 { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+  .fase-2 { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .fase-3 { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+
+  /* KPI cards */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .kpi-grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .kpi-grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .kpi-card { background: var(--card); border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .kpi-label { font-size: 11px; text-transform: uppercase; color: var(--muted); font-weight: 600; letter-spacing: 0.04em; }
+  .kpi-value { font-size: 24px; font-weight: 700; color: var(--text); margin-top: 4px; }
+  .kpi-value.green { color: var(--green-dark); }
+  .kpi-value.red { color: var(--red); }
+  .kpi-value.orange { color: var(--orange); }
+  .kpi-value.blue { color: var(--blue); }
+  .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  .section-title { font-size: 18px; font-weight: 700; margin: 24px 0 12px 0; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; flex-wrap: wrap; }
+  .tab { padding: 10px 16px; background: none; border: none; cursor: pointer; color: var(--muted); font-size: 14px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .tab:hover { color: var(--blue); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Buttons */
+  .btn { background: var(--blue); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; }
+  .btn:hover { background: var(--blue-dark); }
+  .btn-secondary { background: #e5e7eb; color: var(--text); }
+  .btn-secondary:hover { background: #d1d5db; }
+  .btn-danger { background: var(--red); }
+  .btn-danger:hover { background: #b91c1c; }
+  .btn-success { background: var(--green); }
+  .btn-success:hover { background: var(--green-dark); }
+
+  /* Table */
+  .table-card { background: var(--card); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f3f4f6; text-align: left; padding: 10px 12px; font-weight: 600; color: var(--text); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #f9fafb; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.green { background: #d1fae5; color: #065f46; }
+  .badge.red { background: #fee2e2; color: #991b1b; }
+  .badge.yellow { background: #fef3c7; color: #92400e; }
+  .badge.blue { background: #dbeafe; color: #1e40af; }
+  .badge.gray { background: #f3f4f6; color: #4b5563; }
+  .badge.purple { background: #ede9fe; color: #5b21b6; }
+
+  /* Alerts */
+  .alerts { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+  .alerts h3 { color: #9a3412; margin-bottom: 8px; font-size: 14px; }
+  .alerts ul { list-style: none; }
+  .alerts li { color: #7c2d12; padding: 3px 0; font-size: 13px; }
+
+  /* Progress */
+  .progress-container { background: var(--card); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 24px; }
+  .progress-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .progress-bar { width: 100%; background: #e5e7eb; height: 24px; border-radius: 999px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(to right, #34d399, #059669); transition: width .6s; }
+  .progress-meta { display: flex; justify-content: space-between; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .progress-meta strong { color: var(--text); }
+
+  /* Debt card */
+  .debt-card { background: var(--card); border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid var(--border); margin-bottom: 12px; }
+  .debt-card.priority { border-left-color: var(--red); background: #fef2f2; }
+  .debt-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .debt-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge-priority { background: #1f2937; color: white; font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 600; }
+  .badge-urgent { background: var(--red); color: white; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+
+  /* 50/30/20 bars */
+  .bar-row { margin-bottom: 16px; }
+  .bar-header { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .bar-header strong { color: var(--text); }
+  .bar-track { width: 100%; background: #e5e7eb; height: 16px; border-radius: 999px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; transition: width .6s; }
+  .bar-fill.green { background: var(--green); }
+  .bar-fill.yellow { background: var(--yellow); }
+  .bar-fill.red { background: var(--red); }
+  .bar-fill.emerald { background: var(--green-dark); }
+  .bar-fill.orange { background: var(--orange); }
+  .bar-marker { position: absolute; top: 0; bottom: 0; border-left: 2px dashed #4b5563; }
+
+  /* Forms */
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .form-control { width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+  .form-control:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+  textarea.form-control { min-height: 80px; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: white; border-radius: 8px; padding: 24px; max-width: 500px; width: 100%; max-height: 90vh; overflow-y: auto; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .modal-header h3 { font-size: 18px; font-weight: 700; }
+  .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--muted); }
+
+  /* Cards grid */
+  .cards-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  .module-card { background: var(--card); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid var(--blue); cursor: pointer; transition: transform .15s, box-shadow .15s; text-decoration: none; color: inherit; display: block; }
+  .module-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .module-card .ico-square { width: 40px; height: 40px; border-radius: 8px; margin-bottom: 12px; }
+  .module-card h3 { font-size: 16px; font-weight: 700; color: var(--text); }
+  .module-card p { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  /* Chart placeholder */
+  .chart-card { background: var(--card); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 24px; }
+  .chart-card h3 { margin-bottom: 16px; font-size: 16px; }
+  .chart-bars { display: flex; align-items: flex-end; gap: 12px; height: 200px; padding: 16px 0; }
+  .chart-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+  .chart-bar { width: 100%; background: var(--blue); border-radius: 4px 4px 0 0; transition: height .6s; min-height: 4px; }
+  .chart-bar-label { font-size: 11px; color: var(--muted); }
+
+  /* Upload zone */
+  .upload-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 40px; text-align: center; background: var(--card); cursor: pointer; transition: all .15s; }
+  .upload-zone:hover { border-color: var(--blue); background: #eff6ff; }
+  .upload-zone .ico { font-size: 48px; color: var(--muted); }
+
+  /* Stat boxes inline */
+  .stat-box { background: #f3f4f6; border-radius: 6px; padding: 8px; }
+  .stat-box .label { font-size: 11px; color: var(--muted); }
+  .stat-box .value { font-size: 13px; font-weight: 700; margin-top: 2px; }
+
+  /* Empty state */
+  .empty-state { text-align: center; padding: 40px; color: var(--muted); }
+  .empty-state .ico { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .cards-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Plan steps */
+  .fase-block { margin-bottom: 24px; }
+  .fase-header { border-left: 4px solid; padding: 16px; border-radius: 8px; margin-bottom: 12px; }
+  .fase-header h3 { font-size: 18px; font-weight: 700; }
+  .fase-header .plazo { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .fase-1-header { background: #fee2e2; border-color: var(--red); }
+  .fase-2-header { background: #fef3c7; border-color: var(--yellow); }
+  .fase-3-header { background: #d1fae5; border-color: var(--green); }
+  .step { background: var(--card); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 12px; display: flex; gap: 16px; }
+  .step-num { background: #1f2937; color: white; width: 32px; height: 32px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
+  .step-content h4 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .step-content .desc { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .step-content ul { list-style: none; margin-left: 0; }
+  .step-content li { font-size: 13px; padding: 3px 0; padding-left: 18px; position: relative; }
+  .step-content li:before { content: "▸"; color: var(--blue); position: absolute; left: 0; }
+  .step-meta { display: inline-block; background: #dbeafe; color: var(--blue-dark); font-size: 12px; padding: 4px 12px; border-radius: 999px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <h1>Sistema Fiscal IA</h1>
+    <nav>
+      <div class="nav-section">Principal</div>
+      <a class="nav-item active" data-view="dashboard"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg> Dashboard</a>
+
+      <div class="nav-section">Catálogos</div>
+      <a class="nav-item" data-view="empresas"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg> Empresas</a>
+      <a class="nav-item" data-view="clientes"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> Clientes</a>
+      <a class="nav-item" data-view="usuarios">👥 Usuarios</a>
+
+      <div class="nav-section">Operación</div>
+      <a class="nav-item" data-view="facturacion">🧾 Facturación</a>
+      <a class="nav-item" data-view="gastos">💸 Gastos</a>
+      <a class="nav-item" data-view="compras">🛒 Compras</a>
+      <a class="nav-item" data-view="inventario">📦 Inventario</a>
+      <a class="nav-item" data-view="bancos">🏦 Bancos</a>
+      <a class="nav-item" data-view="contabilidad">📒 Contabilidad</a>
+      <a class="nav-item" data-view="nomina">💵 Nómina</a>
+
+      <div class="nav-section">Fiscal</div>
+      <a class="nav-item" data-view="sat">📡 SAT / Descarga</a>
+      <a class="nav-item" data-view="ia-fiscal">🤖 IA Fiscal</a>
+      <a class="nav-item" data-view="tributario">⚖️ Tributario</a>
+      <a class="nav-item" data-view="diot">📊 DIOT</a>
+
+      <div class="nav-section">Finanzas</div>
+      <a class="nav-item" data-view="finanzas"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg> Reestructura Financiera</a>
+
+      <div class="nav-section">Otros</div>
+      <a class="nav-item" data-view="crm">📊 CRM</a>
+      <a class="nav-item" data-view="reportes">📈 Reportes</a>
+    </nav>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+
+    <!-- ====================== DASHBOARD ====================== -->
+    <div class="view active" id="view-dashboard">
+      <div class="topbar">
+        <div>
+          <h1>Dashboard</h1>
+          <div class="subtitle">Resumen general del sistema fiscal</div>
+        </div>
+        <div class="fase-badge fase-1">FASE 1 — Diagnóstico</div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card"><div class="kpi-label">Ingresos del mes</div><div class="kpi-value green">$320,000</div><div class="kpi-sub">+12% vs mes anterior</div></div>
+        <div class="kpi-card"><div class="kpi-label">Egresos del mes</div><div class="kpi-value red">$292,800</div><div class="kpi-sub">+5% vs mes anterior</div></div>
+        <div class="kpi-card"><div class="kpi-label">Facturas emitidas</div><div class="kpi-value blue">47</div><div class="kpi-sub">Este mes</div></div>
+        <div class="kpi-card"><div class="kpi-label">Facturas recibidas</div><div class="kpi-value">128</div><div class="kpi-sub">Vía SAT</div></div>
+        <div class="kpi-card"><div class="kpi-label">Clientes activos</div><div class="kpi-value">23</div><div class="kpi-sub">3 nuevos este mes</div></div>
+        <div class="kpi-card"><div class="kpi-label">Empleados</div><div class="kpi-value">5</div><div class="kpi-sub">Nómina al corriente</div></div>
+        <div class="kpi-card"><div class="kpi-label">IVA por pagar</div><div class="kpi-value orange">$18,450</div><div class="kpi-sub">Próximo pago 17/jul</div></div>
+        <div class="kpi-card"><div class="kpi-label">ISR estimado</div><div class="kpi-value orange">$32,100</div><div class="kpi-sub">Mensual</div></div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:2fr 1fr; gap:24px;">
+        <div class="chart-card">
+          <h3>📈 Ingresos vs Egresos (últimos 6 meses)</h3>
+          <div class="chart-bars">
+            <div class="chart-bar-col"><div class="chart-bar" style="background:#10b981; height:60%"></div><div class="chart-bar-label">Feb</div></div>
+            <div class="chart-bar-col"><div class="chart-bar" style="background:#10b981; height:75%"></div><div class="chart-bar-label">Mar</div></div>
+            <div class="chart-bar-col"><div class="chart-bar" style="background:#10b981; height:65%"></div><div class="chart-bar-label">Abr</div></div>
+            <div class="chart-bar-col"><div class="chart-bar" style="background:#10b981; height:80%"></div><div class="chart-bar-label">May</div></div>
+            <div class="chart-bar-col"><div class="chart-bar" style="background:#10b981; height:70%"></div><div class="chart-bar-label">Jun</div></div>
+            <div class="chart-bar-col"><div class="chart-bar" style="background:#10b981; height:90%"></div><div class="chart-bar-label">Jul</div></div>
+          </div>
+          <div style="display:flex; gap:24px; margin-top:12px; font-size:12px; color:var(--muted);">
+            <span>🟢 Ingresos</span>
+            <span>🔴 Egresos</span>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <h3>⚠️ Alertas fiscales</h3>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="background:#fef3c7; padding:8px; border-radius:6px; font-size:13px; color:#92400e;">
+              <strong>IVA vence en 7 días</strong><br>$18,450 MXN
+            </div>
+            <div style="background:#fee2e2; padding:8px; border-radius:6px; font-size:13px; color:#991b1b;">
+              <strong>Patrimonio negativo</strong><br>−$1,164,000 MXN
+            </div>
+            <div style="background:#dbeafe; padding:8px; border-radius:6px; font-size:13px; color:#1e40af;">
+              <strong>3 facturas por cobrar</strong><br>$87,000 MXN vencidas
+            </div>
+            <div style="background:#ede9fe; padding:8px; border-radius:6px; font-size:13px; color:#5b21b6;">
+              <strong>Deuda agresiva</strong><br>Préstamo familiar 48% anual
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="section-title">Accesos rápidos</h2>
+      <div class="cards-grid">
+        <a class="module-card" style="border-left-color:#3b82f6" onclick="switchView('facturacion')">
+          <div class="ico-square" style="background:#3b82f6"></div>
+          <h3>Facturación CFDI</h3>
+          <p>Emite, recibe y gestiona facturas electrónicas del SAT.</p>
+        </a>
+        <a class="module-card" style="border-left-color:#10b981" onclick="switchView('sat')">
+          <div class="ico-square" style="background:#10b981"></div>
+          <h3>Descarga SAT</h3>
+          <p>Descarga masiva de XML del SAT.</p>
+        </a>
+        <a class="module-card" style="border-left-color:#8b5cf6" onclick="switchView('ia-fiscal')">
+          <div class="ico-square" style="background:#8b5cf6"></div>
+          <h3>IA Fiscal</h3>
+          <p>Simuladores ISR, IVA, PTU y recomendaciones.</p>
+        </a>
+        <a class="module-card" style="border-left-color:#ef4444" onclick="switchView('finanzas')">
+          <div class="ico-square" style="background:#ef4444"></div>
+          <h3>Reestructura Financiera</h3>
+          <p>Plan de 3 fases para salir de deudas.</p>
+        </a>
+        <a class="module-card" style="border-left-color:#f59e0b" onclick="switchView('nomina')">
+          <div class="ico-square" style="background:#f59e0b"></div>
+          <h3>Nómina</h3>
+          <p>Recibos CFDI de nómina y empleados.</p>
+        </a>
+        <a class="module-card" style="border-left-color:#6366f1" onclick="switchView('reportes')">
+          <div class="ico-square" style="background:#6366f1"></div>
+          <h3>Reportes</h3>
+          <p>Balanza, utilidad, flujo de efectivo.</p>
+        </a>
+      </div>
+    </div>
+
+    <!-- ====================== EMPRESAS ====================== -->
+    <div class="view" id="view-empresas">
+      <div class="topbar">
+        <div>
+          <h1>Empresas</h1>
+          <div class="subtitle">Gestión de empresas y RFCs</div>
+        </div>
+        <button class="btn" onclick="openModal('modal-empresa')">+ Nueva empresa</button>
+      </div>
+
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">Total empresas</div><div class="kpi-value">2</div></div>
+        <div class="kpi-card"><div class="kpi-label">Activas</div><div class="kpi-value green">2</div></div>
+        <div class="kpi-card"><div class="kpi-label">Con certificado vigente</div><div class="kpi-value">1</div></div>
+      </div>
+
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Nombre</th><th>RFC</th><th>Régimen</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Construcciones Hernández SAC</strong></td>
+              <td>HEH850415ABC</td>
+              <td>Persona Moral</td>
+              <td><span class="badge green">Activa</span></td>
+              <td><button class="btn btn-secondary" style="font-size:12px; padding:4px 8px;">Ver</button></td>
+            </tr>
+            <tr>
+              <td><strong>Ingeniería y Diseño del Norte</strong></td>
+              <td>IIN920714XYZ</td>
+              <td>Persona Física</td>
+              <td><span class="badge green">Activa</span></td>
+              <td><button class="btn btn-secondary" style="font-size:12px; padding:4px 8px;">Ver</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====================== CLIENTES ====================== -->
+    <div class="view" id="view-clientes">
+      <div class="topbar">
+        <div>
+          <h1>Clientes</h1>
+          <div class="subtitle">Gestión de clientes</div>
+        </div>
+        <button class="btn" onclick="openModal('modal-cliente')">+ Nuevo cliente</button>
+      </div>
+
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">Total clientes</div><div class="kpi-value">23</div></div>
+        <div class="kpi-card"><div class="kpi-label">Activos</div><div class="kpi-value green">21</div></div>
+        <div class="kpi-card"><div class="kpi-label">Saldo pendiente</div><div class="kpi-value red">$87,000</div></div>
+      </div>
+
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Nombre</th><th>RFC</th><th>Uso CFDI</th><th>Saldo</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Tania García López</strong></td><td>GALT850415AB1</td><td>G03</td><td>$0</td><td><span class="badge green">Activo</span></td></tr>
+            <tr><td><strong>Constructora Norte SA</strong></td><td>CNO8501012A1</td><td>G03</td><td>$32,500</td><td><span class="badge yellow">Pendiente</span></td></tr>
+            <tr><td><strong>Desarrollo Urbano del Bajío</strong></td><td>DUB9509203K9</td><td>G03</td><td>$54,500</td><td><span class="badge red">Vencido</span></td></tr>
+            <tr><td><strong>José Martínez Robles</strong></td><td>MARJ780912HDF</td><td>G03</td><td>$0</td><td><span class="badge green">Activo</span></td></tr>
+            <tr><td><strong>Inmobiliaria Premium SRL</strong></td><td>IPR0201014M2</td><td>G03</td><td>$0</td><td><span class="badge green">Activo</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====================== FACTURACIÓN ====================== -->
+    <div class="view" id="view-facturacion">
+      <div class="topbar">
+        <div>
+          <h1>Facturación CFDI</h1>
+          <div class="subtitle">Facturas emitidas y recibidas</div>
+        </div>
+        <div>
+          <button class="btn btn-secondary">📥 Cargar XML</button>
+          <button class="btn">+ Nueva factura</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card"><div class="kpi-label">Emitidas (mes)</div><div class="kpi-value green">47</div><div class="kpi-sub">$285,400 MXN</div></div>
+        <div class="kpi-card"><div class="kpi-label">Recibidas (mes)</div><div class="kpi-value blue">128</div><div class="kpi-sub">$192,300 MXN</div></div>
+        <div class="kpi-card"><div class="kpi-label">Pendientes de cobro</div><div class="kpi-value orange">3</div><div class="kpi-sub">$87,000 MXN</div></div>
+        <div class="kpi-card"><div class="kpi-label">Canceladas</div><div class="kpi-value red">2</div><div class="kpi-sub">Este mes</div></div>
+      </div>
+
+      <div class="upload-zone" style="margin-bottom:24px;">
+        <div class="ico">📤</div>
+        <h3 style="margin-top:12px;">Arrastra archivos XML o ZIP aquí</h3>
+        <p style="color:var(--muted); margin-top:4px;">o haz clic para seleccionar</p>
+      </div>
+
+      <h2 class="section-title">Facturas recientes</h2>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Folio</th><th>UUID</th><th>Fecha</th><th>Cliente/Emisor</th><th>Total</th><th>Tipo</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td>A-001</td><td style="font-family:monospace; font-size:11px;">3F8B-2C4D-...</td><td>10/07/2026</td><td>Tania García López</td><td>$45,000</td><td><span class="badge green">Emitida</span></td><td><span class="badge green">Timbrada</span></td></tr>
+            <tr><td>A-002</td><td style="font-family:monospace; font-size:11px;">5A1E-9F2B-...</td><td>09/07/2026</td><td>Constructora Norte</td><td>$62,500</td><td><span class="badge green">Emitida</span></td><td><span class="badge yellow">Pendiente</span></td></tr>
+            <tr><td>—</td><td style="font-family:monospace; font-size:11px;">B7C2-1D8E-...</td><td>08/07/2026</td><td>Oficina del Centro</td><td>$3,200</td><td><span class="badge blue">Recibida</span></td><td><span class="badge green">Timbrada</span></td></tr>
+            <tr><td>A-003</td><td style="font-family:monospace; font-size:11px;">C9D4-7E3A-...</td><td>07/07/2026</td><td>Desarrollo Urbano Bajío</td><td>$87,000</td><td><span class="badge green">Emitida</span></td><td><span class="badge red">Vencida</span></td></tr>
+            <tr><td>—</td><td style="font-family:monospace; font-size:11px;">E1F5-4A9B-...</td><td>06/07/2026</td><td>Ferretería Industrial</td><td>$18,750</td><td><span class="badge blue">Recibida</span></td><td><span class="badge green">Timbrada</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====================== SAT / DESCARGA ====================== -->
+    <div class="view" id="view-sat">
+      <div class="topbar">
+        <div>
+          <h1>SAT — Descarga Masiva</h1>
+          <div class="subtitle">Descarga automática de CFDIs del SAT</div>
+        </div>
+      </div>
+
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">Descargas este mes</div><div class="kpi-value">3</div></div>
+        <div class="kpi-card"><div class="kpi-label">XML descargados</div><div class="kpi-value blue">412</div></div>
+        <div class="kpi-card"><div class="kpi-label">Procesados</div><div class="kpi-value green">387</div></div>
+      </div>
+
+      <h2 class="section-title">Nueva solicitud de descarga</h2>
+      <div class="chart-card">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <div class="form-group">
+            <label>RFC a consultar</label>
+            <input class="form-control" value="HEH850415ABC" />
+          </div>
+          <div class="form-group">
+            <label>Tipo de comprobante</label>
+            <select class="form-control"><option>Recibidos</option><option>Emitidos</option></select>
+          </div>
+          <div class="form-group">
+            <label>Fecha inicial</label>
+            <input class="form-control" type="date" value="2026-06-01" />
+          </div>
+          <div class="form-group">
+            <label>Fecha final</label>
+            <input class="form-control" type="date" value="2026-07-10" />
+          </div>
+        </div>
+        <button class="btn">📡 Solicitar descarga</button>
+      </div>
+
+      <h2 class="section-title">Historial de descargas</h2>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>RFC</th><th>Periodo</th><th>XMLs</th><th>Estado</th><th>Acción</th></tr></thead>
+          <tbody>
+            <tr><td>09/07/2026</td><td>Recibidos</td><td>HEH850415ABC</td><td>01/06 - 30/06</td><td>156</td><td><span class="badge green">Procesado</span></td><td><button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;">Ver</button></td></tr>
+            <tr><td>08/07/2026</td><td>Emitidos</td><td>HEH850415ABC</td><td>01/06 - 30/06</td><td>47</td><td><span class="badge green">Procesado</span></td><td><button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;">Ver</button></td></tr>
+            <tr><td>05/07/2026</td><td>Recibidos</td><td>HEH850415ABC</td><td>01/05 - 31/05</td><td>209</td><td><span class="badge yellow">En proceso</span></td><td><button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;">Ver</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====================== IA FISCAL ====================== -->
+    <div class="view" id="view-ia-fiscal">
+      <div class="topbar">
+        <div>
+          <h1>IA Fiscal</h1>
+          <div class="subtitle">Simuladores y recomendaciones inteligentes</div>
+        </div>
+      </div>
+
+      <div class="cards-grid">
+        <div class="module-card" style="border-left-color:#8b5cf6">
+          <div class="ico-square" style="background:#8b5cf6"></div>
+          <h3>Simulador ISR</h3>
+          <p>Calcula tu ISR mensual y anual según régimen.</p>
+        </div>
+        <div class="module-card" style="border-left-color:#3b82f6">
+          <div class="ico-square" style="background:#3b82f6"></div>
+          <h3>Simulador IVA</h3>
+          <p>Proyecta tu IVA trasladado y acreditable.</p>
+        </div>
+        <div class="module-card" style="border-left-color:#10b981">
+          <div class="ico-square" style="background:#10b981"></div>
+          <h3>Simulador PTU</h3>
+          <p>Calcula Participación de Utilidades.</p>
+        </div>
+        <div class="module-card" style="border-left-color:#f59e0b">
+          <div class="ico-square" style="background:#f59e0b"></div>
+          <h3>Cierre Mensual</h3>
+          <p>Asistente de cierre con IA.</p>
+        </div>
+        <div class="module-card" style="border-left-color:#ef4444">
+          <div class="ico-square" style="background:#ef4444"></div>
+          <h3>Cierre Anual</h3>
+          <p>Declaración anual automatizada.</p>
+        </div>
+        <div class="module-card" style="border-left-color:#6366f1">
+          <div class="ico-square" style="background:#6366f1"></div>
+          <h3>Recomendaciones</h3>
+          <p>Sugerencias personalizadas de IA.</p>
+        </div>
+      </div>
+
+      <h2 class="section-title">💬 Chat con IA Fiscal</h2>
+      <div class="chart-card" style="min-height:300px;">
+        <div style="background:#f3f4f6; padding:12px; border-radius:8px; margin-bottom:12px;">
+          <strong>IA:</strong> Hola, soy tu asistente fiscal. ¿En qué puedo ayudarte hoy?
+        </div>
+        <div style="background:#dbeafe; padding:12px; border-radius:8px; margin-bottom:12px; margin-left:40px;">
+          <strong>Tú:</strong> ¿Cuánto debo de ISR este mes?
+        </div>
+        <div style="background:#f3f4f6; padding:12px; border-radius:8px; margin-bottom:12px;">
+          <strong>IA:</strong> Según tus facturas de julio 2026, tu base gravable es $215,400 MXN. Aplicando la tarifa del Art. 96 LISR, tu ISR a cargo es <strong>$32,100 MXN</strong>. Te recomiendo hacer tu pago antes del 17 de agosto para evitar recargos.
+        </div>
+        <div style="display:flex; gap:8px; margin-top:16px;">
+          <input class="form-control" placeholder="Escribe tu pregunta..." />
+          <button class="btn">Enviar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== NÓMINA ====================== -->
+    <div class="view" id="view-nomina">
+      <div class="topbar">
+        <div>
+          <h1>Nómina</h1>
+          <div class="subtitle">Recibos de nómina CFDI</div>
+        </div>
+        <div>
+          <button class="btn btn-secondary">📥 Importar</button>
+          <button class="btn">+ Generar recibo</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">Empleados activos</div><div class="kpi-value">5</div></div>
+        <div class="kpi-card"><div class="kpi-label">Nómina quincenal</div><div class="kpi-value red">$78,500</div></div>
+        <div class="kpi-card"><div class="kpi-label">Recibos timbrados</div><div class="kpi-value green">10</div></div>
+      </div>
+
+      <h2 class="section-title">Empleados</h2>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Nombre</th><th>RFC</th><th>Puesto</th><th>Salario mensual</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Juan Pérez González</strong></td><td>PEGJ850101AB1</td><td>Supervisor de obra</td><td>$22,000</td><td><span class="badge green">Activo</span></td></tr>
+            <tr><td><strong>María López Ruiz</strong></td><td>LORM900215CDEF</td><td>Administradora</td><td>$18,000</td><td><span class="badge green">Activo</span></td></tr>
+            <tr><td><strong>Carlos Ramírez Soto</strong></td><td>RASC880712HDF</td><td>Arquitecto</td><td>$25,000</td><td><span class="badge green">Activo</span></td></tr>
+            <tr><td><strong>Ana Torres Vega</strong></td><td>TOVA920815MDF</td><td>Diseñadora</td><td>$15,000</td><td><span class="badge green">Activo</span></td></tr>
+            <tr><td><strong>Luis Mora Díaz</td><td>MODL800101HDF</td><td>Oficial</td><td>$12,000</td><td><span class="badge green">Activo</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====================== FINANZAS (con sub-tabs) ====================== -->
+    <div class="view" id="view-finanzas">
+      <div class="topbar">
+        <div>
+          <h1>Reestructura Financiera</h1>
+          <div class="subtitle">Plan integral en 3 fases</div>
+        </div>
+        <div class="fase-badge fase-1">FASE 1 — Diagnóstico</div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-ftab="f-dash">📊 Dashboard</button>
+        <button class="tab" data-ftab="f-pat">💰 Patrimonio</button>
+        <button class="tab" data-ftab="f-fondo">🚨 Fondo</button>
+        <button class="tab" data-ftab="f-flujo">📈 Flujo 50/30/20</button>
+        <button class="tab" data-ftab="f-deudas">🎯 Avalancha</button>
+        <button class="tab" data-ftab="f-plan">📋 Plan</button>
+      </div>
+
+      <!-- Finanzas Dashboard -->
+      <div class="fpanel active" id="f-dash">
+        <div class="alerts">
+          <h3>⚠️ Alertas activas</h3>
+          <ul>
+            <li>🚨 Fondo de emergencia al 32.5% — prioridad absoluta completarlo.</li>
+            <li>⚠️ Tasa de ahorro real 8.5% — objetivo mínimo 20%.</li>
+            <li>⚠️ Ratio endeudamiento 89.7% — objetivo &lt; 36%.</li>
+            <li>🎯 1 deuda con tasa ≥ 5% mensual — aplicar avalancha urgente.</li>
+          </ul>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-card"><div class="kpi-label">Patrimonio Neto</div><div class="kpi-value red">−$1,164,000</div><div class="kpi-sub">Activo − Pasivo</div></div>
+          <div class="kpi-card"><div class="kpi-label">Activo Total</div><div class="kpi-value green">$1,836,000</div></div>
+          <div class="kpi-card"><div class="kpi-label">Pasivo Total</div><div class="kpi-value red">$3,000,000</div></div>
+          <div class="kpi-card"><div class="kpi-label">Tasa de Ahorro</div><div class="kpi-value orange">8.5%</div><div class="kpi-sub">Meta ≥ 20%</div></div>
+          <div class="kpi-card"><div class="kpi-label">Ratio Endeudamiento</div><div class="kpi-value red">89.7%</div><div class="kpi-sub">Meta &lt; 36%</div></div>
+          <div class="kpi-card"><div class="kpi-label">Cobertura de Caja</div><div class="kpi-value orange">18 días</div><div class="kpi-sub">Meta ≥ 60</div></div>
+          <div class="kpi-card"><div class="kpi-label">Fondo Emergencia</div><div class="kpi-value orange">32.5%</div><div class="kpi-sub">$65K / $200K</div></div>
+          <div class="kpi-card"><div class="kpi-label">Deudas Activas</div><div class="kpi-value">3</div></div>
+        </div>
+      </div>
+
+      <!-- Patrimonio -->
+      <div class="fpanel" id="f-pat">
+        <div style="background:var(--card); border-radius:8px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,0.08); text-align:center; margin-bottom:16px;">
+          <div class="kpi-label">Patrimonio Neto</div>
+          <div style="font-size:48px; font-weight:700; color:var(--red); margin-top:8px;">−$1,164,000</div>
+          <div style="color:var(--muted); margin-top:8px;">Activo: <strong style="color:var(--green-dark)">$1,836,000</strong> · Pasivo: <strong style="color:var(--red)">$3,000,000</strong></div>
+        </div>
+        <div class="kpi-grid kpi-grid-2">
+          <div class="kpi-card">
+            <h3 style="margin-bottom:12px;">📈 Activos</h3>
+            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Efectivo</span><strong>$16,000</strong></div>
+            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Cuenta bancaria</span><strong>$700,000</strong></div>
+            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Bien raíz</span><strong>$1,000,000</strong></div>
+            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Vehículo</span><strong>$120,000</strong></div>
+          </div>
+          <div class="kpi-card">
+            <h3 style="margin-bottom:12px;">📉 Pasivos</h3>
+            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Crédito hipotecario</span><strong style="color:var(--red)">$2,800,000</strong></div>
+            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Préstamo bancario</span><strong style="color:var(--red)">$100,000</strong></div>
+            <div style="display:flex; justify-content:space-between; padding:4px 0;"><span>Préstamo familiar</span><strong style="color:var(--red)">$100,000</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fondo Emergencia -->
+      <div class="fpanel" id="f-fondo">
+        <div class="progress-container">
+          <div class="progress-header"><span style="color:var(--muted);">Progreso</span><span style="font-size:24px; font-weight:700; color:var(--blue);">32.5%</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:32.5%"></div></div>
+          <div class="progress-meta">
+            <span>Saldo: <strong style="color:var(--green-dark)">$65,000</strong></span>
+            <span>Meta: <strong>$200,000</strong></span>
+            <span>Faltante: <strong style="color:var(--red)">$135,000</strong></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Flujo 50/30/20 -->
+      <div class="fpanel" id="f-flujo">
+        <div class="kpi-grid kpi-grid-3">
+          <div class="kpi-card"><div class="kpi-label">Ingresos</div><div class="kpi-value green">$320,000</div></div>
+          <div class="kpi-card"><div class="kpi-label">Egresos</div><div class="kpi-value red">$292,800</div></div>
+          <div class="kpi-card"><div class="kpi-label">Tasa ahorro</div><div class="kpi-value orange">8.5%</div></div>
+        </div>
+        <div class="chart-card">
+          <div class="bar-row"><div class="bar-header"><strong>Necesidades</strong><span>$180,000 · 61.5% (obj 50%)</span></div><div class="bar-track"><div class="bar-fill red" style="width:61.5%"></div><div class="bar-marker" style="left:50%"></div></div></div>
+          <div class="bar-row"><div class="bar-header"><strong>Deseos</strong><span>$72,800 · 24.9% (obj 30%)</span></div><div class="bar-track"><div class="bar-fill yellow" style="width:24.9%"></div><div class="bar-marker" style="left:30%"></div></div></div>
+          <div class="bar-row"><div class="bar-header"><strong>Ahorro</strong><span>$40,000 · 13.7% (obj 20%)</span></div><div class="bar-track"><div class="bar-fill orange" style="width:13.7%"></div><div class="bar-marker" style="left:20%"></div></div></div>
+        </div>
+      </div>
+
+      <!-- Avalancha -->
+      <div class="fpanel" id="f-deudas">
+        <div class="kpi-grid kpi-grid-3">
+          <div class="kpi-card"><div class="kpi-label">Total Deudas</div><div class="kpi-value red">$3,000,000</div></div>
+          <div class="kpi-card"><div class="kpi-label">Interés mensual</div><div class="kpi-value orange">$25,750</div></div>
+          <div class="kpi-card"><div class="kpi-label">Deudas activas</div><div class="kpi-value">3</div></div>
+        </div>
+
+        <div class="debt-card priority">
+          <div class="debt-header">
+            <div class="debt-title"><span class="badge-priority">#1</span><h3 style="font-size:16px;">Préstamo Familiar</h3><span class="badge-urgent">ATACAR PRIMERO</span></div>
+            <div style="text-align:right;"><div style="font-size:22px; font-weight:700; color:var(--red);">$100,000</div><div style="font-size:11px; color:var(--muted);">Pago mín: $46,000/mes</div></div>
+          </div>
+          <div style="font-size:12px; color:var(--muted);">Familiar · 4.00% mensual · Avalancha</div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px;">
+            <div class="stat-box"><div class="label">Meses para pagar</div><div class="value">3 meses</div></div>
+            <div class="stat-box"><div class="label">Interés total</div><div class="value" style="color:var(--orange)">$5,520</div></div>
+            <div class="stat-box"><div class="label">Costo total</div><div class="value">$105,520</div></div>
+          </div>
+        </div>
+
+        <div class="debt-card">
+          <div class="debt-header">
+            <div class="debt-title"><span class="badge-priority">#2</span><h3 style="font-size:16px;">Banorte Credilínea PyME</h3></div>
+            <div style="text-align:right;"><div style="font-size:22px; font-weight:700; color:var(--red);">$2,800,000</div><div style="font-size:11px; color:var(--muted);">Pago mín: $15,000/mes</div></div>
+          </div>
+          <div style="font-size:12px; color:var(--muted);">Banorte · 1.50% mensual · Avalancha</div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px;">
+            <div class="stat-box"><div class="label">Meses para pagar</div><div class="value">312 meses</div></div>
+            <div class="stat-box"><div class="label">Interés total</div><div class="value" style="color:var(--orange)">$1,876,000</div></div>
+            <div class="stat-box"><div class="label">Costo total</div><div class="value">$4,676,000</div></div>
+          </div>
+        </div>
+
+        <div class="debt-card">
+          <div class="debt-header">
+            <div class="debt-title"><span class="badge-priority">#3</span><h3 style="font-size:16px;">Santander PyME</h3></div>
+            <div style="text-align:right;"><div style="font-size:22px; font-weight:700; color:var(--red);">$100,000</div><div style="font-size:11px; color:var(--muted);">Pago mín: $4,750/mes</div></div>
+          </div>
+          <div style="font-size:12px; color:var(--muted);">Santander · 1.20% mensual · Avalancha</div>
+        </div>
+      </div>
+
+      <!-- Plan -->
+      <div class="fpanel" id="f-plan">
+        <div class="fase-block">
+          <div class="fase-header fase-1-header"><h3>Fase 1: Diagnóstico</h3><div class="plazo">Próximos 30 días</div></div>
+          <div class="step"><div class="step-num">1</div><div class="step-content"><h4>Auditoría Financiera Total</h4><div class="desc">Consolidar todos los estados de cuenta.</div><ul><li>Registrar TODOS los activos y pasivos</li><li>Calcular Patrimonio Neto</li></ul><div class="step-meta">🎯 Patrimonio Neto Real</div></div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-content"><h4>Crear Fondo de Emergencia</h4><div class="desc">$200,000 MXN en cuenta separada.</div><ul><li>Abrir cuenta separada</li><li>Automatizar depósitos</li></ul><div class="step-meta">🎯 $200,000 MXN</div></div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-content"><h4>Flujo de Caja 50/30/20</h4><div class="desc">Clasificar movimientos.</div><ul><li>Tasa de Ahorro Real ≥ 20%</li></ul><div class="step-meta">🎯 Tasa Ahorro ≥ 20%</div></div></div>
+        </div>
+        <div class="fase-block">
+          <div class="fase-header fase-2-header"><h3>Fase 2: Reducción de Deuda</h3><div class="plazo">Meses 1 a 6</div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-content"><h4>Estrategia Avalancha</h4><div class="desc">Atacar deuda más cara primero.</div><ul><li>Eliminar préstamo familiar en 3-4 meses</li></ul><div class="step-meta">🎯 Liberar $46K MXN/mes</div></div></div>
+          <div class="step"><div class="step-num">5</div><div class="step-content"><h4>Renegociación Ofensiva</h4><div class="desc">Contactar bancos con plan.</div><ul><li>Banorte, Konfío, Familiar</li></ul><div class="step-meta">🎯 Reducir pago 30%</div></div></div>
+        </div>
+        <div class="fase-block">
+          <div class="fase-header fase-3-header"><h3>Fase 3: Crecimiento</h3><div class="plazo">A partir del Mes 7</div></div>
+          <div class="step"><div class="step-num">7</div><div class="step-content"><h4>Fondo de Inversión</h4><div class="desc">Convertir flujo en activos.</div><ul><li>ETFs, fondos de deuda</li></ul><div class="step-meta">🎯 Tasa Inversión ≥ 20%</div></div></div>
+          <div class="step"><div class="step-num">8</div><div class="step-content"><h4>Diversificación</h4><div class="desc">Reducir dependencia.</div><ul><li>Bienes raíces, ETFs S&P 500</li></ul><div class="step-meta">🎯 Sin cliente &gt; 30%</div></div></div>
+          <div class="step"><div class="step-num">9</div><div class="step-content"><h4>Protección del Patrimonio</h4><div class="desc">Asegurar lo construido.</div><ul><li>Gastos médicos, testamento</li></ul><div class="step-meta">🎯 Cobertura 100%</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== REPORTES ====================== -->
+    <div class="view" id="view-reportes">
+      <div class="topbar">
+        <div><h1>Reportes</h1><div class="subtitle">Reportes financieros y fiscales</div></div>
+        <button class="btn">📥 Exportar Excel</button>
+      </div>
+
+      <div class="cards-grid">
+        <div class="module-card" style="border-left-color:#3b82f6"><div class="ico-square" style="background:#3b82f6"></div><h3>Balanza de Comprobación</h3><p>Estado de cuenta mensual.</p></div>
+        <div class="module-card" style="border-left-color:#10b981"><div class="ico-square" style="background:#10b981"></div><h3>Estado de Resultados</h3><p>Ingresos, costos y utilidad.</p></div>
+        <div class="module-card" style="border-left-color:#f59e0b"><div class="ico-square" style="background:#f59e0b"></div><h3>Flujo de Efectivo</h3><p>Entradas y salidas de efectivo.</p></div>
+        <div class="module-card" style="border-left-color:#8b5cf6"><div class="ico-square" style="background:#8b5cf6"></div><h3>DIOT</h3><p>Declaración informativa de operaciones con terceros.</p></div>
+        <div class="module-card" style="border-left-color:#ef4444"><div class="ico-square" style="background:#ef4444"></div><h3>Declaración Anual</h3><p>Resumen anual ISR.</p></div>
+        <div class="module-card" style="border-left-color:#6366f1"><div class="ico-square" style="background:#6366f1"></div><h3>Facturas por Cliente</h3><p>Detalle por cliente.</p></div>
+      </div>
+
+      <h2 class="section-title">📊 Resumen mensual</h2>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Mes</th><th>Ingresos</th><th>Egresos</th><th>Utilidad</th><th>ISR</th><th>IVA</th></tr></thead>
+          <tbody>
+            <tr><td>Febrero 2026</td><td>$265,000</td><td>$245,000</td><td style="color:var(--green-dark); font-weight:600;">$20,000</td><td>$3,000</td><td>$8,500</td></tr>
+            <tr><td>Marzo 2026</td><td>$298,000</td><td>$267,000</td><td style="color:var(--green-dark); font-weight:600;">$31,000</td><td>$4,650</td><td>$9,300</td></tr>
+            <tr><td>Abril 2026</td><td>$278,000</td><td>$259,000</td><td style="color:var(--green-dark); font-weight:600;">$19,000</td><td>$2,850</td><td>$7,800</td></tr>
+            <tr><td>Mayo 2026</td><td>$310,000</td><td>$278,000</td><td style="color:var(--green-dark); font-weight:600;">$32,000</td><td>$4,800</td><td>$9,500</td></tr>
+            <tr><td>Junio 2026</td><td>$305,000</td><td>$285,000</td><td style="color:var(--green-dark); font-weight:600;">$20,000</td><td>$3,000</td><td>$8,200</td></tr>
+            <tr style="background:#fef3c7;"><td><strong>Julio 2026</strong></td><td><strong>$320,000</strong></td><td><strong>$292,800</strong></td><td style="color:var(--green-dark); font-weight:700;">$27,200</td><td>$4,080</td><td>$9,750</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====================== Vistas placeholder genéricas ====================== -->
+    <div class="view" id="view-gastos">
+      <div class="topbar"><div><h1>Gastos</h1><div class="subtitle">Registro de gastos</div></div><button class="btn">+ Nuevo gasto</button></div>
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">Gastos del mes</div><div class="kpi-value red">$192,300</div></div>
+        <div class="kpi-card"><div class="kpi-label">Deducibles</div><div class="kpi-value green">$156,800</div></div>
+        <div class="kpi-card"><div class="kpi-label">No deducibles</div><div class="kpi-value orange">$35,500</div></div>
+      </div>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th>Monto</th><th>Deducible</th></tr></thead>
+          <tbody>
+            <tr><td>09/07/2026</td><td>Renta de oficina</td><td>Servicios</td><td>$25,000</td><td><span class="badge green">Sí</span></td></tr>
+            <tr><td>08/07/2026</td><td>Material de oficina</td><td>Insumos</td><td>$3,200</td><td><span class="badge green">Sí</span></td></tr>
+            <tr><td>05/07/2026</td><td>Combustible</td><td>Transporte</td><td>$5,500</td><td><span class="badge green">Sí</span></td></tr>
+            <tr><td>03/07/2026</td><td>Comida con cliente</td><td>Representación</td><td>$2,800</td><td><span class="badge yellow">50%</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="view" id="view-compras">
+      <div class="topbar"><div><h1>Compras</h1><div class="subtitle">Órdenes de compra a proveedores</div></div><button class="btn">+ Nueva orden</button></div>
+      <div class="empty-state"><div class="ico">🛒</div><h3>No hay órdenes de compra registradas</h3><p>Las compras a proveedores aparecerán aquí.</p></div>
+    </div>
+
+    <div class="view" id="view-inventario">
+      <div class="topbar"><div><h1>Inventario</h1><div class="subtitle">Productos y existencias</div></div><button class="btn">+ Nuevo producto</button></div>
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">Productos</div><div class="kpi-value">12</div></div>
+        <div class="kpi-card"><div class="kpi-label">Valor inventario</div><div class="kpi-value green">$185,000</div></div>
+        <div class="kpi-card"><div class="kpi-label">Stock bajo</div><div class="kpi-value red">3</div></div>
+      </div>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Código</th><th>Producto</th><th>Existencia</th><th>Precio</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td>P001</td><td>Cemento gris 50kg</td><td>120</td><td>$185</td><td><span class="badge green">Stock</span></td></tr>
+            <tr><td>P002</td><td>Varilla 3/8"</td><td>8</td><td>$95</td><td><span class="badge red">Bajo</span></td></tr>
+            <tr><td>P003</td><td>Block 15x20x40</td><td>500</td><td>$15</td><td><span class="badge green">Stock</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="view" id="view-bancos">
+      <div class="topbar"><div><h1>Bancos</h1><div class="subtitle">Cuentas bancarias y conciliación</div></div><button class="btn">+ Nueva cuenta</button></div>
+      <div class="kpi-grid kpi-grid-2">
+        <div class="kpi-card"><div class="kpi-label">Banorte ****4521</div><div class="kpi-value green">$716,000</div><div class="kpi-sub">Cuenta de operaciones</div></div>
+        <div class="kpi-card"><div class="kpi-label">Santander ****8830</div><div class="kpi-value green">$65,000</div><div class="kpi-sub">Fondo de emergencia</div></div>
+      </div>
+      <h2 class="section-title">Movimientos recientes</h2>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Fecha</th><th>Cuenta</th><th>Concepto</th><th>Monto</th><th>Tipo</th></tr></thead>
+          <tbody>
+            <tr><td>10/07/2026</td><td>Banorte</td><td>Depósito cliente</td><td style="color:var(--green-dark);">+$45,000</td><td><span class="badge green">Ingreso</span></td></tr>
+            <tr><td>09/07/2026</td><td>Banorte</td><td>Pago nómina</td><td style="color:var(--red);">−$78,500</td><td><span class="badge red">Egreso</span></td></tr>
+            <tr><td>08/07/2026</td><td>Santander</td><td>Aporte fondo</td><td style="color:var(--green-dark);">+$15,000</td><td><span class="badge blue">Transferencia</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="view" id="view-contabilidad">
+      <div class="topbar"><div><h1>Contabilidad</h1><div class="subtitle">Pólizas y libro diario</div></div><button class="btn">+ Nueva póliza</button></div>
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">Pólizas del mes</div><div class="kpi-value">142</div></div>
+        <div class="kpi-card"><div class="kpi-label">Cuentas activas</div><div class="kpi-value">87</div></div>
+        <div class="kpi-card"><div class="kpi-label">Conciliadas</div><div class="kpi-value green">138</div></div>
+      </div>
+      <div class="empty-state"><div class="ico">📒</div><h3>Pólizas contables</h3><p>Las pólizas del libro diario aparecerán aquí.</p></div>
+    </div>
+
+    <div class="view" id="view-tributario">
+      <div class="topbar"><div><h1>Tributario</h1><div class="subtitle">Obligaciones fiscales</div></div></div>
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">IVA por pagar</div><div class="kpi-value orange">$18,450</div><div class="kpi-sub">Vence 17/08</div></div>
+        <div class="kpi-card"><div class="kpi-label">ISR mensual</div><div class="kpi-value orange">$32,100</div><div class="kpi-sub">Vence 17/08</div></div>
+        <div class="kpi-card"><div class="kpi-label">DIOT</div><div class="kpi-value red">Pendiente</div><div class="kpi-sub">Vence 31/07</div></div>
+      </div>
+      <h2 class="section-title">📅 Calendario fiscal</h2>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Obligación</th><th>Periodo</th><th>Vencimiento</th><th>Monto</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td>IVA mensual</td><td>Junio 2026</td><td>17/07/2026</td><td>$8,200</td><td><span class="badge green">Pagado</span></td></tr>
+            <tr><td>ISR mensual</td><td>Junio 2026</td><td>17/07/2026</td><td>$3,000</td><td><span class="badge green">Pagado</span></td></tr>
+            <tr><td>IVA mensual</td><td>Julio 2026</td><td>17/08/2026</td><td>$18,450</td><td><span class="badge yellow">Pendiente</span></td></tr>
+            <tr><td>ISR mensual</td><td>Julio 2026</td><td>17/08/2026</td><td>$32,100</td><td><span class="badge yellow">Pendiente</span></td></tr>
+            <tr><td>DIOT</td><td>Julio 2026</td><td>31/07/2026</td><td>—</td><td><span class="badge red">Urgente</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="view" id="view-diot">
+      <div class="topbar"><div><h1>DIOT</h1><div class="subtitle">Declaración Informativa de Operaciones con Terceros</div></div><button class="btn"> Generar DIOT</button></div>
+      <div class="empty-state"><div class="ico">📊</div><h3>DIOT de Julio 2026 pendiente</h3><p>Vence el 31 de julio. Genera la declaración a partir de tus facturas recibidas.</p></div>
+    </div>
+
+    <div class="view" id="view-crm">
+      <div class="topbar"><div><h1>CRM</h1><div class="subtitle">Gestión de relaciones con clientes</div></div><button class="btn">+ Nueva oportunidad</button></div>
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi-card"><div class="kpi-label">Oportunidades activas</div><div class="kpi-value">7</div></div>
+        <div class="kpi-card"><div class="kpi-label">Pipeline</div><div class="kpi-value green">$450,000</div></div>
+        <div class="kpi-card"><div class="kpi-label">Tasa conversión</div><div class="kpi-value">32%</div></div>
+      </div>
+    </div>
+
+    <div class="view" id="view-usuarios">
+      <div class="topbar"><div><h1>Usuarios</h1><div class="subtitle">Gestión de usuarios del sistema</div></div><button class="btn">+ Nuevo usuario</button></div>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Empresa</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Hernández (Admin)</strong></td><td>admin@hernandez.mx</td><td><span class="badge purple">admin</span></td><td>Construcciones Hernández SAC</td><td><span class="badge green">Activo</span></td></tr>
+            <tr><td><strong>María López</strong></td><td>maria@hernandez.mx</td><td><span class="badge blue">contador</span></td><td>Construcciones Hernández SAC</td><td><span class="badge green">Activo</span></td></tr>
+            <tr><td><strong>Juan Pérez</strong></td><td>juan@hernandez.mx</td><td><span class="badge gray">usuario</span></td><td>Ingeniería y Diseño del Norte</td><td><span class="badge green">Activo</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Modal genérico -->
+<div class="modal-overlay" id="modal-empresa">
+  <div class="modal">
+    <div class="modal-header"><h3>Nueva empresa</h3><button class="modal-close" onclick="closeModal('modal-empresa')">✕</button></div>
+    <div class="form-group"><label>Nombre</label><input class="form-control" placeholder="Razón social" /></div>
+    <div class="form-group"><label>RFC</label><input class="form-control" placeholder="12-13 caracteres" /></div>
+    <div class="form-group"><label>Régimen fiscal</label><select class="form-control"><option>Persona Moral</option><option>Persona Física</option></select></div>
+    <div class="form-group"><label>Código postal</label><input class="form-control" /></div>
+    <button class="btn" onclick="closeModal('modal-empresa')">Guardar</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-cliente">
+  <div class="modal">
+    <div class="modal-header"><h3>Nuevo cliente</h3><button class="modal-close" onclick="closeModal('modal-cliente')">✕</button></div>
+    <div class="form-group"><label>Nombre / Razón social</label><input class="form-control" /></div>
+    <div class="form-group"><label>RFC</label><input class="form-control" /></div>
+    <div class="form-group"><label>Uso CFDI</label><select class="form-control"><option>G03 - Gastos en general</option><option>G01 - Adquisición de mercancías</option><option>P01 - Por definir</option></select></div>
+    <div class="form-group"><label>Email</label><input class="form-control" type="email" /></div>
+    <div class="form-group"><label>Teléfono</label><input class="form-control" /></div>
+    <button class="btn" onclick="closeModal('modal-cliente')">Guardar</button>
+  </div>
+</div>
+
+<script>
+  // Navegación principal del sidebar
+  function switchView(viewName) {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const navItem = document.querySelector(`[data-view="${viewName}"]`);
+    const view = document.getElementById(`view-${viewName}`);
+    if (navItem) navItem.classList.add('active');
+    if (view) view.classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  document.querySelectorAll('.nav-item[data-view]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchView(item.dataset.view);
+    });
+  });
+
+  // Sub-tabs dentro de Finanzas
+  document.querySelectorAll('.tab[data-ftab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const parent = tab.closest('.view');
+      parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      parent.querySelectorAll('.fpanel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      const panel = document.getElementById(tab.dataset.ftab);
+      if (panel) panel.classList.add('active');
+    });
+  });
+
+  // Modales
+  function openModal(id) { document.getElementById(id).classList.add('show'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+  document.querySelectorAll('.modal-overlay').forEach(o => {
+    o.addEventListener('click', (e) => { if (e.target === o) o.classList.remove('show'); });
+  });
+</script>
+
+</body>
+</html>

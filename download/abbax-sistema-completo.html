@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ABBAX · Sistema Stark Completo</title>
+<style>
+  :root {
+    --bg-light: #faf5ff;
+    --bg-card: #ffffff;
+    --text: #1e293b;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --violet: #7c3aed;
+    --violet-dark: #5b21b6;
+    --fuchsia: #c026d3;
+    --cyan: #06b6d4;
+    --green: #10b981;
+    --red: #ef4444;
+    --orange: #f97316;
+    --amber: #f59e0b;
+    --blue: #3b82f6;
+  }
+  .dark {
+    --bg-light: #0f172a;
+    --bg-card: #1e293b;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg-light);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    transition: background 0.3s, color 0.3s;
+  }
+  .app { min-height: 100vh; }
+
+  /* Header */
+  .header {
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 30;
+    transition: background 0.3s;
+  }
+  .dark .header { background: rgba(15,23,42,0.85); }
+  .header-inner {
+    max-width: 1400px; margin: 0 auto; padding: 12px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .reactor-box {
+    background: #020617; border: 1px solid rgba(34,211,238,0.3);
+    border-radius: 12px; padding: 6px;
+    box-shadow: 0 0 10px rgba(6,182,212,0.2);
+  }
+  .reactor {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%,
+      #fff 0%, var(--cyan) 20%, var(--cyan) 35%,
+      rgba(6,182,212,0.4) 50%, rgba(124,58,237,0.2) 75%, transparent 90%);
+    position: relative;
+    animation: pulse 2.5s ease-in-out infinite;
+  }
+  .reactor::before, .reactor::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    border: 1.5px dashed rgba(6,182,212,0.5);
+    animation: spin 4s linear infinite;
+  }
+  .reactor::after {
+    inset: 4px; border-style: dotted; border-color: rgba(124,58,237,0.6);
+    animation: spin 3s linear infinite reverse;
+  }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .brand h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.04em; }
+  .brand p { font-size: 11px; color: var(--muted); }
+  .header-actions { display: flex; align-items: center; gap: 8px; }
+  .icon-btn {
+    width: 36px; height: 36px; border: 1px solid var(--border);
+    background: var(--bg-card); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text); font-size: 16px;
+    transition: all 0.2s;
+  }
+  .icon-btn:hover { border-color: var(--violet); color: var(--violet); }
+  .header-tag { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-left: 8px; }
+
+  /* Hero */
+  .hero {
+    max-width: 1400px; margin: 0 auto; padding: 24px 24px 8px;
+  }
+  .hero-card {
+    background: linear-gradient(135deg, #020617 0%, #4c1d95 50%, #831843 100%);
+    color: white; border-radius: 16px; padding: 28px;
+    box-shadow: 0 10px 30px rgba(124,58,237,0.2);
+    position: relative; overflow: hidden;
+  }
+  .hero-bg {
+    position: absolute; right: -40px; top: -40px;
+    width: 180px; height: 180px; opacity: 0.15; pointer-events: none;
+  }
+  .hero-content { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .hero-content h2 { font-size: 22px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .hero-content p { color: rgba(255,255,255,0.9); font-size: 14px; margin-top: 4px; max-width: 600px; }
+  .hero-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+  .hero-badge {
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(34,211,238,0.3);
+    padding: 6px 12px; border-radius: 999px; font-size: 11px;
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  /* Dashboard grid */
+  .dashboard {
+    max-width: 1400px; margin: 0 auto; padding: 24px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  @media (max-width: 1100px) { .dashboard { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px;
+    transition: background 0.3s, border-color 0.3s;
+  }
+  .card-title {
+    font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+    margin-bottom: 12px;
+  }
+  .card-title .ico { font-size: 16px; }
+
+  /* KPI grid personal */
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 12px;
+  }
+  @media (max-width: 700px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  .kpi {
+    background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid;
+    border-radius: 10px; padding: 10px;
+  }
+  .kpi-label { font-size: 10px; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+  .kpi-value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+  .kpi-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+  .kpi.violet { border-left-color: var(--violet); }
+  .kpi.violet .kpi-value, .kpi.violet .kpi-label { color: var(--violet); }
+  .kpi.green { border-left-color: var(--green); }
+  .kpi.green .kpi-value, .kpi.green .kpi-label { color: var(--green); }
+  .kpi.amber { border-left-color: var(--amber); }
+  .kpi.amber .kpi-value, .kpi.amber .kpi-label { color: var(--amber); }
+  .kpi.orange { border-left-color: var(--orange); }
+  .kpi.orange .kpi-value, .kpi.orange .kpi-label { color: var(--orange); }
+  .kpi.blue { border-left-color: var(--blue); }
+  .kpi.blue .kpi-value, .kpi.blue .kpi-label { color: var(--blue); }
+
+  /* Top tareas + recordatorios */
+  .two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .two-cols { grid-template-columns: 1fr; } }
+  .mini-card {
+    background: rgba(124,58,237,0.04); border-radius: 8px; padding: 10px;
+    border: 1px solid var(--border);
+  }
+  .dark .mini-card { background: rgba(124,58,237,0.1); }
+  .mini-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; gap: 4px; }
+  .item-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 0; }
+  .item-num { width: 18px; height: 18px; border-radius: 50%; color: white; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .item-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-meta { font-size: 10px; color: var(--muted); }
+
+  /* Fiscal panel */
+  .fiscal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .fiscal-kpi { border-radius: 10px; padding: 12px; border: 1px solid; }
+  .fiscal-kpi .label { font-size: 10px; text-transform: uppercase; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+  .fiscal-kpi .value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+  .fiscal-kpi .sub { font-size: 10px; color: var(--muted); }
+  .fiscal-kpi.emit { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.3); }
+  .fiscal-kpi.emit .label, .fiscal-kpi.emit .value { color: var(--green); }
+  .fiscal-kpi.recib { background: rgba(249,115,22,0.08); border-color: rgba(249,115,22,0.3); }
+  .fiscal-kpi.recib .label, .fiscal-kpi.recib .value { color: var(--orange); }
+  .fiscal-kpi.iva { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.2); }
+  .fiscal-kpi.iva .label, .fiscal-kpi.iva .value { color: var(--red); }
+  .fiscal-kpi.util { background: rgba(16,185,129,0.06); border-color: rgba(16,185,129,0.2); }
+  .fiscal-kpi.util .label, .fiscal-kpi.util .value { color: var(--green); }
+  .fiscal-kpi.util .value { color: var(--green); }
+
+  .month-selector { display: flex; align-items: center; gap: 8px; }
+  .month-btn { padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-card); border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--text); }
+  .month-label { font-size: 12px; font-weight: 600; min-width: 100px; text-align: center; }
+
+  /* Search */
+  .search-card { margin-bottom: 16px; }
+  .search-input {
+    width: 100%; padding: 10px 12px 10px 36px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-card); color: var(--text); font-size: 14px;
+  }
+  .search-wrap { position: relative; }
+  .search-ico { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+  .kbd { font-size: 10px; background: var(--border); padding: 2px 6px; border-radius: 4px; color: var(--muted); }
+
+  /* Chat panel */
+  .main-grid {
+    max-width: 1400px; margin: 0 auto; padding: 0 24px 24px;
+    display: grid; grid-template-columns: 3fr 2fr; gap: 20px;
+  }
+  @media (max-width: 1100px) { .main-grid { grid-template-columns: 1fr; } }
+
+  .chat-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+    height: 640px; display: flex; flex-direction: column;
+  }
+  .chat-header {
+    background: linear-gradient(135deg, var(--violet-dark) 0%, var(--fuchsia) 100%);
+    color: white; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .chat-header-left { display: flex; align-items: center; gap: 12px; }
+  .chat-reactor { width: 40px; height: 40px; background: rgba(2,6,23,0.4); border: 1px solid rgba(34,211,238,0.3); border-radius: 50%; padding: 4px; display: flex; align-items: center; justify-content: center; }
+  .chat-title { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .chat-badge { font-size: 10px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 999px; font-weight: 400; }
+  .chat-subtitle { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+  .chat-actions { display: flex; gap: 4px; }
+  .chat-action { padding: 6px 10px; background: rgba(255,255,255,0.1); border: none; color: white; border-radius: 6px; cursor: pointer; font-size: 12px; }
+
+  .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 85%; padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.5; }
+  .msg.user { align-self: flex-end; background: var(--violet); color: white; border-bottom-right-radius: 4px; }
+  .msg.assistant { align-self: flex-start; background: rgba(124,58,237,0.08); border-bottom-left-radius: 4px; }
+  .dark .msg.assistant { background: rgba(124,58,237,0.15); }
+  .msg.assistant strong { color: var(--violet); }
+  .dark .msg.assistant strong { color: #a78bfa; }
+  .tool-badge { display: inline-block; background: rgba(16,185,129,0.15); color: var(--green); font-size: 10px; padding: 2px 8px; border-radius: 999px; margin-top: 6px; border: 1px solid rgba(16,185,129,0.3); }
+
+  .chat-input-area { border-top: 1px solid var(--border); padding: 12px; }
+  .chat-input-row { display: flex; gap: 8px; align-items: center; }
+  .mic-btn {
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: var(--violet); color: white; cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 18px;
+  }
+  .chat-input {
+    flex: 1; padding: 8px 12px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--bg-card); color: var(--text); font-size: 14px;
+  }
+  .send-btn {
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: var(--violet); color: white; cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  .suggestions { padding: 0 12px 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .suggestion {
+    font-size: 11px; padding: 4px 10px; border-radius: 999px;
+    background: rgba(124,58,237,0.08); color: var(--violet);
+    border: 1px solid rgba(124,58,237,0.2); cursor: pointer; transition: all 0.2s;
+  }
+  .suggestion:hover { background: rgba(124,58,237,0.15); }
+
+  /* Side panels */
+  .side-panels { display: flex; flex-direction: column; gap: 16px; }
+  .side-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px;
+  }
+  .side-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .side-title .count { background: rgba(124,58,237,0.15); color: var(--violet); font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+
+  .task-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 6px; background: var(--bg-card); }
+  .task-row:hover { background: rgba(124,58,237,0.04); }
+  .checkbox { width: 16px; height: 16px; border: 1.5px solid var(--muted); border-radius: 4px; margin-top: 2px; cursor: pointer; flex-shrink: 0; }
+  .checkbox.done { background: var(--green); border-color: var(--green); }
+  .task-content { flex: 1; }
+  .task-title { font-size: 13px; font-weight: 500; }
+  .task-title.done { text-decoration: line-through; color: var(--muted); }
+  .task-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .priority { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+  .priority.urgente { background: rgba(239,68,68,0.15); color: var(--red); }
+  .priority.alta { background: rgba(249,115,22,0.15); color: var(--orange); }
+  .priority.media { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .voice-tag { font-size: 10px; }
+
+  .note-card {
+    border-radius: 8px; padding: 12px; border: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .note-card.amarillo { background: #fef3c7; border-color: #fde68a; }
+  .note-card.rosa { background: #fce7f3; border-color: #f9a8d4; }
+  .note-card.verde { background: #d1fae5; border-color: #6ee7b7; }
+  .note-card.azul { background: #dbeafe; border-color: #93c5fd; }
+  .note-card.morado { background: #ede9fe; border-color: #c4b5fd; }
+  .note-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .note-content { font-size: 12px; white-space: pre-wrap; }
+
+  .reminder-row { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 6px; }
+  .reminder-row.urgent { background: rgba(249,115,22,0.06); border-color: rgba(249,115,22,0.3); }
+  .reminder-icon { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .reminder-icon.urgent { background: var(--orange); color: white; }
+  .reminder-icon.normal { background: rgba(124,58,237,0.15); color: var(--violet); }
+  .reminder-content { flex: 1; }
+  .reminder-title { font-size: 13px; font-weight: 500; }
+  .reminder-time { font-size: 11px; color: var(--muted); }
+  .reminder-time.urgent { color: var(--orange); font-weight: 600; }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--bg-card); border-radius: 12px; padding: 24px;
+    max-width: 500px; width: 100%; max-height: 90vh; overflow-y: auto;
+    border: 1px solid var(--border);
+  }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .modal-header h3 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--muted); }
+  .shortcut-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+
+  /* Footer */
+  .footer { border-top: 1px solid var(--border); padding: 20px; text-align: center; color: var(--muted); font-size: 11px; }
+  .footer p { margin-top: 4px; }
+
+  /* Floating help */
+  .help-fab {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--violet); color: white;
+    width: 48px; height: 48px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; cursor: pointer; box-shadow: 0 4px 12px rgba(124,58,237,0.4);
+    z-index: 40; border: none;
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="reactor-box">
+          <div class="reactor"></div>
+        </div>
+        <div>
+          <h1>ABBAX</h1>
+          <p>Asistente IA Stark · GLM-4.6 + ElevenLabs</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" onclick="toggleShortcuts()" title="Atajos (Ctrl+/)">⌨️</button>
+        <button class="icon-btn" onclick="toggleDark()" title="Modo oscuro (Ctrl+D)" id="theme-btn">🌙</button>
+        <span class="header-tag">✨ Inteligencia fiscal · Personalidad Stark</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-card">
+      <div class="hero-bg">
+        <div class="reactor" style="width:100%;height:100%"></div>
+      </div>
+      <div class="hero-content">
+        <div>
+          <h2>⚡ Abbax en línea. Lista para trabajar.</h2>
+          <p>Toca el micrófono y pide lo que necesites. Audita facturas, calcula IVA, gestiona tareas, notas, recordatorios y más — todo con eficiencia Stark.</p>
+        </div>
+        <div class="hero-badges">
+          <span class="hero-badge">✅ 22 Tools</span>
+          <span class="hero-badge">📝 Fiscal</span>
+          <span class="hero-badge">🔔 Voz</span>
+          <span class="hero-badge">⚡ Dashboard</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD: Stats + Fiscal -->
+  <section class="dashboard">
+
+    <!-- PANEL PERSONAL (izquierda) -->
+    <div>
+      <div class="card">
+        <div class="card-title"><span class="ico">📊</span> Stats Personal</div>
+        <div class="kpi-grid">
+          <div class="kpi violet">
+            <div class="kpi-label">Pendientes</div>
+            <div class="kpi-value">2</div>
+            <div class="kpi-sub">2 urgentes</div>
+          </div>
+          <div class="kpi green">
+            <div class="kpi-label">Productividad</div>
+            <div class="kpi-value">0%</div>
+            <div class="kpi-sub">0/2 completadas</div>
+          </div>
+          <div class="kpi amber">
+            <div class="kpi-label">Notas</div>
+            <div class="kpi-value">2</div>
+            <div class="kpi-sub">En tablero</div>
+          </div>
+          <div class="kpi orange">
+            <div class="kpi-label">Recordatorios</div>
+            <div class="kpi-value">0</div>
+            <div class="kpi-sub">0 hoy</div>
+          </div>
+          <div class="kpi blue">
+            <div class="kpi-label">Chats hoy</div>
+            <div class="kpi-value">8</div>
+            <div class="kpi-sub">12 este mes</div>
+          </div>
+        </div>
+
+        <div class="two-cols">
+          <div class="mini-card">
+            <div class="mini-title">⚡ Top tareas prioritarias</div>
+            <div class="item-row">
+              <span class="item-num" style="background:#ef4444">1</span>
+              <span class="item-text">auditar facturas del SAT</span>
+              <span class="item-meta">URGENTE</span>
+            </div>
+            <div class="item-row">
+              <span class="item-num" style="background:#ef4444">2</span>
+              <span class="item-text">Llamar al contador</span>
+              <span class="item-meta">URGENTE</span>
+            </div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-title">⏰ Próximos recordatorios</div>
+            <div style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0">
+              Sin recordatorios próximos
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANEL FISCAL (derecha) -->
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span><span class="ico">🧮</span> Panel Fiscal</span>
+        <div class="month-selector">
+          <button class="month-btn">←</button>
+          <span class="month-label">Julio 2026</span>
+          <button class="month-btn">→</button>
+        </div>
+      </div>
+
+      <div class="fiscal-grid">
+        <div class="fiscal-kpi emit">
+          <div class="label">📈 Emitido</div>
+          <div class="value">$378,250</div>
+          <div class="sub">7 facturas · promedio $54,036</div>
+        </div>
+        <div class="fiscal-kpi recib">
+          <div class="label">📉 Recibido</div>
+          <div class="value">$60,399</div>
+          <div class="sub">7 facturas · promedio $8,628</div>
+        </div>
+        <div class="fiscal-kpi iva">
+          <div class="label">💰 IVA por pagar</div>
+          <div class="value">$36,497</div>
+          <div class="sub">Emitido − Acreditable</div>
+        </div>
+        <div class="fiscal-kpi util">
+          <div class="label">📊 Utilidad bruta</div>
+          <div class="value">$317,851</div>
+          <div class="sub">Ingresos − Gastos</div>
+        </div>
+      </div>
+
+      <div class="mini-title">🏆 Top clientes del periodo</div>
+      <div class="item-row">
+        <span class="item-num" style="background:rgba(124,58,237,0.2);color:var(--violet)">1</span>
+        <span class="item-text">Desarrollo Urbano del Bajío</span>
+        <span class="item-meta" style="color:var(--violet);font-weight:600">$211,000</span>
+      </div>
+      <div class="item-row">
+        <span class="item-num" style="background:rgba(124,58,237,0.2);color:var(--violet)">2</span>
+        <span class="item-text">Tania García López</span>
+        <span class="item-meta" style="color:var(--violet);font-weight:600">$86,250</span>
+      </div>
+      <div class="item-row">
+        <span class="item-num" style="background:rgba(124,58,237,0.2);color:var(--violet)">3</span>
+        <span class="item-text">Constructora Norte SA</span>
+        <span class="item-meta" style="color:var(--violet);font-weight:600">$126,600</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- BÚSQUEDA GLOBAL -->
+  <section style="max-width:1400px;margin:0 auto;padding:0 24px 16px">
+    <div class="card search-card">
+      <div class="search-wrap">
+        <span class="search-ico">🔍</span>
+        <input class="search-input" placeholder="Buscar en tareas, notas y recordatorios... (Ctrl+K)" id="search-input" />
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:6px">
+        <span class="kbd">Ctrl + K</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAIN GRID: Chat + Side panels -->
+  <section class="main-grid">
+
+    <!-- CHAT -->
+    <div class="chat-card">
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <div class="chat-reactor">
+            <div class="reactor" style="width:32px;height:32px"></div>
+          </div>
+          <div>
+            <div class="chat-title">ABBAX <span class="chat-badge">🔊 TTS</span></div>
+            <div class="chat-subtitle">En línea · Lista para trabajar</div>
+          </div>
+        </div>
+        <div class="chat-actions">
+          <button class="chat-action">🔊</button>
+          <button class="chat-action">⚙️</button>
+          <button class="chat-action">Limpiar</button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages">
+        <div class="msg assistant">
+          ⚡ <strong>Abbax en línea</strong>. A ver, Jefe, qué desastre tenemos hoy. Yo puedo calcular la órbita de un satélite mientras reviso tus pendientes, así que dime rápido qué necesitas.
+        </div>
+        <div class="msg user">Dame el resumen fiscal de este mes</div>
+        <div class="msg assistant">
+          <strong>Resumen Fiscal - Julio 2026:</strong><br><br>
+          📊 <strong>Emisión de Facturas:</strong><br>
+          • 7 facturas emitidas por <strong>$378,250 MXN</strong><br>
+          • IVA generado: <strong>$44,647.93 MXN</strong><br><br>
+          📥 <strong>Facturas Recibidas:</strong><br>
+          • 7 facturas recibidas por <strong>$60,399 MXN</strong><br>
+          • IVA acreditable: <strong>$8,150.94 MXN</strong><br><br>
+          💰 <strong>Resultado Fiscal:</strong><br>
+          • <strong>IVA por pagar:</strong> $36,496.99 MXN<br>
+          • <strong>Utilidad bruta:</strong> $317,851 MXN<br><br>
+          No está mal, Jefe. Tu utilidad bruta es sólida, pero ese IVA pendiente está gritando tu nombre. ¿Quieres que te ayude a optimizar deducciones para reducir ese impuesto?
+          <div class="tool-badge">✓ resumen_fiscal</div>
+        </div>
+        <div class="msg user">Calcula 15 por ciento de 2500</div>
+        <div class="msg assistant">
+          Ni siquiera tuve que esforzarme. Son <strong>375</strong>. ¿Algo más o ya puedo volver a salvar el mundo fiscal?
+          <div class="tool-badge">✓ calcular</div>
+        </div>
+        <div class="msg user">Convierte 500 dólares a pesos</div>
+        <div class="msg assistant">
+          Fácil. $500 USD = <strong>$8,750.00 MXN</strong>. A una tasa de 17.5. Ojalá todos tus impuestos fueran tan directos como esta conversión, ¿no crees, Jefe?
+          <div class="tool-badge">✓ convertir_moneda</div>
+        </div>
+        <div class="msg user">Dame una frase motivacional</div>
+        <div class="msg assistant">
+          ⚡ <strong>"Yo construí esto en una cueva. Tú puedes construir lo que sea en tu oficina."</strong><br><br>
+          Considera eso la próxima vez que un formulario del SAT te haga sentir pequeño.
+          <div class="tool-badge">✓ frase_motivacional</div>
+        </div>
+      </div>
+
+      <div class="suggestions">
+        <span class="suggestion" onclick="sendMsg('Crea una tarea urgente: Llamar al contador')">Crea tarea urgente</span>
+        <span class="suggestion" onclick="sendMsg('Anota: comprar leche y pan')">Anota compra</span>
+        <span class="suggestion" onclick="sendMsg('Calcula IVA de 5000')">Calcula IVA</span>
+        <span class="suggestion" onclick="sendMsg('Busca facturas RFC GALT')">Busca por RFC</span>
+        <span class="suggestion" onclick="sendMsg('¿Cómo voy con mis estadísticas?')">Mis stats</span>
+      </div>
+
+      <div class="chat-input-area">
+        <div class="chat-input-row">
+          <button class="mic-btn" title="Hablar">🎤</button>
+          <input class="chat-input" placeholder="Escribe o toca el micrófono" id="chat-input" onkeypress="if(event.key==='Enter')sendMsg(this.value)" />
+          <button class="send-btn" onclick="sendMsg(document.getElementById('chat-input').value)">→</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIDE PANELS -->
+    <div class="side-panels">
+
+      <!-- Tareas -->
+      <div class="side-card">
+        <div class="side-title">
+          ✅ Tareas <span class="count">2</span>
+        </div>
+        <div style="display:flex;gap:4px;margin-bottom:10px">
+          <button style="background:var(--violet);color:white;border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">Pendientes</button>
+          <button style="background:rgba(124,58,237,0.08);color:var(--violet);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">Completadas</button>
+          <button style="background:rgba(124,58,237,0.08);color:var(--violet);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">Todas</button>
+        </div>
+
+        <div class="task-row">
+          <div class="checkbox"></div>
+          <div class="task-content">
+            <div class="task-title">auditar facturas del SAT</div>
+            <div class="task-meta">
+              <span class="priority urgente">urgente</span>
+              <span class="voice-tag">🎤</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="task-row">
+          <div class="checkbox"></div>
+          <div class="task-content">
+            <div class="task-title">Llamar al contador</div>
+            <div class="task-meta">
+              <span class="priority urgente">urgente</span>
+              <span class="voice-tag">🎤</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recordatorios -->
+      <div class="side-card">
+        <div class="side-title">🔔 Recordatorios</div>
+        <div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">
+          🔔<br>Sin recordatorios próximos<br>
+          <span style="font-size:11px">Di: <em>"Recuérdame..."</em></span>
+        </div>
+      </div>
+
+      <!-- Notas -->
+      <div class="side-card">
+        <div class="side-title">📝 Notas <span class="count">2</span></div>
+
+        <div class="note-card verde">
+          <div class="note-title">🛒 Lista de compras (5)</div>
+          <div class="note-content">1. pan
+2. leche
+3. huevos
+4. jabon
+5. fruta</div>
+        </div>
+
+        <div class="note-card amarillo">
+          <div class="note-title">Compras del supermercado</div>
+          <div class="note-content">comprar leche y pan</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <p><strong>Abbax</strong> · Next.js 16 + GLM-4.6 + ElevenLabs · Personalidad Stark</p>
+    <p>22 tools activas · Módulo fiscal integrado · Modo oscuro · Atajos: Ctrl+K (búsqueda) · Ctrl+D (dark) · Ctrl+/ (ayuda)</p>
+  </footer>
+</div>
+
+<!-- Modal atajos -->
+<div class="modal-overlay" id="shortcuts-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>⌨️ Atajos de teclado</h3>
+      <button class="modal-close" onclick="toggleShortcuts()">×</button>
+    </div>
+    <div class="shortcut-row"><span>🔍 Búsqueda global</span><span class="kbd">Ctrl + K</span></div>
+    <div class="shortcut-row"><span>🌙 Modo oscuro / claro</span><span class="kbd">Ctrl + D</span></div>
+    <div class="shortcut-row"><span>⌨️ Mostrar esta ayuda</span><span class="kbd">Ctrl + /</span></div>
+    <div class="shortcut-row"><span>🚪 Cerrar diálogo</span><span class="kbd">Esc</span></div>
+    <p style="font-size:12px;color:var(--muted);margin-top:16px">
+      Abbax también responde a comandos de voz como <em>"crea una tarea"</em>, <em>"audita mis facturas"</em>, <em>"cuánto debo de IVA"</em>.
+    </p>
+  </div>
+</div>
+
+<button class="help-fab" onclick="toggleShortcuts()" title="Ayuda">?</button>
+
+<script>
+  function toggleDark() {
+    document.body.classList.toggle('dark');
+    const btn = document.getElementById('theme-btn');
+    btn.textContent = document.body.classList.contains('dark') ? '☀️' : '🌙';
+    localStorage.setItem('abbax-theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+  }
+
+  function toggleShortcuts() {
+    document.getElementById('shortcuts-modal').classList.toggle('show');
+  }
+
+  function sendMsg(text) {
+    if (!text || !text.trim()) return;
+    const msgs = document.getElementById('messages');
+    const userMsg = document.createElement('div');
+    userMsg.className = 'msg user';
+    userMsg.textContent = text;
+    msgs.appendChild(userMsg);
+    document.getElementById('chat-input').value = '';
+
+    // Respuesta simulada de Abbax
+    setTimeout(() => {
+      const resp = document.createElement('div');
+      resp.className = 'msg assistant';
+      const lower = text.toLowerCase();
+
+      if (lower.includes('tarea') || lower.includes('crea')) {
+        resp.innerHTML = 'Listo, agregado al arsenal. Próximo objetivo. <div class="tool-badge">✓ crear_tarea</div>';
+      } else if (lower.includes('iva')) {
+        resp.innerHTML = '🧮 <strong>$5,000 + IVA 16% ($800) = $5,800 MXN</strong>. Ni siquiera tuve que esforzarme. <div class="tool-badge">✓ calcular_iva</div>';
+      } else if (lower.includes('rfc')) {
+        resp.innerHTML = '🔎 Encontré <strong>3 facturas</strong> del RFC GALT (Tania García López). Total: <strong>$86,250 MXN</strong>. <div class="tool-badge">✓ buscar_factura_rfc</div>';
+      } else if (lower.includes('stats') || lower.includes('estadístic') || lower.includes('como voy')) {
+        resp.innerHTML = '📊 Stats: <strong>2 pendientes</strong> (2 urgentes), 0 completadas, 2 notas, 0 recordatorios próximos. Productividad: <strong>0%</strong>. Hoy llevas 8 conversaciones conmigo. <div class="tool-badge">✓ estadisticas</div>';
+      } else if (lower.includes('anota') || lower.includes('nota')) {
+        resp.innerHTML = '📝 Nota creada. Consideralo registrado, Jefe. <div class="tool-badge">✓ crear_nota</div>';
+      } else if (lower.includes('calcula')) {
+        resp.innerHTML = '🧮 Ni siquiera tuve que esforzarme. <div class="tool-badge">✓ calcular</div>';
+      } else {
+        resp.innerHTML = 'Consideralo resuelto, Jefe. ¿Algo más o ya puedo volver a salvar el mundo fiscal?';
+      }
+      msgs.appendChild(resp);
+      msgs.scrollTop = msgs.scrollHeight;
+    }, 800);
+
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  // Atajos de teclado
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+      e.preventDefault();
+      toggleDark();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      document.getElementById('search-input').focus();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+      e.preventDefault();
+      toggleShortcuts();
+    }
+    if (e.key === 'Escape') {
+      document.getElementById('shortcuts-modal').classList.remove('show');
+    }
+  });
+
+  // Cerrar modal al hacer click fuera
+  document.getElementById('shortcuts-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'shortcuts-modal') toggleShortcuts();
+  });
+
+  // Aplicar tema guardado
+  if (localStorage.getItem('abbax-theme') === 'dark') {
+    document.body.classList.add('dark');
+    document.getElementById('theme-btn').textContent = '☀️';
+  }
+</script>
+
+</body>
+</html>
