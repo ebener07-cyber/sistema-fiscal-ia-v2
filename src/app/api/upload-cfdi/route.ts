@@ -135,8 +135,11 @@ export async function POST(req: NextRequest) {
       empId = primera.id;
     }
 
-    // Carpeta de uploads
-    const uploadDir = path.join(process.cwd(), 'uploads', 'cfdi', direccion);
+    // Carpeta de uploads — usar /tmp en Vercel (sistema de archivos de solo lectura excepto /tmp)
+     // Carpeta de uploads - usar /tmp en Vercel (sistema de archivos de solo lectura)
+    const isVercel = !!process.env.VERCEL;
+    const uploadBase = isVercel ? '/tmp' : process.cwd();
+    const uploadDir = path.join(uploadBase, 'uploads', 'cfdi', direccion);
     if (!existsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true });
     }

@@ -41,7 +41,9 @@ export async function POST(req: NextRequest) {
       empId = primera.id;
     }
 
-    const uploadDir = path.join(process.cwd(), 'uploads', 'imss');
+    const isVercel = !!process.env.VERCEL;
+    const uploadBase = isVercel ? '/tmp' : process.cwd();
+    const uploadDir = path.join(uploadBase, 'uploads', 'imss');
     if (!existsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true });
     }
@@ -70,7 +72,9 @@ export async function POST(req: NextRequest) {
 
 /** GET /api/upload-imss — lista PDFs guardados */
 export async function GET() {
-  const uploadDir = path.join(process.cwd(), 'uploads', 'imss');
+  const isVercel = !!process.env.VERCEL;
+    const uploadBase = isVercel ? '/tmp' : process.cwd();
+    const uploadDir = path.join(uploadBase, 'uploads', 'imss');
   if (!existsSync(uploadDir)) {
     return NextResponse.json({ archivos: [] });
   }

@@ -44,7 +44,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Guardar el archivo
-    const uploadDir = path.join(process.cwd(), 'uploads', 'estados-cuenta');
+    const isVercel = !!process.env.VERCEL;
+    const uploadBase = isVercel ? '/tmp' : process.cwd();
+    const uploadDir = path.join(uploadBase, 'uploads', 'estados-cuenta');
     if (!existsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true });
     }
@@ -158,7 +160,9 @@ export async function POST(req: NextRequest) {
 
 /** GET /api/upload-estado-cuenta — lista estados de cuenta guardados */
 export async function GET() {
-  const uploadDir = path.join(process.cwd(), 'uploads', 'estados-cuenta');
+  const isVercel = !!process.env.VERCEL;
+    const uploadBase = isVercel ? '/tmp' : process.cwd();
+    const uploadDir = path.join(uploadBase, 'uploads', 'estados-cuenta');
   if (!existsSync(uploadDir)) {
     return NextResponse.json({ archivos: [] });
   }

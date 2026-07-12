@@ -30,7 +30,9 @@ export async function POST(req: NextRequest) {
       empId = primera.id;
     }
 
-    const uploadDir = path.join(process.cwd(), 'uploads', 'infonavit');
+    const isVercel = !!process.env.VERCEL;
+    const uploadBase = isVercel ? '/tmp' : process.cwd();
+    const uploadDir = path.join(uploadBase, 'uploads', 'infonavit');
     if (!existsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true });
     }
@@ -55,7 +57,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  const uploadDir = path.join(process.cwd(), 'uploads', 'infonavit');
+  const isVercel = !!process.env.VERCEL;
+    const uploadBase = isVercel ? '/tmp' : process.cwd();
+    const uploadDir = path.join(uploadBase, 'uploads', 'infonavit');
   if (!existsSync(uploadDir)) {
     return NextResponse.json({ archivos: [] });
   }
