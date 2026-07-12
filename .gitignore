@@ -50,9 +50,5 @@ test
 prompt
 
 server.log
-
-# Skills - IMPORTANTE: NO ignorar skills/auditoria-fiscal
-# Contiene las leyes procesadas que Abbax necesita
-/skills/auditoria-fiscal/laws/*.json
-!/skills/auditoria-fiscal/laws/_indice.json
-!/skills/auditoria-fiscal/laws/*.lite.json
+# Skills directory
+/skills/

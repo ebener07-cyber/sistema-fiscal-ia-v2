@@ -155,8 +155,8 @@ export async function POST(req: NextRequest) {
           send({ type: 'articulos_cargados', count: totalArticulos });
           send({ type: 'thinking', content: 'Analizando leyes...' });
 
-          const ZAI = (await import('z-ai-web-dev-sdk')).default;
-          const zai = await ZAI.create();
+          const { getZAI } = await import('@/lib/zai');
+          const zai = await getZAI();
 
           const respuesta = await zai.chat.completions.create({
             model: 'glm-4.6',

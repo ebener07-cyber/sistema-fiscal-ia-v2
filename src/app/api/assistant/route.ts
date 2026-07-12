@@ -811,8 +811,8 @@ async function ejecutarTool(name: string, args: any): Promise<{ success: boolean
         // Esta tool es especial: hace una llamada interna a /api/auditoria-fiscal
         // y devuelve la respuesta del LLM con contexto legal.
         try {
-          const ZAI = (await import('z-ai-web-dev-sdk')).default;
-          const zai = await ZAI.create();
+          const { getZAI } = await import('@/lib/zai');
+          const zai = await getZAI();
           const { readFile } = await import('fs/promises');
           const path = (await import('path')).default;
           const LAWS_DIR = path.join(process.cwd(), 'skills', 'auditoria-fiscal', 'laws');
@@ -995,8 +995,8 @@ export async function POST(req: NextRequest) {
         try {
           send({ type: 'thinking', content: 'Procesando...' });
 
-          const ZAI = (await import('z-ai-web-dev-sdk')).default;
-          const zai = await ZAI.create();
+          const { getZAI } = await import('@/lib/zai');
+          const zai = await getZAI();
 
           const mensajesLlm: any[] = [
             { role: 'system', content: SYSTEM_PROMPT },

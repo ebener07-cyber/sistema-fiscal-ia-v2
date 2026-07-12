@@ -1,38 +1,31 @@
-# 🚀 Sistema Fiscal IA + Abbax — Guía de Deploy en Vercel
+# 🚀 Sistema Fiscal IA + Abbax — ERP Completo
 
-ERP fiscal completo con 20 módulos + asistente IA por voz (Abbax) con personalidad Tony Stark.
+ERP fiscal mexicano con 24 módulos, asistente IA por voz (Abbax), RAG con 9 leyes fiscales, y deploy listo para Vercel.
 
 ## 📦 Stack
-
-- **Frontend**: Next.js 16 + Tailwind CSS + shadcn/ui
-- **Backend**: API Routes Next.js
-- **BD**: Prisma ORM (SQLite en dev, PostgreSQL en prod)
-- **IA**: GLM-4.6 vía z-ai-web-dev-sdk (22 tools)
-- **Voz**: ElevenLabs (grave Stark) + Web Speech API fallback
+- Next.js 16 + Tailwind CSS + shadcn/ui
+- Prisma ORM (SQLite en dev, PostgreSQL en Vercel)
+- GLM-4.6 vía z-ai-web-dev-sdk (23 tools)
+- ElevenLabs (voz Stark) + Web Speech API fallback
+- RAG con 9 leyes fiscales (3,301 artículos)
 
 ## 🛠️ Setup local
 
 ```bash
-# 1. Instalar dependencias
 bun install
-
-# 2. Configurar variables de entorno
 cp .env.example .env
-# Edita .env y agrega tu ZAI_API_KEY
+# Edita .env con tu DATABASE_URL y ZAI_API_KEY
 
-# 3. Crear base de datos
+# SQLite para desarrollo local:
+# En prisma/schema.prisma, asegúrate de que provider = "sqlite"
+# DATABASE_URL="file:./db/custom.db"
+
 bun run db:push
-
-# 4. Cargar datos de ejemplo
 bun run db:seed
-
-# 5. Iniciar servidor
 bun run dev
 ```
 
-Abre http://localhost:3000
-
-## ☁️ Deploy en Vercel (5 pasos)
+## ☁️ Deploy en Vercel
 
 ### 1. Subir a GitHub
 ```bash
@@ -40,172 +33,50 @@ git init
 git add .
 git commit -m "Sistema Fiscal IA + Abbax"
 git branch -M main
-git remote add origin https://github.com/tu-usuario/sistema-fiscal-ia.git
+git remote add origin https://github.com/TU_USUARIO/sistema-fiscal-ia.git
 git push -u origin main
 ```
 
-### 2. Crear base de datos PostgreSQL
-
-Recomendado: **Neon** (gratis, serverless)
-1. Ve a https://neon.tech → crea cuenta
+### 2. Crear BD PostgreSQL en Neon
+1. Ve a https://neon.tech → crea cuenta gratis
 2. Crea un proyecto → copia la `DATABASE_URL`
-3. Guarda el string de conexión (formato `postgresql://...`)
 
-### 3. Importar en Vercel
-
-1. Ve a https://vercel.com → New Project
-2. Importa tu repo de GitHub
-3. Vercel detecta Next.js automáticamente
-
-### 4. Configurar variables de entorno
-
-En Vercel → Settings → Environment Variables, agrega:
-
-| Variable | Valor |
-|----------|-------|
-| `DATABASE_URL` | `postgresql://...` (de Neon) |
-| `ZAI_API_KEY` | Tu API key de Z.AI |
-| `ELEVENLABS_API_KEY` | Tu API key de ElevenLabs (opcional) |
-| `ELEVENLABS_VOICE_ID` | `pNInz6obpgDQGcFmaJgB` (Adam) |
-
-### 5. Cambiar Prisma a PostgreSQL
-
-Edita `prisma/schema.prisma`:
-
+### 3. Cambiar Prisma a PostgreSQL
+En `prisma/schema.prisma`, cambia:
 ```prisma
 datasource db {
-  provider = "postgresql"  // ← cambiar de "sqlite"
+  provider = "postgresql"  # ← cambiar de "sqlite"
   url      = env("DATABASE_URL")
 }
 ```
+Haz commit y push.
 
-Haz commit y push:
+### 4. Importar en Vercel
+1. https://vercel.com → New Project → importa tu repo
+2. Environment Variables:
+   - `DATABASE_URL` → string de Neon
+   - `ZAI_API_KEY` → tu API key de Z.AI
+   - `ELEVENLABS_API_KEY` → (opcional) tu key de ElevenLabs
+3. Deploy
 
+### 5. Inicializar BD en producción
 ```bash
-git add prisma/schema.prisma
-git commit -m "Switch to PostgreSQL for production"
-git push
-```
-
-Vercel hará deploy automático. ✅
-
-### 6. Inicializar base de datos en producción
-
-Después del primer deploy, ejecuta el seed en producción:
-
-```bash
-# Instalar Vercel CLI
 npm i -g vercel
-
-# Login y link
 vercel login
 vercel link
-
-# Ejecutar migrate
 vercel env pull .env.production
-npx prisma migrate deploy
-npx prisma db seed  # o ejecuta bun run db:seed con DATABASE_URL de prod
+npx prisma db push
+bun run scripts/seed-completo.ts
 ```
 
-## 🎯 Módulos incluidos (20)
+### 6. Login
+- `admin@hernandez.mx` / `admin123`
 
-### Catálogos
-- Clientes (RFC, saldo, facturación)
-- Proveedores (RFC, servicio, saldos)
-- Empleados (RH, salarios, altas)
+## 📊 Módulos (24)
+Dashboard, Empresas, Clientes, Proveedores, Empleados, Facturación CFDI, Nómina, Compras, Inventario, Bancos, Contabilidad, SAT, IA Fiscal, Auditoría Fiscal (RAG), IMSS, INFONAVIT, Tributario, DIOT, INEGI, Finanzas, CRM, Reportes, Balance General, Abbax, Admin
 
-### Operación
-- Facturación CFDI (emitidas/recibidas)
-- Nómina (recibos CFDI)
-- Compras (órdenes de compra)
-- Inventario (productos, stock)
-- Bancos (cuentas, movimientos)
-- Contabilidad (pólizas)
-
-### Fiscal
-- SAT / Descarga masiva
-- IA Fiscal (simuladores ISR, IVA, PTU)
-- Tributario (calendario de obligaciones)
-
-### Análisis
-- Reestructura Financiera (avalancha de deudas)
-- CRM (oportunidades, pipeline)
-- Reportes (gráficas, mensual)
-
-### Asistente IA
-- **Abbax** · 22 tools + voz Stark + personalidad Tony Stark
-
-## 🛠️ Scripts disponibles
-
-```bash
-bun run dev        # Servidor desarrollo
-bun run build      # Build producción
-bun run lint       # ESLint
-bun run db:push    # Aplicar schema a BD
-bun run db:generate # Regenerar Prisma client
-bun run db:seed    # Cargar datos de ejemplo
-```
-
-## 🔧 APIs REST disponibles
-
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/api/stats` | GET | KPIs globales del dashboard |
-| `/api/facturas` | GET | Lista facturas con filtros |
-| `/api/clientes` | GET | Lista clientes |
-| `/api/proveedores` | GET | Lista proveedores |
-| `/api/empleados` | GET | Lista empleados |
-| `/api/nomina` | GET | Recibos de nómina |
-| `/api/compras` | GET | Órdenes de compra |
-| `/api/inventario` | GET | Productos |
-| `/api/bancos` | GET | Cuentas y movimientos |
-| `/api/polizas` | GET | Pólizas contables |
-| `/api/crm` | GET | Oportunidades CRM |
-| `/api/assistant` | POST | Chat con Abbax (SSE streaming) |
-| `/api/speak` | POST | Text-to-Speech con ElevenLabs |
-| `/api/tareas` | GET/POST | CRUD tareas Abbax |
-| `/api/notas` | GET/POST | CRUD notas Abbax |
-| `/api/recordatorios` | GET/POST | CRUD recordatorios |
-| `/api/conversaciones` | GET/DELETE | Historial chat Abbax |
-| `/api/buscar` | GET | Búsqueda global |
-
-## 🎤 Configurar voz Stark de Abbax
-
-1. Crea cuenta en https://elevenlabs.io (gratis, 10K chars/mes)
-2. Settings → API Keys → copia tu key
-3. Pégala en `.env` (o variables de entorno de Vercel):
-   ```
-   ELEVENLABS_API_KEY=tu_key_aqui
-   ```
-4. Reinicia el servidor
-5. Activa el botón 🔊 en la esquina superior del chat de Abbax
-6. Pídele algo: "Dame el resumen fiscal" → escucharás voz Stark
-
-## 🐛 Troubleshooting
-
-### "Cannot find module '@prisma/client'"
-```bash
-bun run db:generate
-```
-
-### "Database connection error" en Vercel
-- Verifica que `DATABASE_URL` apunta a PostgreSQL (no SQLite)
-- Verifica que el schema dice `provider = "postgresql"`
-
-### Herramientas de Abbax no responden
-- Verifica `ZAI_API_KEY` en variables de entorno
-- Revisa logs en Vercel → Functions → /api/assistant
-
-### Voz de Abbax no suena
-- Sin ElevenLabs: usa fallback Web Speech (Chrome/Edge escritorio)
-- Con ElevenLabs: verifica `ELEVENLABS_API_KEY` y que tengas crédito
-
-## 📞 Soporte
-
-- Documentación completa: ver código comentado
-- Issues: crea un issue en GitHub
-- Stack: Next.js 16 + Prisma + Z.AI + ElevenLabs
-
-## 📄 Licencia
-
-MIT — Libre uso comercial y personal.
+## ⚡ Abbax — Asistente IA Stark
+- 23 tools activas
+- Voz con ElevenLabs (grave tipo Tony Stark)
+- RAG con 9 leyes fiscales mexicanas
+- Personalidad sarcástica pero precisa

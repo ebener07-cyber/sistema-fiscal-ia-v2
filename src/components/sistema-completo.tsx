@@ -12,12 +12,9 @@ import {
   BookOpen, Satellite, Bot, Scale, ClipboardList, BarChart3, MessageSquare,
   Moon, Sun, Menu, Search, Pin, StickyNote, AlertTriangle, Clock,
   Upload, FileSpreadsheet, Heart, Home as HomeIcon, Plus, ShieldCheck,
-  Settings, KeyRound, Trash2, ShieldAlert, Lock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
-import { useEmpresa } from '@/components/empresa-provider';
-import { useRouter } from 'next/navigation';
 
 // ====================== TIPOS ======================
 interface Stats {
@@ -76,7 +73,6 @@ const NAV = [
     ],
   },
   { section: 'Asistente IA', items: [{ id: 'abbax', label: 'Abbax (Stark)', icon: Zap }] },
-  { section: 'Administración', items: [{ id: 'admin', label: 'Panel Admin', icon: Settings, adminOnly: true }] },
 ];
 
 // ====================== COMPONENTE PRINCIPAL ======================
@@ -86,21 +82,6 @@ export function SistemaCompleto() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [abbaxOpen, setAbbaxOpen] = useState(false);
   const { theme, toggle } = useTheme();
-  const { empresa, empresas, setEmpresa, loading: empLoading } = useEmpresa();
-  const router = useRouter();
-  const [usuario, setUsuario] = useState<any>(null);
-
-  useEffect(() => {
-    fetch('/api/auth/me').then(r => r.json()).then(d => {
-      if (d.usuario) setUsuario(d.usuario);
-    }).catch(() => {});
-  }, []);
-
-  const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
-  };
 
   const cargarStats = useCallback(async () => {
     try {
@@ -142,16 +123,12 @@ export function SistemaCompleto() {
         </div>
 
         <nav className="p-3">
-          {NAV.map((sec) => {
-            // Filtrar items adminOnly si el usuario no es admin
-            const items = sec.items.filter((item: any) => !item.adminOnly || usuario?.rol === 'admin');
-            if (items.length === 0) return null;
-            return (
+          {NAV.map((sec) => (
             <div key={sec.section} className="mb-4">
               <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold px-3 mb-1">
                 {sec.section}
               </div>
-              {items.map((item) => {
+              {sec.items.map((item) => {
                 const Icon = item.icon;
                 return (
                   <button
@@ -164,13 +141,11 @@ export function SistemaCompleto() {
                   >
                     <Icon size={16} />
                     {item.label}
-                    {(item as any).adminOnly && <Lock size={10} className="ml-auto text-amber-400" />}
                   </button>
                 );
               })}
             </div>
-            );
-          })}
+          ))}
         </nav>
       </aside>
 
@@ -196,25 +171,9 @@ export function SistemaCompleto() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Selector de empresa */}
-              {empresas.length > 0 && (
-                <select
-                  value={empresa?.id || ''}
-                  onChange={e => {
-                    const sel = empresas.find(em => em.id === e.target.value);
-                    if (sel) setEmpresa(sel);
-                  }}
-                  className="hidden md:block p-1.5 text-xs border rounded-md bg-background font-medium max-w-[180px]"
-                  title="Seleccionar empresa activa"
-                >
-                  {empresas.map(e => (
-                    <option key={e.id} value={e.id}>{e.nombre}</option>
-                  ))}
-                </select>
-              )}
               <div className="relative hidden md:block">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Buscar... (Ctrl+K)" className="pl-9 w-40 h-9 text-sm" />
+                <Input placeholder="Buscar... (Ctrl+K)" className="pl-9 w-56 h-9 text-sm" />
               </div>
               <Button variant="ghost" size="icon" onClick={toggle} title="Modo oscuro (Ctrl+D)">
                 {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
@@ -222,17 +181,12 @@ export function SistemaCompleto() {
               <Button variant="ghost" size="icon" title="Notificaciones">
                 <Bell size={16} />
               </Button>
-              {usuario && (
-                <div className="flex items-center gap-2 bg-violet-100 dark:bg-violet-900/30 px-3 py-1 rounded-full">
-                  <div className="w-6 h-6 rounded-full bg-violet-600 text-white flex items-center justify-center text-[10px] font-bold">
-                    {usuario.nombre?.slice(0, 2).toUpperCase() || 'U'}
-                  </div>
-                  <span className="text-xs font-semibold hidden sm:inline">{usuario.nombre?.split(' ')[0]}</span>
+              <div className="flex items-center gap-2 bg-violet-100 dark:bg-violet-900/30 px-3 py-1 rounded-full">
+                <div className="w-6 h-6 rounded-full bg-violet-600 text-white flex items-center justify-center text-[10px] font-bold">
+                  HE
                 </div>
-              )}
-              <Button variant="ghost" size="icon" onClick={logout} title="Cerrar sesión" className="text-red-500">
-                <X size={16} />
-              </Button>
+                <span className="text-xs font-semibold hidden sm:inline">Hernández</span>
+              </div>
             </div>
           </div>
         </header>
@@ -241,29 +195,28 @@ export function SistemaCompleto() {
         <main className="p-4 md:p-6 max-w-7xl mx-auto">
           {view === 'dashboard' && <DashboardView stats={stats} setView={setView} />}
           {view === 'empresas' && <EmpresasView />}
-          {view === 'clientes' && <ClientesView empresaId={empresa?.id} />}
-          {view === 'proveedores' && <ProveedoresView empresaId={empresa?.id} />}
-          {view === 'empleados' && <EmpleadosView empresaId={empresa?.id} />}
-          {view === 'facturacion' && <FacturacionView empresaId={empresa?.id} />}
-          {view === 'nomina' && <NominaView empresaId={empresa?.id} />}
-          {view === 'compras' && <ComprasView empresaId={empresa?.id} />}
-          {view === 'inventario' && <InventarioView empresaId={empresa?.id} />}
-          {view === 'bancos' && <BancosView empresaId={empresa?.id} />}
+          {view === 'clientes' && <ClientesView />}
+          {view === 'proveedores' && <ProveedoresView />}
+          {view === 'empleados' && <EmpleadosView />}
+          {view === 'facturacion' && <FacturacionView />}
+          {view === 'nomina' && <NominaView />}
+          {view === 'compras' && <ComprasView />}
+          {view === 'inventario' && <InventarioView />}
+          {view === 'bancos' && <BancosView />}
           {view === 'contabilidad' && <ContabilidadView />}
-          {view === 'sat' && <SatView empresaId={empresa?.id} />}
+          {view === 'sat' && <SatView />}
           {view === 'ia-fiscal' && <IaFiscalView />}
           {view === 'auditoria-fiscal' && <AuditoriaFiscalView />}
-          {view === 'imss' && <ImssView empresaId={empresa?.id} />}
-          {view === 'infonavit' && <InfonavitView empresaId={empresa?.id} />}
+          {view === 'imss' && <ImssView />}
+          {view === 'infonavit' && <InfonavitView />}
           {view === 'tributario' && <TributarioView />}
-          {view === 'diot' && <DiotView empresaId={empresa?.id} />}
-          {view === 'inegi' && <InegiView empresaId={empresa?.id} />}
+          {view === 'diot' && <DiotView />}
+          {view === 'inegi' && <InegiView />}
           {view === 'finanzas' && <FinanzasView stats={stats} />}
-          {view === 'crm' && <CrmView empresaId={empresa?.id} />}
+          {view === 'crm' && <CrmView />}
           {view === 'reportes' && <ReportesView stats={stats} />}
-          {view === 'balance' && <BalanceView empresaId={empresa?.id} />}
+          {view === 'balance' && <BalanceView />}
           {view === 'abbax' && <AbbaxView onDatosActualizados={cargarStats} />}
-          {view === 'admin' && usuario?.rol === 'admin' && <AdminView />}
         </main>
       </div>
 
@@ -386,24 +339,20 @@ function DashboardView({ stats, setView }: { stats: Stats | null; setView: (v: s
 }
 
 // ====================== COMPONENTES DE VISTAS ======================
-function useApiData<T>(url: string, empresaId?: string): { data: T | null; loading: boolean; refresh: () => void } {
+function useApiData<T>(url: string): { data: T | null; loading: boolean; refresh: () => void } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // Auto-agregar empresaId como query param si está disponible
-      const finalUrl = empresaId
-        ? `${url}${url.includes('?') ? '&' : '?'}empresaId=${empresaId}`
-        : url;
-      const r = await fetch(finalUrl);
+      const r = await fetch(url);
       const d = await r.json();
       setData(d);
     } finally {
       setLoading(false);
     }
-  }, [url, empresaId]);
+  }, [url]);
 
   useEffect(() => { load(); }, [load]);
   return { data, loading, refresh: load };
@@ -427,8 +376,8 @@ function EmptyState({ icon: Icon, message }: { icon: any; message: string }) {
   );
 }
 
-function ClientesView({ empresaId }: { empresaId?: string }) {
-  const { data, loading } = useApiData<{ clientes: any[] }>('/api/clientes', empresaId);
+function ClientesView() {
+  const { data, loading } = useApiData<{ clientes: any[] }>('/api/clientes');
   if (loading) return <div className="text-center py-20">Cargando clientes...</div>;
   if (!data?.clientes?.length) return <EmptyState icon={Users} message="Sin clientes registrados" />;
   return (
@@ -455,8 +404,8 @@ function ClientesView({ empresaId }: { empresaId?: string }) {
   );
 }
 
-function ProveedoresView({ empresaId }: { empresaId?: string }) {
-  const { data, loading } = useApiData<{ proveedores: any[] }>('/api/proveedores', empresaId);
+function ProveedoresView() {
+  const { data, loading } = useApiData<{ proveedores: any[] }>('/api/proveedores');
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.proveedores?.length) return <EmptyState icon={Truck} message="Sin proveedores" />;
   return (
@@ -483,8 +432,8 @@ function ProveedoresView({ empresaId }: { empresaId?: string }) {
   );
 }
 
-function EmpleadosView({ empresaId }: { empresaId?: string }) {
-  const { data, loading } = useApiData<{ empleados: any[] }>('/api/empleados', empresaId);
+function EmpleadosView() {
+  const { data, loading } = useApiData<{ empleados: any[] }>('/api/empleados');
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.empleados?.length) return <EmptyState icon={User} message="Sin empleados" />;
   return (
@@ -512,8 +461,8 @@ function EmpleadosView({ empresaId }: { empresaId?: string }) {
   );
 }
 
-function FacturacionView({ empresaId }: { empresaId?: string }) {
-  const { data, loading } = useApiData<{ facturas: any[]; total: number; iva: number }>('/api/facturas', empresaId);
+function FacturacionView() {
+  const { data, loading } = useApiData<{ facturas: any[]; total: number; iva: number }>('/api/facturas');
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.facturas?.length) return <EmptyState icon={FileText} message="Sin facturas" />;
   return (
@@ -569,36 +518,153 @@ function FacturacionView({ empresaId }: { empresaId?: string }) {
 }
 
 function NominaView({ empresaId }: { empresaId?: string }) {
-  const { data, loading } = useApiData<{ recibos: any[] }>('/api/nomina', empresaId);
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
-  if (!data?.recibos?.length) return <EmptyState icon={Wallet} message="Sin recibos de nómina" />;
+  const hoy = new Date();
+  const [anioSel, setAnioSel] = useState(hoy.getFullYear());
+  const [mesSel, setMesSel] = useState(0); // 0 = Todo el año
+
+  const url = mesSel === 0
+    ? `/api/nomina?anio=${anioSel}`
+    : `/api/nomina?mes=${mesSel}&anio=${anioSel}`;
+  const { data, loading } = useApiData<any>(url, empresaId);
+
+  const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const resumen = data?.resumenMensual || [];
+
   return (
-    <DataTableCard title={`Recibos de nómina (${data.recibos.length})`}>
-      <table className="w-full text-sm">
-        <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-          <th className="px-4 py-2">Folio</th><th className="px-4 py-2">Empleado</th>
-          <th className="px-4 py-2">Periodo</th><th className="px-4 py-2">Percepciones</th>
-          <th className="px-4 py-2">Deducciones</th><th className="px-4 py-2 text-right">Neto</th>
-        </tr></thead>
-        <tbody>
-          {data.recibos.map((r) => (
-            <tr key={r.id} className="border-b hover:bg-muted/30">
-              <td className="px-4 py-2 font-mono text-xs">{r.folio}</td>
-              <td className="px-4 py-2 font-medium">{r.empleado.nombre}</td>
-              <td className="px-4 py-2 text-muted-foreground">{r.periodo || '—'}</td>
-              <td className="px-4 py-2 text-emerald-600">{fmt(r.totalPercepciones)}</td>
-              <td className="px-4 py-2 text-red-600">{fmt(r.totalDeducciones)}</td>
-              <td className="px-4 py-2 text-right font-bold">{fmt(r.neto)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </DataTableCard>
+    <div className="space-y-4">
+      {/* Selector de año */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-muted-foreground">Año:</span>
+        <select value={anioSel} onChange={e => setAnioSel(parseInt(e.target.value))} className="p-1.5 text-xs border rounded-md bg-background">
+          {Array.from({ length: 5 }, (_, i) => hoy.getFullYear() - i).map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+
+      {/* Pestañas por mes + Todo el año */}
+      <div className="flex flex-wrap gap-1 items-center">
+        <button
+          onClick={() => setMesSel(0)}
+          className={cn('px-3 py-2 rounded-lg text-xs font-bold transition-all border mr-2',
+            mesSel === 0 ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+            : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100')}
+        >
+          📅 Todo {anioSel}
+        </button>
+        <div className="h-8 w-px bg-border mx-1"></div>
+        {meses.map((m, i) => {
+          const mesNum = i + 1;
+          const datosMes = resumen.find((r: any) => r.mes === mesNum);
+          const count = datosMes?.count || 0;
+          const isActive = mesSel === mesNum;
+          const hasData = count > 0;
+          return (
+            <button key={m} onClick={() => setMesSel(mesNum)}
+              className={cn('px-3 py-2 rounded-lg text-xs font-medium transition-all border',
+                isActive ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+                : hasData ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800 hover:bg-violet-100'
+                : 'bg-muted/30 text-muted-foreground border-transparent hover:bg-muted/50')}
+              title={hasData ? `${count} recibo(s) · ${fmt(datosMes.totalNeto)}` : 'Sin recibos'}
+            >
+              <div className="flex flex-col items-center gap-0.5 min-w-[44px]">
+                <span>{m}</span>
+                {hasData && <span className={cn('text-[9px] font-bold', isActive ? 'text-white/80' : 'text-violet-500')}>{count}</span>}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* KPIs del periodo */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Card className="p-3 border-l-4 border-l-violet-500">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Recibos</div>
+          <div className="text-xl font-bold">{data?.count || 0}</div>
+        </Card>
+        <Card className="p-3 border-l-4 border-l-emerald-500">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Percepciones</div>
+          <div className="text-xl font-bold text-emerald-600">{fmt(data?.totalPercepciones || 0)}</div>
+        </Card>
+        <Card className="p-3 border-l-4 border-l-red-500">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Deducciones</div>
+          <div className="text-xl font-bold text-red-600">{fmt(data?.totalDeducciones || 0)}</div>
+        </Card>
+        <Card className="p-3 border-l-4 border-l-blue-500">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">ISR retenido</div>
+          <div className="text-xl font-bold text-blue-600">{fmt(data?.totalISR || 0)}</div>
+        </Card>
+        <Card className="p-3 border-l-4 border-l-amber-500">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Neto pagado</div>
+          <div className="text-xl font-bold text-amber-600">{fmt(data?.totalNeto || 0)}</div>
+        </Card>
+      </div>
+
+      {/* Tabla de recibos */}
+      {loading ? (
+        <div className="text-center py-8">
+          {mesSel === 0 ? `Cargando nómina del año ${anioSel}...` : `Cargando nómina de ${meses[mesSel - 1]} ${anioSel}...`}
+        </div>
+      ) : (data?.recibos?.length || 0) === 0 ? (
+        <Card className="p-8 text-center text-muted-foreground">
+          <Wallet size={32} className="mx-auto mb-2 opacity-40" />
+          <p className="text-sm">
+            {mesSel === 0 ? `No hay recibos de nómina en ${anioSel}` : `No hay recibos en ${meses[mesSel - 1]} ${anioSel}`}
+          </p>
+          <p className="text-xs mt-1">Sube tus CFDIs de nómina (XML) desde el módulo SAT</p>
+        </Card>
+      ) : (
+        <DataTableCard title={
+          mesSel === 0 ? `Nómina — Todo ${anioSel} (${data?.count || 0})` : `Nómina — ${meses[mesSel - 1]} ${anioSel} (${data?.count || 0})`
+        }>
+          <table className="w-full text-sm">
+            <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
+              <th className="px-4 py-2">Folio</th>
+              <th className="px-4 py-2">Fecha</th>
+              <th className="px-4 py-2">Empleado</th>
+              <th className="px-4 py-2">RFC</th>
+              <th className="px-4 py-2">Periodo</th>
+              <th className="px-4 py-2 text-right">Percepciones</th>
+              <th className="px-4 py-2 text-right">ISR</th>
+              <th className="px-4 py-2 text-right">IMSS</th>
+              <th className="px-4 py-2 text-right">Deducciones</th>
+              <th className="px-4 py-2 text-right">Neto</th>
+            </tr></thead>
+            <tbody>
+              {(data?.recibos || []).map((r: any) => (
+                <tr key={r.id} className="border-b hover:bg-muted/30">
+                  <td className="px-4 py-2 font-mono text-xs">{r.folio}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">{new Date(r.fecha).toLocaleDateString('es-MX')}</td>
+                  <td className="px-4 py-2 font-medium">{r.empleado?.nombre || '—'}</td>
+                  <td className="px-4 py-2 font-mono text-xs">{r.empleado?.rfc || '—'}</td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">{r.periodo || '—'}</td>
+                  <td className="px-4 py-2 text-right text-xs text-emerald-600">{fmt(r.totalPercepciones)}</td>
+                  <td className="px-4 py-2 text-right text-xs text-blue-600">{fmt(r.isr)}</td>
+                  <td className="px-4 py-2 text-right text-xs text-orange-600">{fmt(r.imss)}</td>
+                  <td className="px-4 py-2 text-right text-xs text-red-600">{fmt(r.totalDeducciones)}</td>
+                  <td className="px-4 py-2 text-right font-bold">{fmt(r.neto)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-muted/30 font-bold">
+                <td colSpan={5} className="px-4 py-2 text-right">
+                  {mesSel === 0 ? `TOTALES AÑO ${anioSel}:` : `TOTALES ${meses[mesSel - 1]} ${anioSel}:`}
+                </td>
+                <td className="px-4 py-2 text-right text-emerald-600">{fmt(data?.totalPercepciones || 0)}</td>
+                <td className="px-4 py-2 text-right text-blue-600">{fmt(data?.totalISR || 0)}</td>
+                <td className="px-4 py-2 text-right text-orange-600">{fmt(data?.totalIMSS || 0)}</td>
+                <td className="px-4 py-2 text-right text-red-600">{fmt(data?.totalDeducciones || 0)}</td>
+                <td className="px-4 py-2 text-right text-amber-600">{fmt(data?.totalNeto || 0)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </DataTableCard>
+      )}
+    </div>
   );
 }
 
-function ComprasView({ empresaId }: { empresaId?: string }) {
-  const { data, loading } = useApiData<{ ordenes: any[] }>('/api/compras', empresaId);
+function ComprasView() {
+  const { data, loading } = useApiData<{ ordenes: any[] }>('/api/compras');
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.ordenes?.length) return <EmptyState icon={ShoppingCart} message="Sin órdenes de compra" />;
   return (
@@ -626,8 +692,8 @@ function ComprasView({ empresaId }: { empresaId?: string }) {
   );
 }
 
-function InventarioView({ empresaId }: { empresaId?: string }) {
-  const { data, loading } = useApiData<{ productos: any[] }>('/api/inventario', empresaId);
+function InventarioView() {
+  const { data, loading } = useApiData<{ productos: any[] }>('/api/inventario');
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.productos?.length) return <EmptyState icon={Package} message="Sin productos" />;
   return (
@@ -661,8 +727,8 @@ function InventarioView({ empresaId }: { empresaId?: string }) {
   );
 }
 
-function BancosView({ empresaId }: { empresaId?: string }) {
-  const { data, loading, refresh } = useApiData<{ cuentas: any[]; movimientos: any[] }>('/api/bancos', empresaId);
+function BancosView() {
+  const { data, loading, refresh } = useApiData<{ cuentas: any[]; movimientos: any[] }>('/api/bancos');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
 
@@ -794,32 +860,12 @@ function ContabilidadView() {
   );
 }
 
-function SatView({ empresaId }: { empresaId?: string }) {
+function SatView() {
   const [tab, setTab] = useState<'recibidas' | 'emitidas'>('recibidas');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [resultados, setResultados] = useState<any[]>([]);
-
-  // Estado de mes/año seleccionado — mesSel = 0 significa "Todo el año"
-  const hoy = new Date();
-  const [anioSel, setAnioSel] = useState(hoy.getFullYear());
-  const [mesSel, setMesSel] = useState(0); // 0 = Todo el año, 1-12 = meses
-
-  // Cargar facturas del mes/año seleccionado + dirección
-  // mesSel = 0 → todo el año (sin parámetro mes, solo anio)
-  const dirParam = tab === 'recibidas' ? 'recibida' : 'emitida';
-  const url = mesSel === 0
-    ? `/api/facturas?direccion=${dirParam}&anio=${anioSel}&limit=500`
-    : `/api/facturas?direccion=${dirParam}&mes=${mesSel}&anio=${anioSel}&limit=200`;
-  const { data, loading, refresh } = useApiData<{ facturas: any[]; total: number; iva: number; resumenMensual: any[] }>(url, empresaId);
-
-  // Cargar resumen mensual del año (para las pestañas con contadores)
-  const { data: dataResumen } = useApiData<{ resumenMensual: any[] }>(
-    `/api/facturas?anio=${anioSel}&limit=1`,
-    empresaId
-  );
-
-  const resumen = dataResumen?.resumenMensual || data?.resumenMensual || [];
+  const { data, loading, refresh } = useApiData<{ facturas: any[] }>(`/api/facturas?direccion=${tab === 'recibidas' ? 'recibida' : 'emitida'}&limit=20`);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -831,8 +877,7 @@ function SatView({ empresaId }: { empresaId?: string }) {
       for (let i = 0; i < files.length; i++) {
         formData.append('files', files[i]);
       }
-      formData.append('direccion', dirParam);
-      if (empresaId) formData.append('empresaId', empresaId);
+      formData.append('direccion', tab === 'recibidas' ? 'recibida' : 'emitida');
 
       const r = await fetch('/api/upload-cfdi', {
         method: 'POST',
@@ -854,11 +899,9 @@ function SatView({ empresaId }: { empresaId?: string }) {
     }
   };
 
-  const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-
   return (
     <div className="space-y-4">
-      {/* Tabs principales: Recibidas / Emitidas */}
+      {/* Tabs */}
       <div className="flex gap-2 border-b">
         <button
           onClick={() => setTab('recibidas')}
@@ -876,96 +919,6 @@ function SatView({ empresaId }: { empresaId?: string }) {
         </button>
       </div>
 
-      {/* Selector de año */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-muted-foreground">Año:</span>
-        <select
-          value={anioSel}
-          onChange={e => setAnioSel(parseInt(e.target.value))}
-          className="p-1.5 text-xs border rounded-md bg-background"
-        >
-          {Array.from({ length: 5 }, (_, i) => hoy.getFullYear() - i).map(y => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Pestañas por mes + Todo el año */}
-      <div className="flex flex-wrap gap-1 items-center">
-        {/* Botón Todo el Año */}
-        <button
-          onClick={() => setMesSel(0)}
-          className={cn(
-            'px-3 py-2 rounded-lg text-xs font-bold transition-all border mr-2',
-            mesSel === 0
-              ? 'bg-violet-600 text-white border-violet-600 shadow-md'
-              : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40'
-          )}
-        >
-          📅 Todo {anioSel}
-        </button>
-
-        {/* Separador */}
-        <div className="h-8 w-px bg-border mx-1"></div>
-
-        {/* 12 meses */}
-        {meses.map((m, i) => {
-          const mesNum = i + 1;
-          const datosMes = resumen.find(r => r.mes === mesNum);
-          const count = tab === 'recibidas' ? (datosMes?.recibidas || 0) : (datosMes?.emitidas || 0);
-          const monto = tab === 'recibidas' ? (datosMes?.totalRecibido || 0) : (datosMes?.totalEmitido || 0);
-          const isActive = mesSel === mesNum;
-          const hasData = count > 0;
-
-          return (
-            <button
-              key={m}
-              onClick={() => setMesSel(mesNum)}
-              className={cn(
-                'px-3 py-2 rounded-lg text-xs font-medium transition-all border',
-                isActive
-                  ? 'bg-violet-600 text-white border-violet-600 shadow-md'
-                  : hasData
-                  ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800 hover:bg-violet-100 dark:hover:bg-violet-900/40'
-                  : 'bg-muted/30 text-muted-foreground border-transparent hover:bg-muted/50'
-              )}
-              title={hasData ? `${count} factura(s) · ${fmt(monto)}` : 'Sin facturas este mes'}
-            >
-              <div className="flex flex-col items-center gap-0.5 min-w-[44px]">
-                <span>{m}</span>
-                {hasData && (
-                  <span className={cn('text-[9px] font-bold', isActive ? 'text-white/80' : 'text-violet-500')}>
-                    {count}
-                  </span>
-                )}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Resumen del periodo seleccionado */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="p-3 border-l-4 border-l-violet-500">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">
-            {mesSel === 0 ? `Facturas ${tab} (año)` : `Facturas ${tab}`}
-          </div>
-          <div className="text-xl font-bold">{data?.count || 0}</div>
-        </Card>
-        <Card className="p-3 border-l-4 border-l-emerald-500">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Subtotal</div>
-          <div className="text-xl font-bold text-emerald-600">{fmt(data?.subtotal || 0)}</div>
-        </Card>
-        <Card className="p-3 border-l-4 border-l-blue-500">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">IVA</div>
-          <div className="text-xl font-bold text-blue-600">{fmt(data?.iva || 0)}</div>
-        </Card>
-        <Card className="p-3 border-l-4 border-l-amber-500">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total</div>
-          <div className="text-xl font-bold text-amber-600">{fmt(data?.total || 0)}</div>
-        </Card>
-      </div>
-
       {/* Upload zone */}
       <Card className="p-5">
         <h3 className="font-semibold mb-2 flex items-center gap-2">
@@ -973,10 +926,10 @@ function SatView({ empresaId }: { empresaId?: string }) {
         </h3>
         <p className="text-xs text-muted-foreground mb-3">
           Sube tus archivos XML (y sus PDFs opcionales) del SAT. También puedes subir un ZIP con múltiples XML.
-          El sistema parsea automáticamente y guarda las facturas. Las fechas se toman del propio XML del SAT.
+          El sistema parsea automáticamente y guarda las facturas en la base de datos.
         </p>
-        <label className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
-          <Upload size={28} className="text-muted-foreground mb-2" />
+        <label className="border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
+          <Upload size={32} className="text-muted-foreground mb-2" />
           <span className="text-sm font-medium">
             {uploading ? 'Procesando...' : 'Haz clic o arrastra tus archivos XML/PDF/ZIP aquí'}
           </span>
@@ -999,38 +952,16 @@ function SatView({ empresaId }: { empresaId?: string }) {
         )}
       </Card>
 
-      {/* Tabla de facturas del periodo seleccionado */}
+      {/* Facturas cargadas */}
       {loading ? (
-        <div className="text-center py-8">
-          {mesSel === 0
-            ? `Cargando facturas del año ${anioSel}...`
-            : `Cargando facturas de ${meses[mesSel - 1]} ${anioSel}...`}
-        </div>
-      ) : (data?.facturas?.length || 0) === 0 ? (
-        <Card className="p-8 text-center text-muted-foreground">
-          <FileText size={32} className="mx-auto mb-2 opacity-40" />
-          <p className="text-sm">
-            {mesSel === 0
-              ? `No hay CFDIs ${tab} en el año ${anioSel}`
-              : `No hay CFDIs ${tab} en ${meses[mesSel - 1]} ${anioSel}`}
-          </p>
-          <p className="text-xs mt-1">Sube tus archivos XML del SAT usando la zona de arriba</p>
-        </Card>
+        <div className="text-center py-8">Cargando facturas...</div>
       ) : (
-        <DataTableCard title={
-          mesSel === 0
-            ? `CFDIs ${tab} — Todo ${anioSel} (${data?.count || 0})`
-            : `CFDIs ${tab} — ${meses[mesSel - 1]} ${anioSel} (${data?.count || 0})`
-        }>
+        <DataTableCard title={`Facturas ${tab} (${data?.facturas?.length || 0})`}>
           <table className="w-full text-sm">
             <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-              <th className="px-4 py-2">Folio</th>
-              <th className="px-4 py-2">Fecha</th>
+              <th className="px-4 py-2">Folio</th><th className="px-4 py-2">Fecha</th>
               <th className="px-4 py-2">{tab === 'recibidas' ? 'Proveedor' : 'Cliente'}</th>
               <th className="px-4 py-2">RFC</th>
-              <th className="px-4 py-2">Concepto</th>
-              <th className="px-4 py-2 text-right">Subtotal</th>
-              <th className="px-4 py-2 text-right">IVA</th>
               <th className="px-4 py-2 text-right">Total</th>
               <th className="px-4 py-2">UUID</th>
             </tr></thead>
@@ -1038,28 +969,14 @@ function SatView({ empresaId }: { empresaId?: string }) {
               {(data?.facturas || []).map((f: any) => (
                 <tr key={f.id} className="border-b hover:bg-muted/30">
                   <td className="px-4 py-2 font-mono text-xs">{f.folio}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">{new Date(f.fecha).toLocaleDateString('es-MX')}</td>
+                  <td className="px-4 py-2">{new Date(f.fecha).toLocaleDateString('es-MX')}</td>
                   <td className="px-4 py-2 font-medium">{tab === 'recibidas' ? f.emisorNombre : f.receptorNombre}</td>
                   <td className="px-4 py-2 font-mono text-xs">{tab === 'recibidas' ? f.emisorRfc : f.receptorRfc}</td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground truncate max-w-[150px]">{f.concepto || '—'}</td>
-                  <td className="px-4 py-2 text-right text-xs">{fmt(f.subtotal)}</td>
-                  <td className="px-4 py-2 text-right text-xs text-blue-600">{fmt(f.totalImpuestos)}</td>
                   <td className="px-4 py-2 text-right font-semibold">{fmt(f.total)}</td>
-                  <td className="px-4 py-2 font-mono text-[10px] text-muted-foreground">{f.uuid?.slice(0, 12)}...</td>
+                  <td className="px-4 py-2 font-mono text-[10px] text-muted-foreground">{f.uuid?.slice(0, 16)}...</td>
                 </tr>
               ))}
             </tbody>
-            <tfoot>
-              <tr className="bg-muted/30 font-bold">
-                <td colSpan={5} className="px-4 py-2 text-right">
-                  {mesSel === 0 ? `TOTALES AÑO ${anioSel}:` : `TOTALES ${meses[mesSel - 1]} ${anioSel}:`}
-                </td>
-                <td className="px-4 py-2 text-right">{fmt(data?.subtotal || 0)}</td>
-                <td className="px-4 py-2 text-right text-blue-600">{fmt(data?.iva || 0)}</td>
-                <td className="px-4 py-2 text-right text-amber-600">{fmt(data?.total || 0)}</td>
-                <td></td>
-              </tr>
-            </tfoot>
           </table>
         </DataTableCard>
       )}
@@ -1140,112 +1057,18 @@ function TributarioView() {
 
 function FinanzasView({ stats }: { stats: Stats | null }) {
   if (!stats) return <div className="text-center py-20">Cargando...</div>;
-
-  const utilidad = stats.fiscal.utilidadBruta;
-  const ingresos = stats.fiscal.totalEmitido;
-  const egresos = stats.fiscal.totalRecibido;
-  const ivaPorPagar = stats.fiscal.ivaPorPagar;
-  const margenUtilidad = ingresos > 0 ? (utilidad / ingresos) * 100 : 0;
-  const tasaAhorro = ingresos > 0 ? ((ingresos - egresos) / ingresos) * 100 : 0;
-
   const kpis = [
-    { l: 'Ingresos del mes', v: fmt(ingresos), c: 'text-emerald-600' },
-    { l: 'Egresos del mes', v: fmt(egresos), c: 'text-red-600' },
-    { l: 'Utilidad bruta', v: fmt(utilidad), c: 'text-emerald-600' },
-    { l: 'Margen utilidad', v: `${margenUtilidad.toFixed(1)}%`, c: margenUtilidad > 30 ? 'text-emerald-600' : 'text-amber-600' },
-    { l: 'IVA por pagar', v: fmt(ivaPorPagar), c: 'text-orange-600' },
-    { l: 'Tasa de ahorro', v: `${tasaAhorro.toFixed(1)}%`, c: tasaAhorro > 20 ? 'text-emerald-600' : 'text-amber-600' },
-    { l: 'Clientes activos', v: String(stats.catalogos.clientes), c: 'text-violet-600' },
-    { l: 'Empleados', v: String(stats.catalogos.empleados), c: 'text-fuchsia-600' },
+    { l: 'Patrimonio neto', v: '−$1,164,000', c: 'text-red-600' },
+    { l: 'Activo total', v: fmt(1836000), c: 'text-emerald-600' },
+    { l: 'Pasivo total', v: fmt(3000000), c: 'text-red-600' },
+    { l: 'Tasa de ahorro', v: '8.5%', c: 'text-amber-600' },
+    { l: 'Ratio endeudamiento', v: '89.7%', c: 'text-red-600' },
+    { l: 'Fondo emergencia', v: '32.5%', c: 'text-amber-600' },
+    { l: 'IVA por pagar', v: fmt(stats.fiscal.ivaPorPagar), c: 'text-orange-600' },
+    { l: 'Utilidad bruta', v: fmt(stats.fiscal.utilidadBruta), c: 'text-emerald-600' },
   ];
-
-  // ===== RECOMENDACIONES PROFESIONALES =====
-  const recomendaciones: Array<{ tipo: string; titulo: string; descripcion: string; prioridad: string; color: string }> = [];
-
-  // 1. Liquidez
-  if (tasaAhorro < 20) {
-    recomendaciones.push({
-      tipo: '🚨 LIQUIDEZ',
-      titulo: 'Tu tasa de ahorro es baja',
-      descripcion: `Actualmente ahorras ${tasaAhorro.toFixed(1)}% de tus ingresos. Lo recomendable es ≥20%. Considera recortar gastos no esenciales (deseos) o renegociar precios con proveedores para mejorar tu margen. Una estrategia: audita tus egresos categorizando en necesarios vs prescindibles.`,
-      prioridad: 'ALTA',
-      color: 'red',
-    });
-  } else {
-    recomendaciones.push({
-      tipo: '✅ LIQUIDEZ',
-      titulo: 'Tu tasa de ahorro es saludable',
-      descripcion: `Ahorrar ${tasaAhorro.toFixed(1)}% de tus ingresos está por encima del 20% recomendado. Destina este excedente a: 1) Fondo de emergencia (meta 3-6 meses de gastos operativos), 2) Pago anticipado de deudas con mayor tasa, 3) Fondo de inversión para crecimiento.`,
-      prioridad: 'MEDIA',
-      color: 'green',
-    });
-  }
-
-  // 2. IVA
-  if (ivaPorPagar > ingresos * 0.1) {
-    recomendaciones.push({
-      tipo: '⚠️ FISCAL',
-      titulo: 'Tu IVA por pagar es alto relativo a ingresos',
-      descripcion: `El IVA por pagar (${fmt(ivaPorPagar)}) representa más del 10% de tus ingresos. Verifica que estés acumulando TODOS los gastos deducibles con CFDI para maximizar el IVA acreditable. Muchos empresarios pierden acreditamiento por no solicitar factura de gastos menores. También revisa si tienes compras con tasa 0% que podrían generar saldo a favor.`,
-      prioridad: 'ALTA',
-      color: 'amber',
-    });
-  }
-
-  // 3. Margen de utilidad
-  if (margenUtilidad > 50) {
-    recomendaciones.push({
-      tipo: '💡 ESTRATEGIA',
-      titulo: 'Margen de utilidad excelente — momento de invertir',
-      descripcion: `Con ${margenUtilidad.toFixed(1)}% de margen, tienes holgura para reinvertir. Opciones: 1) Fondo de inversión en instrumentos de renta fija (CETES, fondos de deuda) para liquidez, 2) Expansión del negocio (nuevos clientes, diversificación), 3) Reserva legal del 5% (obligación para personas morales según Art. 122 LISR). No dejes el dinero ocioso en cuenta de operaciones.`,
-      prioridad: 'MEDIA',
-      color: 'blue',
-    });
-  } else if (margenUtilidad < 20) {
-    recomendaciones.push({
-      tipo: '🚨 RENTABILIDAD',
-      titulo: 'Margen de utilidad bajo',
-      descripcion: `Tu margen de ${margenUtilidad.toFixed(1)}% es bajo. Acciones: 1) Revisar estructura de costos — ¿qué gastos puedes reducir? 2) Renegociar precios con proveedores (tienes margen de negociación si compras volumen), 3) Aumentar precios de venta si el mercado lo permite, 4) Diversificar hacia servicios de mayor valor agregado.`,
-      prioridad: 'ALTA',
-      color: 'red',
-    });
-  }
-
-  // 4. Concentración de clientes
-  if (stats.topClientes.length > 0) {
-    const topCliente = stats.topClientes[0];
-    const pctTopCliente = ingresos > 0 ? (topCliente.total / ingresos) * 100 : 0;
-    if (pctTopCliente > 40) {
-      recomendaciones.push({
-        tipo: '⚠️ RIESGO',
-        titulo: `Alta dependencia de un cliente (${pctTopCliente.toFixed(0)}%)`,
-        descripcion: `${topCliente.nombre} representa ${pctTopCliente.toFixed(0)}% de tus ingresos. Si pierdes a este cliente, tu flujo de caja se ve seriamente afectado. Recomendación: 1) Diversificar activamente tu cartera de clientes, 2) Firmar contratos a mediano plazo con tu cliente principal, 3) Crear un fondo de contingencia equivalente a 3 meses de gastos fijos.`,
-        prioridad: 'ALTA',
-        color: 'amber',
-      });
-    }
-  }
-
-  // 5. Plan de acción general
-  recomendaciones.push({
-    tipo: '📋 PLAN DE ACCIÓN',
-    titulo: 'Recomendaciones generales del consultor',
-    descripcion: `1) **Reserva legal**: Si eres persona moral, destina el 5% de utilidad a reserva legal hasta alcanzar 20% del capital social (Art. 122 LGSC).\n2) **PTU**: Recuerda que en mayo debes pagar el 10% de utilidad a trabajadores (Art. 122 LFT). Provisiona mensualmente.\n3) **Declaraciones mensuales**: IVA e ISR antes del día 17 del mes siguiente.\n4) **DIOT**: Antes del día 10 del mes siguiente.\n5) **Conciliación bancaria**: Realízala mensualmente para detectar errores.\n6) **Auditoría interna**: Revisa que todos tus gastos tengan CFDI para maximizar deducciones.`,
-    prioridad: 'MEDIA',
-    color: 'violet',
-  });
-
-  const colorMap: Record<string, string> = {
-    red: 'border-l-red-500 bg-red-50/50 dark:bg-red-900/10',
-    amber: 'border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10',
-    green: 'border-l-emerald-500 bg-emerald-50/50 dark:bg-emerald-900/10',
-    blue: 'border-l-blue-500 bg-blue-50/50 dark:bg-blue-900/10',
-    violet: 'border-l-violet-500 bg-violet-50/50 dark:bg-violet-900/10',
-  };
-
   return (
     <div className="space-y-4">
-      {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {kpis.map((k) => (
           <Card key={k.l} className="p-4">
@@ -1254,51 +1077,20 @@ function FinanzasView({ stats }: { stats: Stats | null }) {
           </Card>
         ))}
       </div>
-
-      {/* Recomendaciones profesionales */}
-      <Card className="p-5">
-        <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-          <DollarSign size={20} className="text-violet-600" /> Recomendaciones Financieras Profesionales
-        </h3>
-        <p className="text-xs text-muted-foreground mb-4">
-          Análisis automático basado en tus datos del periodo. Como tu consultor financiero, esto es lo que te recomiendo:
-        </p>
-
-        <div className="space-y-3">
-          {recomendaciones.map((r, i) => (
-            <div key={i} className={cn('border-l-4 rounded-lg p-4', colorMap[r.color])}>
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{r.tipo}</span>
-                  <h4 className="font-semibold text-sm mt-0.5">{r.titulo}</h4>
-                </div>
-                <Badge variant={r.prioridad === 'ALTA' ? 'destructive' : 'secondary'} className="text-[10px] flex-shrink-0">
-                  {r.prioridad}
-                </Badge>
-              </div>
-              <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">{r.descripcion}</p>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Deudas */}
       <Card className="p-5 border-l-4 border-l-red-500 bg-red-50/50">
         <h3 className="font-semibold flex items-center gap-2 mb-2">
-          🎯 Estrategia Avalancha de Deudas
+          🎯 Avalancha de deudas
         </h3>
         <p className="text-sm text-muted-foreground">
-          Registra tus deudas (préstamos bancarios, tarjetas, préstamos familiares) para activar la calculadora de avalancha.
-          El sistema ordenará tus deudas de mayor a menor tasa de interés y te dirá exactamente cuánto pagar cada mes
-          para minimizar el costo total.
+          Configura tus deudas en el panel de finanzas para activar la estrategia de pago optimizada.
         </p>
       </Card>
     </div>
   );
 }
 
-function CrmView({ empresaId }: { empresaId?: string }) {
-  const { data, loading } = useApiData<{ oportunidades: any[] }>('/api/crm', empresaId);
+function CrmView() {
+  const { data, loading } = useApiData<{ oportunidades: any[] }>('/api/crm');
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.oportunidades?.length) return <EmptyState icon={TrendingUp} message="Sin oportunidades" />;
   return (
@@ -1594,7 +1386,7 @@ function AuditoriaFiscalView() {
 }
 
 // ====================== DIOT VIEW ======================
-function DiotView({ empresaId }: { empresaId?: string }) {
+function DiotView() {
   const [periodo, setPeriodo] = useState({ mes: new Date().getMonth() + 1, anio: new Date().getFullYear() });
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -1602,7 +1394,7 @@ function DiotView({ empresaId }: { empresaId?: string }) {
   const cargar = async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/diot?mes=${periodo.mes}&anio=${periodo.anio}${empresaId ? `&empresaId=${empresaId}` : ''}`);
+      const r = await fetch(`/api/diot?mes=${periodo.mes}&anio=${periodo.anio}`);
       const d = await r.json();
       setData(d);
     } finally {
@@ -1697,7 +1489,7 @@ function DiotView({ empresaId }: { empresaId?: string }) {
 }
 
 // ====================== INEGI VIEW ======================
-function InegiView({ empresaId }: { empresaId?: string }) {
+function InegiView() {
   const [anio, setAnio] = useState(new Date().getFullYear());
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -1705,7 +1497,7 @@ function InegiView({ empresaId }: { empresaId?: string }) {
   const cargar = async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/inegi?anio=${anio}${empresaId ? `&empresaId=${empresaId}` : ''}`);
+      const r = await fetch(`/api/inegi?anio=${anio}`);
       const d = await r.json();
       setData(d);
     } finally {
@@ -1807,7 +1599,7 @@ function InegiView({ empresaId }: { empresaId?: string }) {
 }
 
 // ====================== BALANCE GENERAL VIEW ======================
-function BalanceView({ empresaId }: { empresaId?: string }) {
+function BalanceView() {
   const [anio, setAnio] = useState(new Date().getFullYear());
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -1815,7 +1607,7 @@ function BalanceView({ empresaId }: { empresaId?: string }) {
   const cargar = async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/balance?anio=${anio}${empresaId ? `&empresaId=${empresaId}` : ''}`);
+      const r = await fetch(`/api/balance?anio=${anio}`);
       const d = await r.json();
       setData(d);
     } finally {
@@ -1885,285 +1677,6 @@ function BalanceView({ empresaId }: { empresaId?: string }) {
             </div>
           </div>
         ) : null}
-      </Card>
-    </div>
-  );
-}
-
-// ====================== ADMIN VIEW (panel de usuarios — solo admin) ======================
-function AdminView() {
-  const { data, loading, refresh } = useApiData<{ usuarios: any[] }>('/api/admin/usuarios');
-  const { empresas } = useEmpresa();
-  const [showForm, setShowForm] = useState(false);
-  const [editUser, setEditUser] = useState<any>(null);
-  const [form, setForm] = useState({ nombre: '', email: '', password: '', rol: 'usuario', empresaId: '' });
-  const [error, setError] = useState('');
-  const [msg, setMsg] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setError('');
-    setMsg('');
-    try {
-      if (editUser) {
-        // Actualizar usuario existente
-        const body: any = { nombre: form.nombre, email: form.email, rol: form.rol, empresaId: form.empresaId || null };
-        if (form.password) body.password = form.password;
-        const r = await fetch(`/api/admin/usuarios/${editUser.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const d = await r.json();
-        if (!r.ok) setError(d.error);
-        else { setMsg(d.message); setShowForm(false); setEditUser(null); refresh(); }
-      } else {
-        // Crear nuevo usuario
-        const r = await fetch('/api/admin/usuarios', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...form, empresaId: form.empresaId || null }),
-        });
-        const d = await r.json();
-        if (!r.ok) setError(d.error);
-        else { setMsg(d.message); setShowForm(false); refresh(); }
-      }
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const editar = (u: any) => {
-    setEditUser(u);
-    setForm({ nombre: u.nombre, email: u.email, password: '', rol: u.rol, empresaId: u.empresaId || '' });
-    setShowForm(true);
-    setError('');
-    setMsg('');
-  };
-
-  const eliminar = async (id: string) => {
-    setSaving(true);
-    try {
-      const r = await fetch(`/api/admin/usuarios/${id}`, { method: 'DELETE' });
-      const d = await r.json();
-      if (!r.ok) setError(d.error);
-      else { setMsg(d.message); setConfirmDelete(null); refresh(); }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const resetPassword = async (u: any) => {
-    const nuevaPass = prompt(`Nueva contraseña para ${u.nombre}:`, '');
-    if (!nuevaPass) return;
-    if (nuevaPass.length < 6) { setError('Mínimo 6 caracteres'); return; }
-    setSaving(true);
-    try {
-      const r = await fetch(`/api/admin/usuarios/${u.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: nuevaPass }),
-      });
-      const d = await r.json();
-      if (!r.ok) setError(d.error);
-      else setMsg(`✅ Contraseña de "${u.nombre}" actualizada`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading) return <div className="text-center py-20">Cargando usuarios...</div>;
-
-  const rolColors: Record<string, string> = {
-    admin: 'destructive',
-    contador: 'default',
-    usuario: 'secondary',
-    lectura: 'secondary',
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Header con advertencia */}
-      <Card className="p-4 bg-gradient-to-r from-red-600 to-orange-600 text-white">
-        <div className="flex items-center gap-3">
-          <ShieldAlert size={24} />
-          <div>
-            <h3 className="font-bold">Panel de Administración</h3>
-            <p className="text-xs text-white/80">Solo tú como administrador puedes ver y modificar esta sección. Los cambios son inmediatos.</p>
-          </div>
-        </div>
-      </Card>
-
-      {msg && <div className="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 p-3 rounded-lg text-sm">{msg}</div>}
-      {error && <div className="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-3 rounded-lg text-sm">{error}</div>}
-
-      <div className="flex justify-between items-center">
-        <h3 className="font-semibold">Usuarios del sistema ({data?.usuarios?.length || 0})</h3>
-        <Button onClick={() => {
-          setShowForm(!showForm);
-          setEditUser(null);
-          setForm({ nombre: '', email: '', password: '', rol: 'usuario', empresaId: '' });
-          setError(''); setMsg('');
-        }}>
-          <Plus size={14} className="mr-2" /> {showForm ? 'Cancelar' : 'Nuevo usuario'}
-        </Button>
-      </div>
-
-      {/* Formulario crear/editar */}
-      {showForm && (
-        <Card className="p-5 border-l-4 border-l-violet-500">
-          <h4 className="font-semibold mb-3">{editUser ? `Editando: ${editUser.nombre}` : 'Crear nuevo usuario'}</h4>
-          <form onSubmit={submit} className="space-y-3">
-            <div className="grid md:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-semibold uppercase text-muted-foreground">Nombre completo *</label>
-                <Input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Juan Pérez" className="mt-1" required />
-              </div>
-              <div>
-                <label className="text-xs font-semibold uppercase text-muted-foreground">Email *</label>
-                <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="juan@empresa.mx" className="mt-1" required />
-              </div>
-              <div>
-                <label className="text-xs font-semibold uppercase text-muted-foreground">
-                  {editUser ? 'Nueva contraseña (dejar vacío = sin cambio)' : 'Contraseña *'} (mín. 6 caracteres)
-                </label>
-                <Input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="••••••••" className="mt-1" required={!editUser} />
-              </div>
-              <div>
-                <label className="text-xs font-semibold uppercase text-muted-foreground">Rol</label>
-                <select value={form.rol} onChange={e => setForm({ ...form, rol: e.target.value })} className="w-full mt-1 p-2 border rounded-md bg-background text-sm">
-                  <option value="admin">🔑 Admin (acceso total + panel admin)</option>
-                  <option value="contador">📊 Contador (facturas, nómina, reportes)</option>
-                  <option value="usuario">👤 Usuario (operación normal)</option>
-                  <option value="lectura">👁️ Solo lectura (consultas)</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold uppercase text-muted-foreground">Empresa asignada</label>
-                <select value={form.empresaId} onChange={e => setForm({ ...form, empresaId: e.target.value })} className="w-full mt-1 p-2 border rounded-md bg-background text-sm">
-                  <option value="">Sin empresa</option>
-                  {empresas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button type="submit" disabled={saving}>
-                {saving ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Plus size={14} className="mr-2" />}
-                {editUser ? 'Guardar cambios' : 'Crear usuario'}
-              </Button>
-              {editUser && (
-                <Button type="button" variant="secondary" onClick={() => { setEditUser(null); setShowForm(false); }}>
-                  Cancelar
-                </Button>
-              )}
-            </div>
-          </form>
-        </Card>
-      )}
-
-      {/* Tabla de usuarios */}
-      <DataTableCard title="Usuarios registrados">
-        <table className="w-full text-sm">
-          <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-            <th className="px-4 py-2">Nombre</th>
-            <th className="px-4 py-2">Email</th>
-            <th className="px-4 py-2">Rol</th>
-            <th className="px-4 py-2">Empresa</th>
-            <th className="px-4 py-2">Creado</th>
-            <th className="px-4 py-2 text-center">Acciones</th>
-          </tr></thead>
-          <tbody>
-            {(data?.usuarios || []).map((u: any) => (
-              <tr key={u.id} className="border-b hover:bg-muted/30">
-                <td className="px-4 py-2 font-medium">
-                  {u.nombre}
-                  {u.rol === 'admin' && <Lock size={10} className="inline ml-1 text-amber-500" />}
-                </td>
-                <td className="px-4 py-2 text-muted-foreground">{u.email}</td>
-                <td className="px-4 py-2">
-                  <Badge variant={rolColors[u.rol] as any || 'secondary'} className="text-xs">
-                    {u.rol === 'admin' ? '🔑 admin' : u.rol === 'contador' ? '📊 contador' : u.rol === 'lectura' ? '👁️ lectura' : '👤 usuario'}
-                  </Badge>
-                </td>
-                <td className="px-4 py-2 text-muted-foreground">{u.empresa?.nombre || '—'}</td>
-                <td className="px-4 py-2 text-xs text-muted-foreground">{new Date(u.createdAt).toLocaleDateString('es-MX')}</td>
-                <td className="px-4 py-2">
-                  <div className="flex gap-1 justify-center">
-                    <button onClick={() => editar(u)} title="Editar" className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 rounded text-violet-600">
-                      <Settings size={14} />
-                    </button>
-                    <button onClick={() => resetPassword(u)} title="Cambiar contraseña" className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded text-blue-600">
-                      <KeyRound size={14} />
-                    </button>
-                    {u.rol !== 'admin' && (
-                      <button
-                        onClick={() => setConfirmDelete(u.id)}
-                        title="Eliminar"
-                        className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-600"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </DataTableCard>
-
-      {/* Confirmación de eliminar */}
-      {confirmDelete && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setConfirmDelete(null)}>
-          <Card className="p-6 max-w-sm" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-                <Trash2 size={18} className="text-red-600" />
-              </div>
-              <div>
-                <h4 className="font-bold">¿Eliminar usuario?</h4>
-                <p className="text-xs text-muted-foreground">Esta acción no se puede deshacer.</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="destructive" onClick={() => eliminar(confirmDelete)} disabled={saving}>
-                {saving ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-                Sí, eliminar
-              </Button>
-              <Button variant="secondary" onClick={() => setConfirmDelete(null)}>Cancelar</Button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Información de roles */}
-      <Card className="p-4">
-        <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-          <ShieldAlert size={14} className="text-amber-500" /> Guía de roles y permisos
-        </h4>
-        <div className="grid md:grid-cols-2 gap-3 text-xs">
-          <div className="border rounded p-3">
-            <p className="font-bold text-red-600">🔑 Admin</p>
-            <p className="text-muted-foreground mt-1">Acceso total al sistema + panel de administración. Puede crear/editar/eliminar usuarios, cambiar contraseñas, ver todas las empresas.</p>
-          </div>
-          <div className="border rounded p-3">
-            <p className="font-bold text-violet-600">📊 Contador</p>
-            <p className="text-muted-foreground mt-1">Acceso a facturación, nómina, contabilidad, reportes, IMSS, INFONAVIT, DIOT. No puede administrar usuarios.</p>
-          </div>
-          <div className="border rounded p-3">
-            <p className="font-bold text-blue-600">👤 Usuario</p>
-            <p className="text-muted-foreground mt-1">Operación normal: clientes, proveedores, facturas, compras, inventario. Sin acceso a módulos fiscales avanzados.</p>
-          </div>
-          <div className="border rounded p-3">
-            <p className="font-bold text-muted-foreground">👁️ Solo lectura</p>
-            <p className="text-muted-foreground mt-1">Solo puede consultar información. No puede crear, editar ni eliminar registros.</p>
-          </div>
-        </div>
       </Card>
     </div>
   );
@@ -2287,31 +1800,6 @@ function EmpresasView() {
 
   if (loading) return <div className="text-center py-20">Cargando empresas...</div>;
 
-  const eliminarEmpresa = async (e: any) => {
-    if (!confirm(`¿Eliminar la empresa "${e.nombre}" (RFC: ${e.rfc})?\n\nSe eliminarán también todos sus registros asociados (facturas, clientes, proveedores, empleados, etc.).\n\nEsta acción NO se puede deshacer.`)) return;
-    try {
-      const r = await fetch(`/api/empresas/${e.id}?force=true`, { method: 'DELETE' });
-      const d = await r.json();
-      if (!r.ok) {
-        if (d.needsForce) {
-          if (confirm(`${d.error}\n\n¿Eliminar también todos los ${d.totalAsociados} registros asociados?`)) {
-            const r2 = await fetch(`/api/empresas/${e.id}?force=true`, { method: 'DELETE' });
-            const d2 = await r2.json();
-            if (r2.ok) { setMsgConstancia(d2.message); refresh(); }
-            else setError(d2.error);
-          }
-        } else {
-          setError(d.error);
-        }
-      } else {
-        setMsgConstancia(d.message);
-        refresh();
-      }
-    } catch (e: any) {
-      setError(e.message);
-    }
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex justify-between flex-wrap gap-2">
@@ -2407,7 +1895,7 @@ function EmpresasView() {
             <th className="px-4 py-2">Nombre</th><th className="px-4 py-2">RFC</th>
             <th className="px-4 py-2">Régimen</th><th className="px-4 py-2">Clientes</th>
             <th className="px-4 py-2">Proveedores</th><th className="px-4 py-2">Empleados</th>
-            <th className="px-4 py-2">Estado</th><th className="px-4 py-2 text-center">Acciones</th>
+            <th className="px-4 py-2">Estado</th>
           </tr></thead>
           <tbody>
             {(data?.empresas || []).map((e: any) => (
@@ -2419,15 +1907,6 @@ function EmpresasView() {
                 <td className="px-4 py-2"><Badge variant="secondary">{e._count.proveedores}</Badge></td>
                 <td className="px-4 py-2"><Badge variant="secondary">{e._count.empleados}</Badge></td>
                 <td className="px-4 py-2"><Badge variant={e.status === 'activo' ? 'default' : 'secondary'}>{e.status}</Badge></td>
-                <td className="px-4 py-2 text-center">
-                  <button
-                    onClick={() => eliminarEmpresa(e)}
-                    title="Eliminar empresa"
-                    className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-600"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </td>
               </tr>
             ))}
           </tbody>
@@ -2438,8 +1917,8 @@ function EmpresasView() {
 }
 
 // ====================== IMSS VIEW ======================
-function ImssView({ empresaId }: { empresaId?: string }) {
-  const { data, loading, refresh } = useApiData<any>(empresaId ? `/api/imss?empresaId=${empresaId}` : '/api/imss');
+function ImssView() {
+  const { data, loading, refresh } = useApiData<any>('/api/imss');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [periodo, setPeriodo] = useState({ mes: new Date().getMonth() + 1, anio: new Date().getFullYear() });
@@ -2562,8 +2041,8 @@ function ImssView({ empresaId }: { empresaId?: string }) {
 }
 
 // ====================== INFONAVIT VIEW ======================
-function InfonavitView({ empresaId }: { empresaId?: string }) {
-  const { data, loading, refresh } = useApiData<any>(empresaId ? `/api/infonavit?empresaId=${empresaId}` : '/api/infonavit');
+function InfonavitView() {
+  const { data, loading, refresh } = useApiData<any>('/api/infonavit');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [periodo, setPeriodo] = useState({ mes: new Date().getMonth() + 1, anio: new Date().getFullYear() });

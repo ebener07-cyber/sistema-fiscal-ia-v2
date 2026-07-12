@@ -136,7 +136,6 @@ export async function POST(req: NextRequest) {
     }
 
     // Carpeta de uploads — usar /tmp en Vercel (sistema de archivos de solo lectura excepto /tmp)
-     // Carpeta de uploads - usar /tmp en Vercel (sistema de archivos de solo lectura)
     const isVercel = !!process.env.VERCEL;
     const uploadBase = isVercel ? '/tmp' : process.cwd();
     const uploadDir = path.join(uploadBase, 'uploads', 'cfdi', direccion);
@@ -187,24 +186,83 @@ export async function POST(req: NextRequest) {
           }
 
           // Guardar XML original
-          const xmlPath = path.join(uploadDir, file.name);
-          await writeFile(xmlPath, await file.text());
+          try {
+            const xmlPath = path.join(uploadDir, file.name);
+            await writeFile(xmlPath, await file.text());
+          } catch {}
 
+          // ===== DETECTAR TIPO DE CFDI =====
+          // tipoComprobante: I=Ingreso, E=Egreso(Nota de crédito), T=Traslado, N=Nómina, P=Pago
+          const esNomina = cfdi.tipoComprobante === 'N';
+          const esNotaCredito = cfdi.tipoComprobante === 'E';
+
+          if (esNomina) {
+            // ===== NÓMINA → Guardar en ReciboNomina =====
+            // Buscar empleado por RFC del receptor
+            let empleado = await db.empleado.findFirst({
+              where: { rfc: cfdi.receptorRfc },
+            });
+
+            // Si no existe el empleado, crearlo automáticamente
+            if (!empleado) {
+              empleado = await db.empleado.create({
+                data: {
+                  nombre: cfdi.receptorNombre || 'Empleado sin nombre',
+                  rfc: cfdi.receptorRfc || 'XAXX000000XXX',
+                  puesto: 'Por clasificar',
+                  departamento: 'Por clasificar',
+                  salarioMensual: cfdi.total, // Aproximación
+                  empresaId: empId,
+                },
+              });
+            }
+
+            // Calcular deducciones aproximadas (15% del total)
+            const deducciones = cfdi.total * 0.15;
+            const neto = cfdi.total - deducciones;
+            const isr = deducciones * 0.5;
+            const imss = deducciones * 0.3;
+
+            const fechaRecibo = new Date(cfdi.fecha);
+            await db.reciboNomina.create({
+              data: {
+                folio: cfdi.folio,
+                fecha: fechaRecibo,
+                periodo: `${fechaRecibo.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}`,
+                totalPercepciones: cfdi.total,
+                totalDeducciones: deducciones,
+                neto,
+                isr,
+                imss,
+                uuid: cfdi.uuid || `${file.name}-${Date.now()}`,
+                estado: 'timbrado',
+                empleadoId: empleado.id,
+                empresaId: empId,
+              },
+            });
+
+            procesados++;
+            detalles.push({
+              archivo: file.name,
+              estado: 'nomina',
+              mensaje: `📋 Nómina → ${cfdi.receptorNombre}: $${cfdi.total.toFixed(2)} (guardada en módulo Nómina)`,
+            });
+            continue;
+          }
+
+          // ===== FACTURA NORMAL O NOTA DE CRÉDITO → Guardar en Factura =====
           // Buscar cliente/proveedor por RFC
           let clienteId: string | null = null;
           let proveedorId: string | null = null;
 
           if (direccion === 'emitida') {
-            // Si es emitida, el receptor es el cliente
             const cliente = await db.cliente.findFirst({ where: { rfc: cfdi.receptorRfc } });
             if (cliente) clienteId = cliente.id;
           } else {
-            // Si es recibida, el emisor es el proveedor
             const proveedor = await db.proveedor.findFirst({ where: { rfc: cfdi.emisorRfc } });
             if (proveedor) proveedorId = proveedor.id;
           }
 
-          // Crear factura
           await db.factura.create({
             data: {
               folio: cfdi.folio,
@@ -214,7 +272,7 @@ export async function POST(req: NextRequest) {
               totalImpuestos: cfdi.totalImpuestos,
               total: cfdi.total,
               moneda: cfdi.moneda,
-              tipoComprobante: cfdi.tipoComprobante,
+              tipoComprobante: cfdi.tipoComprobante, // I, E, T, P
               metodoPago: cfdi.metodoPago,
               formaPago: cfdi.formaPago,
               uuid: cfdi.uuid || `${file.name}-${Date.now()}`,
@@ -227,15 +285,17 @@ export async function POST(req: NextRequest) {
               receptorNombre: cfdi.receptorNombre,
               emisorRfc: cfdi.emisorRfc,
               emisorNombre: cfdi.emisorNombre,
-              concepto: `Importado: ${file.name}`,
+              concepto: esNotaCredito
+                ? `Nota de crédito: ${file.name}`
+                : `Importado: ${file.name}`,
             },
           });
 
           procesados++;
           detalles.push({
             archivo: file.name,
-            estado: 'procesado',
-            mensaje: `${cfdi.emisorNombre || 'N/A'} → ${cfdi.receptorNombre || 'N/A'}: $${cfdi.total.toFixed(2)}`,
+            estado: esNotaCredito ? 'nota_credito' : 'procesado',
+            mensaje: `${esNotaCredito ? '⚠️ Nota de crédito' : '🧾 Factura'} → ${cfdi.emisorNombre || 'N/A'} → ${cfdi.receptorNombre || 'N/A'}: $${cfdi.total.toFixed(2)}`,
           });
         } catch (e: any) {
           errores++;
@@ -266,57 +326,106 @@ export async function POST(req: NextRequest) {
               }
 
               if (cfdi.uuid) {
-                const existente = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
-                if (existente) {
+                const existenteFactura = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
+                const existenteNomina = await db.reciboNomina.findUnique({ where: { uuid: cfdi.uuid } });
+                if (existenteFactura || existenteNomina) {
                   duplicados++;
                   continue;
                 }
               }
 
               // Guardar XML
-              const xmlPath = path.join(uploadDir, entry.entryName);
-              const entryDir = path.dirname(xmlPath);
-              if (!existsSync(entryDir)) {
-                await mkdir(entryDir, { recursive: true });
-              }
-              await writeFile(xmlPath, xmlContent);
+              try {
+                const xmlPath = path.join(uploadDir, entry.entryName);
+                const entryDir = path.dirname(xmlPath);
+                if (!existsSync(entryDir)) {
+                  await mkdir(entryDir, { recursive: true });
+                }
+                await writeFile(xmlPath, xmlContent);
+              } catch {}
 
-              let clienteId: string | null = null;
-              let proveedorId: string | null = null;
-              if (direccion === 'emitida') {
-                const c = await db.cliente.findFirst({ where: { rfc: cfdi.receptorRfc } });
-                if (c) clienteId = c.id;
+              // Detectar tipo
+              const esNominaZip = cfdi.tipoComprobante === 'N';
+              const esNotaCreditoZip = cfdi.tipoComprobante === 'E';
+
+              if (esNominaZip) {
+                // Nómina → ReciboNomina
+                let empleado = await db.empleado.findFirst({
+                  where: { rfc: cfdi.receptorRfc },
+                });
+                if (!empleado) {
+                  empleado = await db.empleado.create({
+                    data: {
+                      nombre: cfdi.receptorNombre || 'Empleado sin nombre',
+                      rfc: cfdi.receptorRfc || 'XAXX000000XXX',
+                      puesto: 'Por clasificar',
+                      departamento: 'Por clasificar',
+                      salarioMensual: cfdi.total,
+                      empresaId: empId,
+                    },
+                  });
+                }
+                const deducciones = cfdi.total * 0.15;
+                const neto = cfdi.total - deducciones;
+                const fechaRecibo = new Date(cfdi.fecha);
+                await db.reciboNomina.create({
+                  data: {
+                    folio: cfdi.folio,
+                    fecha: fechaRecibo,
+                    periodo: `${fechaRecibo.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}`,
+                    totalPercepciones: cfdi.total,
+                    totalDeducciones: deducciones,
+                    neto,
+                    isr: deducciones * 0.5,
+                    imss: deducciones * 0.3,
+                    uuid: cfdi.uuid || `${entry.entryName}-${Date.now()}`,
+                    estado: 'timbrado',
+                    empleadoId: empleado.id,
+                    empresaId: empId,
+                  },
+                });
+                procesados++;
               } else {
-                const p = await db.proveedor.findFirst({ where: { rfc: cfdi.emisorRfc } });
-                if (p) proveedorId = p.id;
-              }
+                // Factura o nota de crédito → Factura
+                let clienteId: string | null = null;
+                let proveedorId: string | null = null;
+                if (direccion === 'emitida') {
+                  const c = await db.cliente.findFirst({ where: { rfc: cfdi.receptorRfc } });
+                  if (c) clienteId = c.id;
+                } else {
+                  const p = await db.proveedor.findFirst({ where: { rfc: cfdi.emisorRfc } });
+                  if (p) proveedorId = p.id;
+                }
 
-              await db.factura.create({
-                data: {
-                  folio: cfdi.folio,
-                  serie: cfdi.serie,
-                  fecha: cfdi.fecha,
-                  subtotal: cfdi.subtotal,
-                  totalImpuestos: cfdi.totalImpuestos,
-                  total: cfdi.total,
-                  moneda: cfdi.moneda,
-                  tipoComprobante: cfdi.tipoComprobante,
-                  metodoPago: cfdi.metodoPago,
-                  formaPago: cfdi.formaPago,
-                  uuid: cfdi.uuid || `${entry.entryName}-${Date.now()}`,
-                  direccion,
-                  estado: 'timbrada',
-                  empresaId: empId,
-                  clienteId,
-                  proveedorId,
-                  receptorRfc: cfdi.receptorRfc,
-                  receptorNombre: cfdi.receptorNombre,
-                  emisorRfc: cfdi.emisorRfc,
-                  emisorNombre: cfdi.emisorNombre,
-                  concepto: `Importado ZIP: ${file.name}`,
-                },
-              });
-              procesados++;
+                await db.factura.create({
+                  data: {
+                    folio: cfdi.folio,
+                    serie: cfdi.serie,
+                    fecha: cfdi.fecha,
+                    subtotal: cfdi.subtotal,
+                    totalImpuestos: cfdi.totalImpuestos,
+                    total: cfdi.total,
+                    moneda: cfdi.moneda,
+                    tipoComprobante: cfdi.tipoComprobante,
+                    metodoPago: cfdi.metodoPago,
+                    formaPago: cfdi.formaPago,
+                    uuid: cfdi.uuid || `${entry.entryName}-${Date.now()}`,
+                    direccion,
+                    estado: 'timbrada',
+                    empresaId: empId,
+                    clienteId,
+                    proveedorId,
+                    receptorRfc: cfdi.receptorRfc,
+                    receptorNombre: cfdi.receptorNombre,
+                    emisorRfc: cfdi.emisorRfc,
+                    emisorNombre: cfdi.emisorNombre,
+                    concepto: esNotaCreditoZip
+                      ? `Nota de crédito (ZIP): ${file.name}`
+                      : `Importado ZIP: ${file.name}`,
+                  },
+                });
+                procesados++;
+              }
             } catch (e) {
               errores++;
             }

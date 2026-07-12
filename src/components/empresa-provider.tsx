@@ -32,7 +32,6 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
       }));
       setEmpresas(lista);
 
-      // Restaurar empresa seleccionada de localStorage
       if (typeof localStorage !== 'undefined') {
         const guardada = localStorage.getItem('empresa-activa');
         if (guardada) {
@@ -46,7 +45,6 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Default: primera empresa
       if (lista.length > 0 && !empresa) {
         setEmpresaState(lista[0]);
         if (typeof localStorage !== 'undefined') {
