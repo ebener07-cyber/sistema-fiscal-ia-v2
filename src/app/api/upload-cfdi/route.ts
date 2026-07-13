@@ -88,6 +88,22 @@ function parseCFDIXML(xmlContent: string) {
     const totalTrasladados = parseFloat(getAttr(impuestosNode, 'TotalImpuestosTrasladados')) || 0;
     const totalRetenidos = parseFloat(getAttr(impuestosNode, 'TotalImpuestosRetenidos')) || 0;
 
+    // Detectar si el CFDI está cancelado
+    // Un CFDI cancelado tiene un nodo de cancelación en el complemento, o no tiene timbre
+    let estado = 'timbrada';
+    if (!uuid) {
+      estado = 'sin_timbrar';
+    }
+    // Verificar si tiene complemento de cancelación
+    if (complemento && (complemento['tfd:CancelaCfdi'] || complemento['CancelaCfdi'])) {
+      estado = 'cancelada';
+    }
+    // También verificar si el nodo raíz tiene atributo de estado cancelado
+    const estadoAttr = getAttr(comprobante, 'Estado') || getAttr(comprobante, 'SituacionFiscal');
+    if (estadoAttr && (estadoAttr === 'Cancelado' || estadoAttr === '0' || estadoAttr === '03')) {
+      estado = 'cancelada';
+    }
+
     return {
       folio,
       serie,
@@ -107,6 +123,7 @@ function parseCFDIXML(xmlContent: string) {
       receptorNombre,
       receptorUsoCfdi,
       lugarExpedicion,
+      estado,
     };
   } catch (e) {
     console.error('Error parseando CFDI:', e);
@@ -195,6 +212,13 @@ export async function POST(req: NextRequest) {
           // tipoComprobante: I=Ingreso, E=Egreso(Nota de crédito), T=Traslado, N=Nómina, P=Pago
           const esNomina = cfdi.tipoComprobante === 'N';
           const esNotaCredito = cfdi.tipoComprobante === 'E';
+          const esCancelada = cfdi.estado === 'cancelada';
+
+          // Saltar CFDIs cancelados — solo procesamos activos
+          if (esCancelada) {
+            detalles.push({ archivo: file.name, estado: 'cancelada', mensaje: '🚫 CFDI cancelado — omitido' });
+            continue;
+          }
 
           if (esNomina) {
             // ===== NÓMINA → Guardar en ReciboNomina =====
@@ -347,6 +371,12 @@ export async function POST(req: NextRequest) {
               // Detectar tipo
               const esNominaZip = cfdi.tipoComprobante === 'N';
               const esNotaCreditoZip = cfdi.tipoComprobante === 'E';
+              const esCanceladaZip = cfdi.estado === 'cancelada';
+
+              // Saltar canceladas
+              if (esCanceladaZip) {
+                continue;
+              }
 
               if (esNominaZip) {
                 // Nómina → ReciboNomina

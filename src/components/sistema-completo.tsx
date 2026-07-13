@@ -692,45 +692,121 @@ function ComprasView() {
   );
 }
 
-function InventarioView() {
-  const { data, loading } = useApiData<{ productos: any[] }>('/api/inventario');
+function InventarioView({ empresaId }: { empresaId?: string }) {
+  const { data, loading, refresh } = useApiData<{ productos: any[] }>('/api/inventario', empresaId);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ codigo: '', nombre: '', categoria: '', existencia: '0', minimo: '0', precio: '0' });
+
+  const crear = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const r = await fetch('/api/inventario', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...form, empresaId }),
+    });
+    if (r.ok) {
+      setShowForm(false);
+      setForm({ codigo: '', nombre: '', categoria: '', existencia: '0', minimo: '0', precio: '0' });
+      refresh();
+    }
+  };
+
   if (loading) return <div className="text-center py-20">Cargando...</div>;
-  if (!data?.productos?.length) return <EmptyState icon={Package} message="Sin productos" />;
   return (
-    <DataTableCard title={`Productos (${data.productos.length})`}>
-      <table className="w-full text-sm">
-        <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-          <th className="px-4 py-2">Código</th><th className="px-4 py-2">Producto</th>
-          <th className="px-4 py-2">Categoría</th><th className="px-4 py-2">Existencia</th>
-          <th className="px-4 py-2">Mínimo</th><th className="px-4 py-2 text-right">Precio</th>
-          <th className="px-4 py-2">Estado</th>
-        </tr></thead>
-        <tbody>
-          {data.productos.map((p) => (
-            <tr key={p.id} className="border-b hover:bg-muted/30">
-              <td className="px-4 py-2 font-mono text-xs">{p.codigo}</td>
-              <td className="px-4 py-2 font-medium">{p.nombre}</td>
-              <td className="px-4 py-2 text-muted-foreground">{p.categoria || '—'}</td>
-              <td className="px-4 py-2">{p.existencia}</td>
-              <td className="px-4 py-2 text-muted-foreground">{p.minimo}</td>
-              <td className="px-4 py-2 text-right font-semibold">{fmt(p.precio)}</td>
-              <td className="px-4 py-2">
-                <Badge variant={p.existencia <= p.minimo ? 'destructive' : 'default'}>
-                  {p.existencia <= p.minimo ? 'Bajo' : 'Stock'}
-                </Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </DataTableCard>
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button onClick={() => setShowForm(!showForm)}>
+          <Plus size={14} className="mr-2" /> {showForm ? 'Cancelar' : 'Nuevo producto'}
+        </Button>
+      </div>
+      {showForm && (
+        <Card className="p-5">
+          <form onSubmit={crear} className="grid md:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Código *</label>
+              <Input value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value })} className="mt-1" required />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Nombre *</label>
+              <Input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="mt-1" required />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Categoría</label>
+              <Input value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Existencia</label>
+              <Input type="number" value={form.existencia} onChange={e => setForm({ ...form, existencia: e.target.value })} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Mínimo</label>
+              <Input type="number" value={form.minimo} onChange={e => setForm({ ...form, minimo: e.target.value })} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Precio</label>
+              <Input type="number" step="0.01" value={form.precio} onChange={e => setForm({ ...form, precio: e.target.value })} className="mt-1" />
+            </div>
+            <div className="md:col-span-3">
+              <Button type="submit">Crear producto</Button>
+            </div>
+          </form>
+        </Card>
+      )}
+      {(data?.productos?.length || 0) === 0 ? (
+        <EmptyState icon={Package} message="Sin productos — agrega tu primer producto" />
+      ) : (
+        <DataTableCard title={`Productos (${data.productos.length})`}>
+          <table className="w-full text-sm">
+            <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
+              <th className="px-4 py-2">Código</th><th className="px-4 py-2">Producto</th>
+              <th className="px-4 py-2">Categoría</th><th className="px-4 py-2">Existencia</th>
+              <th className="px-4 py-2">Mínimo</th><th className="px-4 py-2 text-right">Precio</th>
+              <th className="px-4 py-2">Estado</th>
+            </tr></thead>
+            <tbody>
+              {data.productos.map((p) => (
+                <tr key={p.id} className="border-b hover:bg-muted/30">
+                  <td className="px-4 py-2 font-mono text-xs">{p.codigo}</td>
+                  <td className="px-4 py-2 font-medium">{p.nombre}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{p.categoria || '—'}</td>
+                  <td className="px-4 py-2">{p.existencia}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{p.minimo}</td>
+                  <td className="px-4 py-2 text-right font-semibold">{fmt(p.precio)}</td>
+                  <td className="px-4 py-2">
+                    <Badge variant={p.existencia <= p.minimo ? 'destructive' : 'default'}>
+                      {p.existencia <= p.minimo ? 'Bajo' : 'Stock'}
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DataTableCard>
+      )}
+    </div>
   );
 }
 
-function BancosView() {
-  const { data, loading, refresh } = useApiData<{ cuentas: any[]; movimientos: any[] }>('/api/bancos');
+function BancosView({ empresaId }: { empresaId?: string }) {
+  const { data, loading, refresh } = useApiData<{ cuentas: any[]; movimientos: any[] }>('/api/bancos', empresaId);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
+  const [showCuentaForm, setShowCuentaForm] = useState(false);
+  const [cuentaForm, setCuentaForm] = useState({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
+
+  const crearCuenta = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const r = await fetch('/api/bancos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...cuentaForm, empresaId }),
+    });
+    if (r.ok) {
+      setShowCuentaForm(false);
+      setCuentaForm({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
+      refresh();
+    }
+  };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -744,11 +820,7 @@ function BancosView() {
       const hoy = new Date();
       formData.append('mes', String(hoy.getMonth() + 1));
       formData.append('anio', String(hoy.getFullYear()));
-
-      const r = await fetch('/api/upload-estado-cuenta', {
-        method: 'POST',
-        body: formData,
-      });
+      const r = await fetch('/api/upload-estado-cuenta', { method: 'POST', body: formData });
       const d = await r.json();
       if (d.success) {
         setUploadMsg(`✅ ${d.message} (${d.movimientosCreados} movimientos nuevos)`);
@@ -765,66 +837,102 @@ function BancosView() {
   };
 
   if (loading) return <div className="text-center py-20">Cargando...</div>;
-  if (!data?.cuentas?.length) return <EmptyState icon={Banknote} message="Sin cuentas bancarias" />;
 
   return (
     <div className="space-y-4">
-      <div className="grid md:grid-cols-2 gap-3">
-        {data.cuentas.map((c) => (
-          <Card key={c.id} className="p-5 border-l-4 border-l-emerald-500">
-            <div className="text-xs uppercase font-semibold text-muted-foreground">{c.banco} {c.cuenta}</div>
-            <div className="text-2xl font-bold text-emerald-600 mt-1">{fmt(c.saldo)}</div>
-            <div className="text-xs text-muted-foreground mt-1">{c._count.movimientos} movimientos</div>
-          </Card>
-        ))}
+      {/* Botón crear cuenta */}
+      <div className="flex justify-end">
+        <Button onClick={() => setShowCuentaForm(!showCuentaForm)}>
+          <Plus size={14} className="mr-2" /> {showCuentaForm ? 'Cancelar' : 'Nueva cuenta bancaria'}
+        </Button>
       </div>
 
-      {/* Cargar estado de cuenta */}
+      {/* Formulario nueva cuenta */}
+      {showCuentaForm && (
+        <Card className="p-5">
+          <form onSubmit={crearCuenta} className="grid md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Banco *</label>
+              <Input value={cuentaForm.banco} onChange={e => setCuentaForm({ ...cuentaForm, banco: e.target.value })} placeholder="Banorte" className="mt-1" required />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Cuenta *</label>
+              <Input value={cuentaForm.cuenta} onChange={e => setCuentaForm({ ...cuentaForm, cuenta: e.target.value })} placeholder="****4521" className="mt-1" required />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Saldo inicial</label>
+              <Input type="number" step="0.01" value={cuentaForm.saldo} onChange={e => setCuentaForm({ ...cuentaForm, saldo: e.target.value })} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Tipo</label>
+              <select value={cuentaForm.tipo} onChange={e => setCuentaForm({ ...cuentaForm, tipo: e.target.value })} className="w-full mt-1 p-2 border rounded-md bg-background text-sm">
+                <option value="operaciones">Operaciones</option>
+                <option value="ahorro">Ahorro</option>
+                <option value="inversion">Inversión</option>
+              </select>
+            </div>
+            <div className="md:col-span-2"><Button type="submit">Crear cuenta</Button></div>
+          </form>
+        </Card>
+      )}
+
+      {/* Cuentas */}
+      {(data?.cuentas?.length || 0) > 0 && (
+        <div className="grid md:grid-cols-2 gap-3">
+          {data.cuentas.map((c) => (
+            <Card key={c.id} className="p-5 border-l-4 border-l-emerald-500">
+              <div className="text-xs uppercase font-semibold text-muted-foreground">{c.banco} {c.cuenta}</div>
+              <div className="text-2xl font-bold text-emerald-600 mt-1">{fmt(c.saldo)}</div>
+              <div className="text-xs text-muted-foreground mt-1">{c._count?.movimientos || 0} movimientos · {c.tipo}</div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Upload estado de cuenta */}
       <Card className="p-5">
         <h3 className="font-semibold mb-2 flex items-center gap-2">
           <Upload size={16} className="text-violet-600" /> Cargar estado de cuenta (PDF/CSV)
         </h3>
         <p className="text-xs text-muted-foreground mb-3">
           Sube el estado de cuenta de tu banco. Si es CSV, se importan los movimientos automáticamente.
-          Los PDFs se guardan para consulta manual.
         </p>
         <label className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
           <Upload size={28} className="text-muted-foreground mb-2" />
-          <span className="text-sm font-medium">
-            {uploading ? 'Procesando...' : 'Haz clic o arrastra tu archivo aquí'}
-          </span>
+          <span className="text-sm font-medium">{uploading ? 'Procesando...' : 'Haz clic o arrastra tu archivo aquí'}</span>
           <span className="text-xs text-muted-foreground mt-1">Formatos: CSV (auto-importa), PDF (guarda)</span>
-          <input type="file" accept=".csv,.pdf,.xlsx" onChange={handleUpload} disabled={uploading} className="hidden" />
+          <input type="file" accept=".csv,.pdf,.xlsx" onChange={handleUpload} disabled={uploading || !data?.cuentas?.length} className="hidden" />
         </label>
-        {uploadMsg && (
-          <div className={cn('mt-3 p-2 rounded text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>
-            {uploadMsg}
-          </div>
-        )}
+        {!data?.cuentas?.length && <p className="text-xs text-amber-600 mt-2">⚠️ Primero crea una cuenta bancaria para poder subir estados de cuenta</p>}
+        {uploadMsg && <div className={cn('mt-3 p-2 rounded text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>{uploadMsg}</div>}
       </Card>
 
-      <DataTableCard title="Movimientos recientes">
-        <table className="w-full text-sm">
-          <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-            <th className="px-4 py-2">Fecha</th><th className="px-4 py-2">Cuenta</th>
-            <th className="px-4 py-2">Concepto</th><th className="px-4 py-2 text-right">Monto</th>
-            <th className="px-4 py-2">Tipo</th>
-          </tr></thead>
-          <tbody>
-            {data.movimientos.map((m) => (
-              <tr key={m.id} className="border-b hover:bg-muted/30">
-                <td className="px-4 py-2">{new Date(m.fecha).toLocaleDateString('es-MX')}</td>
-                <td className="px-4 py-2">{m.cuenta.banco}</td>
-                <td className="px-4 py-2">{m.concepto}</td>
-                <td className={cn('px-4 py-2 text-right font-semibold', m.monto >= 0 ? 'text-emerald-600' : 'text-red-600')}>
-                  {m.monto >= 0 ? '+' : ''}{fmt(m.monto)}
-                </td>
-                <td className="px-4 py-2"><Badge variant="secondary">{m.tipo}</Badge></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </DataTableCard>
+      {/* Movimientos */}
+      {(data?.movimientos?.length || 0) > 0 && (
+        <DataTableCard title="Movimientos recientes">
+          <table className="w-full text-sm">
+            <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
+              <th className="px-4 py-2">Fecha</th><th className="px-4 py-2">Cuenta</th>
+              <th className="px-4 py-2">Concepto</th><th className="px-4 py-2 text-right">Monto</th>
+              <th className="px-4 py-2">Tipo</th>
+            </tr></thead>
+            <tbody>
+              {(data?.movimientos || []).map((m) => (
+                <tr key={m.id} className="border-b hover:bg-muted/30">
+                  <td className="px-4 py-2">{new Date(m.fecha).toLocaleDateString('es-MX')}</td>
+                  <td className="px-4 py-2">{m.cuenta?.banco}</td>
+                  <td className="px-4 py-2">{m.concepto}</td>
+                  <td className={cn('px-4 py-2 text-right font-semibold', m.monto >= 0 ? 'text-emerald-600' : 'text-red-600')}>{m.monto >= 0 ? '+' : ''}{fmt(m.monto)}</td>
+                  <td className="px-4 py-2"><Badge variant="secondary">{m.tipo}</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DataTableCard>
+      )}
+      {(data?.cuentas?.length || 0) === 0 && (data?.movimientos?.length || 0) === 0 && (
+        <EmptyState icon={Banknote} message="Sin cuentas bancarias — crea tu primera cuenta" />
+      )}
     </div>
   );
 }
@@ -918,6 +1026,25 @@ function SatView() {
           📤 CFDIs Emitidos
         </button>
       </div>
+
+      {/* Botón eliminar mes */}
+      {mesSel !== 0 && (data?.count || 0) > 0 && (
+        <div className="flex justify-end">
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={async () => {
+              if (!confirm(`¿Eliminar TODAS las facturas ${tab} de ${meses[mesSel - 1]} ${anioSel}?\n\nSe eliminarán ${data?.count || 0} factura(s). Esta acción no se puede deshacer.`)) return;
+              const r = await fetch(`/api/facturas/eliminar-mes?mes=${mesSel}&anio=${anioSel}&direccion=${dirParam}${empresaId ? `&empresaId=${empresaId}` : ''}`, { method: 'DELETE' });
+              const d = await r.json();
+              if (d.success) { alert(d.message); refresh(); }
+              else alert(`Error: ${d.error}`);
+            }}
+          >
+            <Trash2 size={14} className="mr-2" /> Eliminar {meses[mesSel - 1]} {anioSel}
+          </Button>
+        </div>
+      )}
 
       {/* Upload zone */}
       <Card className="p-5">
