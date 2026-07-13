@@ -16,12 +16,16 @@ export async function GET(req: NextRequest) {
     const hoy = new Date();
     const mes = parseInt(searchParams.get('mes') ?? String(hoy.getMonth() + 1));
     const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
+    const empresaId = searchParams.get('empresaId') || undefined;
 
     const inicio = new Date(anio, mes - 1, 1);
     const fin = new Date(anio, mes, 0, 23, 59, 59);
 
     const recibos = await db.reciboNomina.findMany({
-      where: { fecha: { gte: inicio, lte: fin } },
+      where: {
+        fecha: { gte: inicio, lte: fin },
+        ...(empresaId ? { empresaId } : {}),
+      },
       include: { empleado: true },
       orderBy: { fecha: 'asc' },
     });

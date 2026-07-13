@@ -1,57 +1,53 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+/**
+ * Next.js 16 — proxy.ts (reemplaza middleware.ts)
+ *
+ * Solo protege rutas /api (excepto /api/auth/*).
+ * Las páginas se protegen client-side (home-page.tsx redirige a /login si no hay auth).
+ */
 
-const publicRoutes = ['/login', '/api/auth/login', '/api/auth/logout'];
+import { NextRequest, NextResponse } from 'next/server';
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Permitir rutas públicas
-  if (publicRoutes.some(route => pathname.startsWith(route))) {
+  // Solo intervenir en rutas API
+  if (!pathname.startsWith('/api')) {
     return NextResponse.next();
   }
 
-  // Permitir TODO lo de _next sin verificar token
-  if (pathname.startsWith('/_next')) {
+  // Permitir rutas públicas de auth
+  if (pathname.startsWith('/api/auth/')) {
     return NextResponse.next();
   }
 
-  // Permitir archivos estáticos
-  if (pathname.startsWith('/favicon') || pathname.match(/\.(svg|png|jpg|ico|css|js|woff|woff2|ttf|eot)$/)) {
-    return NextResponse.next();
-  }
-
-  // Para APIs, verificar token
-  const token = request.cookies.get('auth-token')?.value;
-
+  // Verificar token en cookie httpOnly
+  const token = request.cookies.get('token')?.value;
   if (!token) {
-    if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-    }
-    // NO redirigir páginas — dejar que el cliente maneje la auth
-    // Solo las APIs están protegidas
-    return NextResponse.next();
+    return NextResponse.json(
+      { error: 'No autenticado', code: 'NO_TOKEN' },
+      { status: 401 }
+    );
   }
 
-  // Verificar expiración
+  // Verificación básica (la validación completa se hace en cada route handler con verifyToken)
   try {
-    const decoded = atob(token);
-    const payload = JSON.parse(decoded);
+    const payload = JSON.parse(Buffer.from(token, 'base64').toString('utf-8'));
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-      if (pathname.startsWith('/api/')) {
-        return NextResponse.json({ error: 'Token expirado' }, { status: 401 });
-      }
-      return NextResponse.next();
+      return NextResponse.json(
+        { error: 'Sesión expirada', code: 'TOKEN_EXPIRED' },
+        { status: 401 }
+      );
     }
   } catch {
-    if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'Token inválido' }, { status: 401 });
-    }
+    return NextResponse.json(
+      { error: 'Token inválido', code: 'INVALID_TOKEN' },
+      { status: 401 }
+    );
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/((?!_next|favicon.ico|login|robots.txt).*)'],
+  matcher: ['/api/:path*'],
 };

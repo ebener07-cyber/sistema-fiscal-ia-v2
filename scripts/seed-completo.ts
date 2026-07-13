@@ -1,8 +1,9 @@
 /**
  * Seed completo del Sistema Fiscal IA ERP
- * Ejecutar: bun run db:seed
+ * Ejecutar: bun run scripts/seed-completo.ts
  */
 import { db } from '../src/lib/db';
+import { hashPassword } from '../src/lib/auth';
 
 async function main() {
   console.log('🌱 Sembrando sistema completo...');
@@ -39,13 +40,26 @@ async function main() {
   });
   console.log('✅ Empresa creada');
 
-  // USUARIOS
-  await db.usuario.createMany({
-    data: [
-      { email: 'admin@hernandez.mx', nombre: 'Hernández Admin', password: 'admin123', rol: 'admin', empresaId: empresa.id },
-      { email: 'maria@hernandez.mx', nombre: 'María López', password: 'maria123', rol: 'contador', empresaId: empresa.id },
-    ],
+  // USUARIOS (con contraseñas hasheadas)
+  await db.usuario.create({
+    data: {
+      email: 'admin@hernandez.mx',
+      nombre: 'Hernández Admin',
+      password: hashPassword('admin123'),
+      rol: 'admin',
+      empresaId: empresa.id,
+    },
   });
+  await db.usuario.create({
+    data: {
+      email: 'maria@hernandez.mx',
+      nombre: 'María López',
+      password: hashPassword('maria123'),
+      rol: 'usuario',
+      empresaId: empresa.id,
+    },
+  });
+  console.log('✅ Usuarios creados (admin@hernandez.mx / admin123)');
 
   // CLIENTES
   const clientes = await Promise.all([

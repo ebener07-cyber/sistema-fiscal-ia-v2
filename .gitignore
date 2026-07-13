@@ -50,5 +50,9 @@ test
 prompt
 
 server.log
-# Skills directory
-/skills/
+
+# Skills: excluir todo MENOS las leyes fiscales (necesarias para RAG en producción)
+/skills/*
+!/skills/auditoria-fiscal/
+/skills/auditoria-fiscal/*.md
+!/skills/auditoria-fiscal/laws/

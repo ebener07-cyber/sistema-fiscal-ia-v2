@@ -18,7 +18,7 @@ import { useTheme } from '@/components/theme-provider';
 import { useEmpresa } from '@/components/empresa-provider';
 import { useRouter } from 'next/navigation';
 import {
-  Settings, KeyRound, Trash2, ShieldAlert, Lock,
+  Settings, KeyRound, Trash2, ShieldAlert, Lock, Shield,
 } from 'lucide-react';
 
 // ====================== TIPOS ======================
@@ -78,6 +78,7 @@ const NAV = [
     ],
   },
   { section: 'Asistente IA', items: [{ id: 'abbax', label: 'Abbax (Stark)', icon: Zap }] },
+  { section: 'Sistema', items: [{ id: 'admin', label: 'Admin Usuarios', icon: Shield }] },
 ];
 
 // ====================== COMPONENTE PRINCIPAL ======================
@@ -111,14 +112,17 @@ export function SistemaCompleto() {
 
   const cargarStats = useCallback(async () => {
     try {
-      const r = await fetch('/api/stats', { credentials: 'include' });
+      const url = empresa?.id
+        ? `/api/stats?empresaId=${encodeURIComponent(empresa.id)}`
+        : '/api/stats';
+      const r = await fetch(url, { credentials: 'include' });
       const d = await r.json();
       return d;
     } catch (e) {
       console.error('Error cargando stats:', e);
       return null;
     }
-  }, []);
+  }, [empresa?.id]);
 
   useEffect(() => {
     if (!authChecked) return;
@@ -234,10 +238,10 @@ export function SistemaCompleto() {
           {view === 'proveedores' && <ProveedoresView />}
           {view === 'empleados' && <EmpleadosView />}
           {view === 'facturacion' && <FacturacionView />}
-          {view === 'nomina' && <NominaView />}
+          {view === 'nomina' && <NominaView empresaId={empresa?.id} />}
           {view === 'compras' && <ComprasView />}
-          {view === 'inventario' && <InventarioView />}
-          {view === 'bancos' && <BancosView />}
+          {view === 'inventario' && <InventarioView empresaId={empresa?.id} />}
+          {view === 'bancos' && <BancosView empresaId={empresa?.id} />}
           {view === 'contabilidad' && <ContabilidadView />}
           {view === 'sat' && <SatView />}
           {view === 'ia-fiscal' && <IaFiscalView />}
@@ -252,6 +256,7 @@ export function SistemaCompleto() {
           {view === 'reportes' && <ReportesView stats={stats} />}
           {view === 'balance' && <BalanceView />}
           {view === 'abbax' && <AbbaxView onDatosActualizados={cargarStats} />}
+          {view === 'admin' && <AdminView />}
         </main>
       </div>
 
@@ -374,20 +379,27 @@ function DashboardView({ stats, setView }: { stats: Stats | null; setView: (v: s
 }
 
 // ====================== COMPONENTES DE VISTAS ======================
-function useApiData<T>(url: string): { data: T | null; loading: boolean; refresh: () => void } {
+function useApiData<T>(url: string, empresaId?: string | null): { data: T | null; loading: boolean; refresh: () => void } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Construir URL con query param empresaId si está disponible
+  const urlConEmpresa = (() => {
+    if (!empresaId) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}empresaId=${encodeURIComponent(empresaId)}`;
+  })();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(url);
+      const r = await fetch(urlConEmpresa, { credentials: 'include' });
       const d = await r.json();
       setData(d);
     } finally {
       setLoading(false);
     }
-  }, [url]);
+  }, [urlConEmpresa]);
 
   useEffect(() => { load(); }, [load]);
   return { data, loading, refresh: load };
@@ -412,7 +424,8 @@ function EmptyState({ icon: Icon, message }: { icon: any; message: string }) {
 }
 
 function ClientesView() {
-  const { data, loading } = useApiData<{ clientes: any[] }>('/api/clientes');
+  const { empresa } = useEmpresa();
+  const { data, loading } = useApiData<{ clientes: any[] }>('/api/clientes', empresa?.id);
   if (loading) return <div className="text-center py-20">Cargando clientes...</div>;
   if (!data?.clientes?.length) return <EmptyState icon={Users} message="Sin clientes registrados" />;
   return (
@@ -440,7 +453,8 @@ function ClientesView() {
 }
 
 function ProveedoresView() {
-  const { data, loading } = useApiData<{ proveedores: any[] }>('/api/proveedores');
+  const { empresa } = useEmpresa();
+  const { data, loading } = useApiData<{ proveedores: any[] }>('/api/proveedores', empresa?.id);
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.proveedores?.length) return <EmptyState icon={Truck} message="Sin proveedores" />;
   return (
@@ -468,7 +482,8 @@ function ProveedoresView() {
 }
 
 function EmpleadosView() {
-  const { data, loading } = useApiData<{ empleados: any[] }>('/api/empleados');
+  const { empresa } = useEmpresa();
+  const { data, loading } = useApiData<{ empleados: any[] }>('/api/empleados', empresa?.id);
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.empleados?.length) return <EmptyState icon={User} message="Sin empleados" />;
   return (
@@ -497,7 +512,8 @@ function EmpleadosView() {
 }
 
 function FacturacionView() {
-  const { data, loading } = useApiData<{ facturas: any[]; total: number; iva: number }>('/api/facturas');
+  const { empresa } = useEmpresa();
+  const { data, loading } = useApiData<{ facturas: any[]; total: number; iva: number }>('/api/facturas', empresa?.id);
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.facturas?.length) return <EmptyState icon={FileText} message="Sin facturas" />;
   return (
@@ -699,7 +715,8 @@ function NominaView({ empresaId }: { empresaId?: string }) {
 }
 
 function ComprasView() {
-  const { data, loading } = useApiData<{ ordenes: any[] }>('/api/compras');
+  const { empresa } = useEmpresa();
+  const { data, loading } = useApiData<{ ordenes: any[] }>('/api/compras', empresa?.id);
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.ordenes?.length) return <EmptyState icon={ShoppingCart} message="Sin órdenes de compra" />;
   return (
@@ -855,6 +872,7 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       const hoy = new Date();
       formData.append('mes', String(hoy.getMonth() + 1));
       formData.append('anio', String(hoy.getFullYear()));
+      if (empresaId) formData.append('empresaId', empresaId);
       const r = await fetch('/api/upload-estado-cuenta', { method: 'POST', body: formData });
       const d = await r.json();
       if (d.success) {
@@ -973,7 +991,8 @@ function BancosView({ empresaId }: { empresaId?: string }) {
 }
 
 function ContabilidadView() {
-  const { data, loading } = useApiData<{ polizas: any[] }>('/api/polizas');
+  const { empresa } = useEmpresa();
+  const { data, loading } = useApiData<{ polizas: any[] }>('/api/polizas', empresa?.id);
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.polizas?.length) return <EmptyState icon={BookOpen} message="Sin pólizas" />;
   return (
@@ -1004,11 +1023,12 @@ function ContabilidadView() {
 }
 
 function SatView() {
+  const { empresa } = useEmpresa();
   const [tab, setTab] = useState<'recibidas' | 'emitidas'>('recibidas');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [resultados, setResultados] = useState<any[]>([]);
-  const { data, loading, refresh } = useApiData<{ facturas: any[] }>(`/api/facturas?direccion=${tab === 'recibidas' ? 'recibida' : 'emitida'}&limit=20`);
+  const { data, loading, refresh } = useApiData<{ facturas: any[] }>(`/api/facturas?direccion=${tab === 'recibidas' ? 'recibida' : 'emitida'}&limit=20`, empresa?.id);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1021,6 +1041,7 @@ function SatView() {
         formData.append('files', files[i]);
       }
       formData.append('direccion', tab === 'recibidas' ? 'recibida' : 'emitida');
+      if (empresa?.id) formData.append('empresaId', empresa.id);
 
       const r = await fetch('/api/upload-cfdi', {
         method: 'POST',
@@ -1252,7 +1273,8 @@ function FinanzasView({ stats }: { stats: Stats | null }) {
 }
 
 function CrmView() {
-  const { data, loading } = useApiData<{ oportunidades: any[] }>('/api/crm');
+  const { empresa } = useEmpresa();
+  const { data, loading } = useApiData<{ oportunidades: any[] }>('/api/crm', empresa?.id);
   if (loading) return <div className="text-center py-20">Cargando...</div>;
   if (!data?.oportunidades?.length) return <EmptyState icon={TrendingUp} message="Sin oportunidades" />;
   return (
@@ -1280,6 +1302,7 @@ function CrmView() {
 }
 
 function ReportesView({ stats }: { stats: Stats | null }) {
+  const { empresa } = useEmpresa();
   if (!stats) return <div className="text-center py-20">Cargando...</div>;
   const meses = [
     { m: 'Febrero', i: 265000, e: 245000 },
@@ -1330,7 +1353,12 @@ function ReportesView({ stats }: { stats: Stats | null }) {
             <Button
               onClick={() => {
                 const hoy = new Date();
-                window.open(`/api/export/facturas?mes=${hoy.getMonth() + 1}&anio=${hoy.getFullYear()}`, '_blank');
+                const params = new URLSearchParams({
+                  mes: String(hoy.getMonth() + 1),
+                  anio: String(hoy.getFullYear()),
+                });
+                if (empresa?.id) params.set('empresaId', empresa.id);
+                window.open(`/api/export/facturas?${params}`, '_blank');
               }}
             >
               <FileSpreadsheet size={14} className="mr-2" /> Descargar Excel Facturas
@@ -1348,7 +1376,12 @@ function ReportesView({ stats }: { stats: Stats | null }) {
               variant="secondary"
               onClick={() => {
                 const hoy = new Date();
-                window.open(`/api/export/nomina?mes=${hoy.getMonth() + 1}&anio=${hoy.getFullYear()}`, '_blank');
+                const params = new URLSearchParams({
+                  mes: String(hoy.getMonth() + 1),
+                  anio: String(hoy.getFullYear()),
+                });
+                if (empresa?.id) params.set('empresaId', empresa.id);
+                window.open(`/api/export/nomina?${params}`, '_blank');
               }}
             >
               <FileSpreadsheet size={14} className="mr-2" /> Descargar Excel Nómina
@@ -1549,6 +1582,7 @@ function AuditoriaFiscalView() {
 
 // ====================== DIOT VIEW ======================
 function DiotView() {
+  const { empresa } = useEmpresa();
   const [periodo, setPeriodo] = useState({ mes: new Date().getMonth() + 1, anio: new Date().getFullYear() });
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -1556,7 +1590,12 @@ function DiotView() {
   const cargar = async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/diot?mes=${periodo.mes}&anio=${periodo.anio}`);
+      const params = new URLSearchParams({
+        mes: String(periodo.mes),
+        anio: String(periodo.anio),
+      });
+      if (empresa?.id) params.set('empresaId', empresa.id);
+      const r = await fetch(`/api/diot?${params}`);
       const d = await r.json();
       setData(d);
     } finally {
@@ -1564,7 +1603,7 @@ function DiotView() {
     }
   };
 
-  useEffect(() => { cargar(); }, [periodo]);
+  useEffect(() => { cargar(); }, [periodo, empresa?.id]);
 
   const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -1652,6 +1691,7 @@ function DiotView() {
 
 // ====================== INEGI VIEW ======================
 function InegiView() {
+  const { empresa } = useEmpresa();
   const [anio, setAnio] = useState(new Date().getFullYear());
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -1659,7 +1699,9 @@ function InegiView() {
   const cargar = async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/inegi?anio=${anio}`);
+      const params = new URLSearchParams({ anio: String(anio) });
+      if (empresa?.id) params.set('empresaId', empresa.id);
+      const r = await fetch(`/api/inegi?${params}`);
       const d = await r.json();
       setData(d);
     } finally {
@@ -1667,7 +1709,7 @@ function InegiView() {
     }
   };
 
-  useEffect(() => { cargar(); }, [anio]);
+  useEffect(() => { cargar(); }, [anio, empresa?.id]);
 
   return (
     <div className="space-y-4">
@@ -1762,6 +1804,7 @@ function InegiView() {
 
 // ====================== BALANCE GENERAL VIEW ======================
 function BalanceView() {
+  const { empresa } = useEmpresa();
   const [anio, setAnio] = useState(new Date().getFullYear());
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -1769,7 +1812,9 @@ function BalanceView() {
   const cargar = async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/balance?anio=${anio}`);
+      const params = new URLSearchParams({ anio: String(anio) });
+      if (empresa?.id) params.set('empresaId', empresa.id);
+      const r = await fetch(`/api/balance?${params}`);
       const d = await r.json();
       setData(d);
     } finally {
@@ -1777,7 +1822,7 @@ function BalanceView() {
     }
   };
 
-  useEffect(() => { cargar(); }, [anio]);
+  useEffect(() => { cargar(); }, [anio, empresa?.id]);
 
   return (
     <div className="space-y-4">
@@ -1847,6 +1892,7 @@ function BalanceView() {
 // ====================== EMPRESAS VIEW (con alta + constancia fiscal) ======================
 function EmpresasView() {
   const { data, loading, refresh } = useApiData<{ empresas: any[] }>('/api/empresas');
+  const { empresa, setEmpresa } = useEmpresa();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ nombre: '', rfc: '', regimenFiscal: '', email: '', telefono: '', direccion: '' });
   const [error, setError] = useState('');
@@ -1854,6 +1900,41 @@ function EmpresasView() {
   const [procesandoConstancia, setProcesandoConstancia] = useState(false);
   const [datosConstancia, setDatosConstancia] = useState<any>(null);
   const [msgConstancia, setMsgConstancia] = useState('');
+  const [eliminando, setEliminando] = useState<string | null>(null);
+
+  const handleEliminar = async (id: string, nombre: string, rfc: string) => {
+    const totalRel = 0; // ya viene en _count
+    const confirmar = window.confirm(
+      `¿Eliminar la empresa "${nombre}" (RFC: ${rfc})?\n\n` +
+      `Se eliminarán TODOS sus datos relacionados:\n` +
+      `• Facturas y CFDIs\n` +
+      `• Empleados y Recibos de nómina\n` +
+      `• Clientes y Proveedores\n` +
+      `• Productos e Inventario\n` +
+      `• Cuentas bancarias y Movimientos\n\n` +
+      `Esta acción NO se puede deshacer.`
+    );
+    if (!confirmar) return;
+
+    setEliminando(id);
+    try {
+      const r = await fetch(`/api/empresas/${id}`, { method: 'DELETE' });
+      const d = await r.json();
+      if (!r.ok) {
+        alert(d.error || 'Error al eliminar empresa');
+      } else {
+        // Si la empresa eliminada era la seleccionada, limpiar selección
+        if (empresa?.id === id) {
+          setEmpresa(null);
+        }
+        refresh();
+      }
+    } catch (e: any) {
+      alert(`Error: ${e.message}`);
+    } finally {
+      setEliminando(null);
+    }
+  };
 
   const handleUploadConstancia = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2058,6 +2139,7 @@ function EmpresasView() {
             <th className="px-4 py-2">Régimen</th><th className="px-4 py-2">Clientes</th>
             <th className="px-4 py-2">Proveedores</th><th className="px-4 py-2">Empleados</th>
             <th className="px-4 py-2">Estado</th>
+            <th className="px-4 py-2 text-right">Acciones</th>
           </tr></thead>
           <tbody>
             {(data?.empresas || []).map((e: any) => (
@@ -2069,6 +2151,21 @@ function EmpresasView() {
                 <td className="px-4 py-2"><Badge variant="secondary">{e._count.proveedores}</Badge></td>
                 <td className="px-4 py-2"><Badge variant="secondary">{e._count.empleados}</Badge></td>
                 <td className="px-4 py-2"><Badge variant={e.status === 'activo' ? 'default' : 'secondary'}>{e.status}</Badge></td>
+                <td className="px-4 py-2 text-right">
+                  <button
+                    onClick={() => handleEliminar(e.id, e.nombre, e.rfc)}
+                    disabled={eliminando === e.id}
+                    title="Eliminar empresa y todos sus datos"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  >
+                    {eliminando === e.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={12} />
+                    )}
+                    {eliminando === e.id ? 'Eliminando...' : 'Eliminar'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -2080,7 +2177,8 @@ function EmpresasView() {
 
 // ====================== IMSS VIEW ======================
 function ImssView() {
-  const { data, loading, refresh } = useApiData<any>('/api/imss');
+  const { empresa } = useEmpresa();
+  const { data, loading, refresh } = useApiData<any>('/api/imss', empresa?.id);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [periodo, setPeriodo] = useState({ mes: new Date().getMonth() + 1, anio: new Date().getFullYear() });
@@ -2095,6 +2193,7 @@ function ImssView() {
       formData.append('file', file);
       formData.append('mes', String(periodo.mes));
       formData.append('anio', String(periodo.anio));
+      if (empresa?.id) formData.append('empresaId', empresa.id);
       const r = await fetch('/api/upload-imss', { method: 'POST', body: formData });
       const d = await r.json();
       setUploadMsg(d.message || `❌ ${d.error}`);
@@ -2204,7 +2303,8 @@ function ImssView() {
 
 // ====================== INFONAVIT VIEW ======================
 function InfonavitView() {
-  const { data, loading, refresh } = useApiData<any>('/api/infonavit');
+  const { empresa } = useEmpresa();
+  const { data, loading, refresh } = useApiData<any>('/api/infonavit', empresa?.id);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [periodo, setPeriodo] = useState({ mes: new Date().getMonth() + 1, anio: new Date().getFullYear() });
@@ -2219,6 +2319,7 @@ function InfonavitView() {
       formData.append('file', file);
       formData.append('mes', String(periodo.mes));
       formData.append('anio', String(periodo.anio));
+      if (empresa?.id) formData.append('empresaId', empresa.id);
       const r = await fetch('/api/upload-infonavit', { method: 'POST', body: formData });
       const d = await r.json();
       setUploadMsg(d.message || `❌ ${d.error}`);
@@ -2490,3 +2591,20 @@ function AbbaxView({ onDatosActualizados }: { onDatosActualizados: () => void })
   );
 }
 
+
+// ====================== ADMIN VIEW (gestión de usuarios) ======================
+function AdminView() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Redirige a la página /admin completa
+    router.push('/admin');
+  }, [router]);
+
+  return (
+    <div className="flex items-center justify-center py-20">
+      <Loader2 className="animate-spin text-violet-500" size={32} />
+      <span className="ml-3 text-muted-foreground">Redirigiendo a panel de administración...</span>
+    </div>
+  );
+}

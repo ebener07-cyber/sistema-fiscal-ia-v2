@@ -87,9 +87,13 @@ export async function GET(req: NextRequest) {
   const hoy = new Date();
   const mes = parseInt(searchParams.get('mes') ?? String(hoy.getMonth() + 1));
   const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
+  const empresaId = searchParams.get('empresaId') || undefined;
 
   const empleados = await db.empleado.findMany({
-    where: { status: 'activo' },
+    where: {
+      status: 'activo',
+      ...(empresaId ? { empresaId } : {}),
+    },
   });
 
   const detalleEmpleados = empleados.map(e => {

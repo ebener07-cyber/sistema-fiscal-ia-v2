@@ -16,18 +16,26 @@ export async function GET(req: NextRequest) {
     const hoy = new Date();
     const mes = parseInt(searchParams.get('mes') ?? String(hoy.getMonth() + 1));
     const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
+    const empresaId = searchParams.get('empresaId') || undefined;
 
     const inicio = new Date(anio, mes - 1, 1);
     const fin = new Date(anio, mes, 0, 23, 59, 59);
 
+    const whereEmitidas: any = { direccion: 'emitida', fecha: { gte: inicio, lte: fin } };
+    const whereRecibidas: any = { direccion: 'recibida', fecha: { gte: inicio, lte: fin } };
+    if (empresaId) {
+      whereEmitidas.empresaId = empresaId;
+      whereRecibidas.empresaId = empresaId;
+    }
+
     const [emitidas, recibidas] = await Promise.all([
       db.factura.findMany({
-        where: { direccion: 'emitida', fecha: { gte: inicio, lte: fin } },
+        where: whereEmitidas,
         include: { cliente: true },
         orderBy: { fecha: 'asc' },
       }),
       db.factura.findMany({
-        where: { direccion: 'recibida', fecha: { gte: inicio, lte: fin } },
+        where: whereRecibidas,
         include: { proveedor: true },
         orderBy: { fecha: 'asc' },
       }),

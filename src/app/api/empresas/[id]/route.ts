@@ -1,85 +1,109 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-/**
- * DELETE /api/empresas/[id]
- * Elimina una empresa. Verifica que no tenga registros asociados
- * o ofrece eliminar en cascada con ?force=true
- *
- * PATCH /api/empresas/[id]
- * Actualiza datos de la empresa
- */
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-export async function DELETE(
-  req: NextRequest,
+/** GET /api/empresas/[id] — Detalle de una empresa */
+export async function GET(
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const { searchParams } = new URL(req.url);
-    const force = searchParams.get('force') === 'true';
-
     const empresa = await db.empresa.findUnique({
       where: { id },
       include: {
         _count: {
           select: {
-            clientes: true, proveedores: true, facturas: true,
-            empleados: true, usuarios: true, cuentas: true, productos: true,
+            clientes: true,
+            proveedores: true,
+            facturas: true,
+            empleados: true,
+            usuarios: true,
+            cuentas: true,
+            productos: true,
           },
         },
       },
     });
 
     if (!empresa) {
-      return NextResponse.json({ error: 'Empresa no encontrada' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Empresa no encontrada' },
+        { status: 404 }
+      );
     }
 
-    // Si tiene registros asociados y no es force, advertir
-    const totalAsociados = empresa._count.clientes + empresa._count.proveedores +
-      empresa._count.facturas + empresa._count.empleados + empresa._count.cuentas +
-      empresa._count.productos;
-
-    if (totalAsociados > 0 && !force) {
-      return NextResponse.json({
-        error: `La empresa tiene ${totalAsociados} registro(s) asociado(s) (${empresa._count.facturas} facturas, ${empresa._count.clientes} clientes, ${empresa._count.empleados} empleados, etc.). Usa force=true para eliminar todo en cascada.`,
-        totalAsociados,
-        detalle: empresa._count,
-        needsForce: true,
-      }, { status: 409 });
-    }
-
-    // Eliminar en cascada (force=true)
-    // Orden importa por las foreign keys
-    await db.movimientoBanco.deleteMany({
-      where: { cuenta: { empresaId: id } },
-    });
-    await db.cuentaBancaria.deleteMany({ where: { empresaId: id } });
-    await db.ordenCompra.deleteMany({ where: { empresaId: id } });
-    await db.reciboNomina.deleteMany({ where: { empresaId: id } });
-    await db.oportunidad.deleteMany({ where: { cliente: { empresaId: id } } });
-    await db.factura.deleteMany({ where: { empresaId: id } });
-    await db.producto.deleteMany({ where: { empresaId: id } });
-    await db.empleado.deleteMany({ where: { empresaId: id } });
-    await db.cliente.deleteMany({ where: { empresaId: id } });
-    await db.proveedor.deleteMany({ where: { empresaId: id } });
-    // Desvincular usuarios (no eliminarlos, solo quitar empresaId)
-    await db.usuario.updateMany({
-      where: { empresaId: id },
-      data: { empresaId: null },
-    });
-    // Finalmente eliminar la empresa
-    await db.empresa.delete({ where: { id } });
-
-    return NextResponse.json({
-      success: true,
-      message: `✅ Empresa "${empresa.nombre}" eliminada correctamente${totalAsociados > 0 ? ` junto con ${totalAsociados} registro(s) asociado(s)` : ''}`,
-    });
+    return NextResponse.json(empresa);
   } catch (e: any) {
+    console.error('Error en /api/empresas/[id] GET:', e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
+/** DELETE /api/empresas/[id] — Eliminar empresa y todos sus datos relacionados */
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    // Verificar que existe
+    const empresa = await db.empresa.findUnique({ where: { id } });
+    if (!empresa) {
+      return NextResponse.json(
+        { error: 'Empresa no encontrada' },
+        { status: 404 }
+      );
+    }
+
+    // Eliminar en cascada: primero los hijos, luego la empresa
+    // Prisma onDelete: SetNull o Cascade ya configurado en schema, pero
+    // para evitar errores de integridad, eliminamos explícitamente los relacionados
+    // Eliminación en cascada manual — primero los hijos con FK a empresa,
+    // luego los hijos de esos hijos, finalmente la empresa
+    await db.$transaction([
+      // Recibos de nómina cuelgan de Empleado
+      db.reciboNomina.deleteMany({
+        where: { empleado: { empresaId: id } },
+      }),
+      // Órdenes de compra cuelgan de Proveedor
+      db.ordenCompra.deleteMany({
+        where: { proveedor: { empresaId: id } },
+      }),
+      // Movimientos bancarios cuelgan de CuentaBancaria
+      db.movimientoBanco.deleteMany({
+        where: { cuenta: { empresaId: id } },
+      }),
+      // Facturas, Empleados, Clientes, Proveedores, Productos, Cuentas — directa empresaId
+      db.factura.deleteMany({ where: { empresaId: id } }),
+      db.empleado.deleteMany({ where: { empresaId: id } }),
+      db.cliente.deleteMany({ where: { empresaId: id } }),
+      db.proveedor.deleteMany({ where: { empresaId: id } }),
+      db.producto.deleteMany({ where: { empresaId: id } }),
+      db.cuentaBancaria.deleteMany({ where: { empresaId: id } }),
+      // Usuarios asignados a esa empresa (NO eliminamos el admin global)
+      db.usuario.deleteMany({ where: { empresaId: id } }),
+      // Finalmente la empresa
+      db.empresa.delete({ where: { id } }),
+    ]);
+
+    return NextResponse.json({
+      ok: true,
+      message: `Empresa "${empresa.nombre}" eliminada correctamente`,
+    });
+  } catch (e: any) {
+    console.error('Error en /api/empresas/[id] DELETE:', e);
+    return NextResponse.json(
+      { error: e.message || 'Error al eliminar empresa' },
+      { status: 500 }
+    );
+  }
+}
+
+/** PATCH /api/empresas/[id] — Actualizar empresa */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -87,18 +111,22 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await req.json();
-    const data: any = {};
 
-    if (body.nombre) data.nombre = String(body.nombre).slice(0, 200);
-    if (body.regimenFiscal !== undefined) data.regimenFiscal = body.regimenFiscal;
-    if (body.email !== undefined) data.email = body.email;
-    if (body.telefono !== undefined) data.telefono = body.telefono;
-    if (body.direccion !== undefined) data.direccion = body.direccion;
-    if (body.status) data.status = body.status;
+    const empresa = await db.empresa.update({
+      where: { id },
+      data: {
+        nombre: body.nombre,
+        regimenFiscal: body.regimenFiscal,
+        email: body.email,
+        telefono: body.telefono,
+        direccion: body.direccion,
+        status: body.status,
+      },
+    });
 
-    const actualizada = await db.empresa.update({ where: { id }, data });
-    return NextResponse.json(actualizada);
+    return NextResponse.json(empresa);
   } catch (e: any) {
+    console.error('Error en /api/empresas/[id] PATCH:', e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

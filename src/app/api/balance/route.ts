@@ -28,16 +28,27 @@ export async function GET(req: NextRequest) {
     const hoy = new Date();
     const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
     const formato = searchParams.get('formato') || 'json';
+    const empresaId = searchParams.get('empresaId') || undefined;
 
     const inicioAnio = new Date(anio, 0, 1);
     const finAnio = new Date(anio, 11, 31, 23, 59, 59);
 
+    // Filtros por empresa
+    const filtroEmp = empresaId ? { empresaId } : {};
+    const filtroEmpEmitidas = empresaId
+      ? { empresaId, direccion: 'emitida' as const }
+      : { direccion: 'emitida' as const };
+    const filtroEmpRecibidas = empresaId
+      ? { empresaId, direccion: 'recibida' as const }
+      : { direccion: 'recibida' as const };
+
     // Obtener datos
-    const [cuentasBancarias, facturasEmitidasAnio, facturasRecibidasAnio, productos] = await Promise.all([
-      db.cuentaBancaria.findMany(),
-      db.factura.findMany({ where: { direccion: 'emitida', fecha: { gte: inicioAnio, lte: finAnio } } }),
-      db.factura.findMany({ where: { direccion: 'recibida', fecha: { gte: inicioAnio, lte: finAnio } } }),
-      db.producto.findMany(),
+    const [cuentasBancarias, facturasEmitidasAnio, facturasRecibidasAnio, productos, empresa] = await Promise.all([
+      db.cuentaBancaria.findMany({ where: filtroEmp }),
+      db.factura.findMany({ where: { ...filtroEmpEmitidas, fecha: { gte: inicioAnio, lte: finAnio } } }),
+      db.factura.findMany({ where: { ...filtroEmpRecibidas, fecha: { gte: inicioAnio, lte: finAnio } } }),
+      db.producto.findMany({ where: filtroEmp }),
+      empresaId ? db.empresa.findUnique({ where: { id: empresaId } }) : Promise.resolve(null),
     ]);
 
     // ===== ACTIVOS =====
@@ -71,6 +82,9 @@ export async function GET(req: NextRequest) {
 
     const balance = {
       anio,
+      empresa: empresa
+        ? { nombre: empresa.nombre, rfc: empresa.rfc, regimenFiscal: empresa.regimenFiscal }
+        : null,
       activos: {
         circulante: {
           efectivoBancos,

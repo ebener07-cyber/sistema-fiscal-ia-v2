@@ -29,16 +29,18 @@ export async function GET(req: NextRequest) {
     const mes = parseInt(searchParams.get('mes') ?? String(hoy.getMonth() + 1));
     const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
     const formato = searchParams.get('formato') || 'json';
+    const empresaId = searchParams.get('empresaId') || undefined;
 
     const inicio = new Date(anio, mes - 1, 1);
     const fin = new Date(anio, mes, 0, 23, 59, 59);
 
-    // Obtener facturas recibidas del periodo
+    // Obtener facturas recibidas del periodo (filtradas por empresa)
     const facturas = await db.factura.findMany({
       where: {
         direccion: 'recibida',
         fecha: { gte: inicio, lte: fin },
         estado: 'timbrada',
+        ...(empresaId ? { empresaId } : {}),
       },
     });
 

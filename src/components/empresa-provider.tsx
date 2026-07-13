@@ -11,7 +11,7 @@ interface EmpresaActiva {
 interface EmpresaContextValue {
   empresa: EmpresaActiva | null;
   empresas: EmpresaActiva[];
-  setEmpresa: (e: EmpresaActiva) => void;
+  setEmpresa: (e: EmpresaActiva | null) => void;
   cargarEmpresas: () => Promise<void>;
   loading: boolean;
 }
@@ -68,10 +68,14 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
     cargarEmpresas();
   }, [cargarEmpresas]);
 
-  const setEmpresa = useCallback((e: EmpresaActiva) => {
+  const setEmpresa = useCallback((e: EmpresaActiva | null) => {
     setEmpresaState(e);
     try {
-      localStorage.setItem('empresa-activa', JSON.stringify(e));
+      if (e) {
+        localStorage.setItem('empresa-activa', JSON.stringify(e));
+      } else {
+        localStorage.removeItem('empresa-activa');
+      }
     } catch {}
   }, []);
 

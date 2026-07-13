@@ -26,15 +26,26 @@ export async function GET(req: NextRequest) {
     const hoy = new Date();
     const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
     const formato = searchParams.get('formato') || 'json';
+    const empresaId = searchParams.get('empresaId') || undefined;
 
     const inicioAnio = new Date(anio, 0, 1);
     const finAnio = new Date(anio, 11, 31, 23, 59, 59);
 
-    const [empleados, facturasEmitidas, facturasRecibidas, productos] = await Promise.all([
-      db.empleado.findMany({ where: { status: 'activo' } }),
-      db.factura.findMany({ where: { direccion: 'emitida', fecha: { gte: inicioAnio, lte: finAnio } } }),
-      db.factura.findMany({ where: { direccion: 'recibida', fecha: { gte: inicioAnio, lte: finAnio } } }),
-      db.producto.findMany(),
+    // Filtros por empresa
+    const filtroEmp = empresaId ? { empresaId } : {};
+    const filtroEmpFacturaE = empresaId
+      ? { empresaId, direccion: 'emitida' as const }
+      : { direccion: 'emitida' as const };
+    const filtroEmpFacturaR = empresaId
+      ? { empresaId, direccion: 'recibida' as const }
+      : { direccion: 'recibida' as const };
+
+    const [empleados, facturasEmitidas, facturasRecibidas, productos, empresa] = await Promise.all([
+      db.empleado.findMany({ where: { status: 'activo', ...filtroEmp } }),
+      db.factura.findMany({ where: { ...filtroEmpFacturaE, fecha: { gte: inicioAnio, lte: finAnio } } }),
+      db.factura.findMany({ where: { ...filtroEmpFacturaR, fecha: { gte: inicioAnio, lte: finAnio } } }),
+      db.producto.findMany({ where: filtroEmp }),
+      empresaId ? db.empresa.findUnique({ where: { id: empresaId } }) : Promise.resolve(null),
     ]);
 
     const personalOcupado = empleados.length;
@@ -57,8 +68,9 @@ export async function GET(req: NextRequest) {
     const reporte = {
       anio,
       identificacion: {
-        razonSocial: 'Construcciones Hernández SAC',
-        rfc: 'HEH850415ABC',
+        razonSocial: empresa?.nombre || 'Empresa',
+        rfc: empresa?.rfc || '—',
+        regimenFiscal: empresa?.regimenFiscal || '—',
         tipoUnidad: 'Actividad económica',
         anioReferencia: anio,
       },

@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
   const todasDelAnio = await db.factura.findMany({
     where: {
       ...(direccion ? { direccion } : {}),
-      ...(searchParams.get('empresaId') ? { empresaId: searchParams.get('empresaId') } : {}),
+      ...(searchParams.get('empresaId') ? { empresaId: searchParams.get('empresaId') as string } : {}),
       tipoComprobante: { not: 'N' }, // Excluir nómina
       fecha: { gte: inicioAnioActual, lte: finAnioActual },
     },

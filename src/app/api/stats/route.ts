@@ -1,17 +1,24 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const ahora = new Date();
     const inicioHoy = new Date(ahora);
     inicioHoy.setHours(0, 0, 0, 0);
     const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
 
+    // Filtro por empresa (todas las consultas lo aplican si llega ?empresaId=)
+    const url = new URL(req.url);
+    const empresaId = url.searchParams.get('empresaId') || undefined;
+    const filtroEmpresa = empresaId ? { empresaId } : {};
+    const filtroEmpresaFactura = empresaId ? { empresaId, direccion: 'emitida' as const } : { direccion: 'emitida' as const };
+    const filtroEmpresaFacturaRec = empresaId ? { empresaId, direccion: 'recibida' as const } : { direccion: 'recibida' as const };
+
     // Facturas del mes
     const [emitidasMes, recibidasMes] = await Promise.all([
-      db.factura.findMany({ where: { direccion: 'emitida', fecha: { gte: inicioMes } } }),
-      db.factura.findMany({ where: { direccion: 'recibida', fecha: { gte: inicioMes } } }),
+      db.factura.findMany({ where: { ...filtroEmpresaFactura, fecha: { gte: inicioMes } } }),
+      db.factura.findMany({ where: { ...filtroEmpresaFacturaRec, fecha: { gte: inicioMes } } }),
     ]);
 
     const totalEmitido = emitidasMes.reduce((s, f) => s + f.total, 0);
@@ -22,10 +29,10 @@ export async function GET() {
     const utilidadBruta = totalEmitido - totalRecibido;
 
     const [clientes, proveedores, empleados, productos, tareasPend, notas, recordatorios, conversacionesHoy] = await Promise.all([
-      db.cliente.count(),
-      db.proveedor.count(),
-      db.empleado.count({ where: { status: 'activo' } }),
-      db.producto.count(),
+      db.cliente.count({ where: filtroEmpresa }),
+      db.proveedor.count({ where: filtroEmpresa }),
+      db.empleado.count({ where: { ...filtroEmpresa, status: 'activo' } }),
+      db.producto.count({ where: filtroEmpresa }),
       db.tarea.count({ where: { estado: 'pendiente' } }),
       db.nota.count({ where: { archivada: false } }),
       db.recordatorio.count({ where: { estado: 'pendiente', fechaHora: { gte: ahora } } }),
@@ -50,7 +57,7 @@ export async function GET() {
     }
     const topClientes = Array.from(topClientesMap.values()).sort((a, b) => b.total - a.total).slice(0, 3);
 
-    const stockBajo = await db.producto.count({ where: { existencia: { lte: 0 } } });
+    const stockBajo = await db.producto.count({ where: { ...filtroEmpresa, existencia: { lte: 0 } } });
 
     return NextResponse.json({
       fiscal: {
