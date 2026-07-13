@@ -35,6 +35,7 @@ model Empresa {
   usuarios    Usuario[]
   cuentas     CuentaBancaria[]
   productos   Producto[]
+  proyectos   Proyecto[]
 }
 
 model Usuario {
@@ -64,6 +65,7 @@ model Cliente {
 
   facturas Factura[]
   oportunidades Oportunidad[]
+  proyectos Proyecto[]
 
   @@index([empresaId])
 }
@@ -135,6 +137,8 @@ model Factura {
   cliente         Cliente? @relation(fields: [clienteId], references: [id])
   proveedorId     String?
   proveedor       Proveedor? @relation(fields: [proveedorId], references: [id])
+  proyectoId      String?
+  proyecto        Proyecto? @relation(fields: [proyectoId], references: [id])
   receptorRfc     String?
   receptorNombre  String?
   emisorRfc       String?
@@ -146,8 +150,35 @@ model Factura {
   @@index([empresaId])
   @@index([clienteId])
   @@index([proveedorId])
+  @@index([proyectoId])
   @@index([fecha])
   @@index([direccion])
+  @@index([estado])
+}
+
+// ============================================================================
+// PROYECTOS — agrupa facturas emitidas/recibidas por obra/servicio
+// ============================================================================
+
+model Proyecto {
+  id          String   @id @default(cuid())
+  nombre      String
+  codigo      String?
+  descripcion String?
+  clienteId   String?
+  cliente     Cliente? @relation(fields: [clienteId], references: [id])
+  estado      String   @default("activo") // activo, pausado, finalizado, cancelado
+  presupuesto Float    @default(0)
+  fechaInicio DateTime?
+  fechaFin    DateTime?
+  empresaId   String
+  empresa     Empresa  @relation(fields: [empresaId], references: [id])
+  facturas    Factura[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([empresaId])
+  @@index([clienteId])
   @@index([estado])
 }
 

@@ -11,7 +11,7 @@ import {
   Building2, Users, Truck, User, Wallet, ShoppingCart, Package, Banknote,
   BookOpen, Satellite, Bot, Scale, ClipboardList, BarChart3, MessageSquare,
   Moon, Sun, Menu, Search, Pin, StickyNote, AlertTriangle, Clock,
-  Upload, FileSpreadsheet, Heart, Home as HomeIcon, Plus, ShieldCheck,
+  Upload, FileSpreadsheet, Heart, Home as HomeIcon, Plus, ShieldCheck, Briefcase,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
@@ -71,6 +71,7 @@ const NAV = [
   {
     section: 'Análisis',
     items: [
+      { id: 'proyectos', label: 'Proyectos', icon: Briefcase },
       { id: 'finanzas', label: 'Reestructura Fin.', icon: DollarSign },
       { id: 'crm', label: 'CRM', icon: TrendingUp },
       { id: 'reportes', label: 'Reportes + Excel', icon: ClipboardList },
@@ -255,6 +256,7 @@ export function SistemaCompleto() {
           {view === 'crm' && <CrmView />}
           {view === 'reportes' && <ReportesView stats={stats} />}
           {view === 'balance' && <BalanceView />}
+          {view === 'proyectos' && <ProyectosView />}
           {view === 'abbax' && <AbbaxView onDatosActualizados={cargarStats} />}
           {view === 'admin' && <AdminView />}
         </main>
@@ -2653,6 +2655,434 @@ function AdminView() {
     <div className="flex items-center justify-center py-20">
       <Loader2 className="animate-spin text-violet-500" size={32} />
       <span className="ml-3 text-muted-foreground">Redirigiendo a panel de administración...</span>
+    </div>
+  );
+}
+
+// ====================== PROYECTOS VIEW ======================
+function ProyectosView() {
+  const { empresa } = useEmpresa();
+  const { data, loading, refresh } = useApiData<{ proyectos: any[] }>('/api/proyectos', empresa?.id);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({
+    nombre: '', codigo: '', descripcion: '', clienteId: '', presupuesto: '',
+    fechaInicio: '', fechaFin: '',
+  });
+  const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [proyectoExpandido, setProyectoExpandido] = useState<string | null>(null);
+  const [clientes, setClientes] = useState<any[]>([]);
+  const [facturasSinProyecto, setFacturasSinProyecto] = useState<any[]>([]);
+  const [showAsignar, setShowAsignar] = useState<string | null>(null);
+  const [facturasSeleccionadas, setFacturasSeleccionadas] = useState<Set<string>>(new Set());
+
+  // Cargar clientes para el formulario
+  useEffect(() => {
+    if (empresa?.id) {
+      fetch(`/api/clientes?empresaId=${empresa.id}`)
+        .then(r => r.json())
+        .then(d => setClientes(d.clientes || []))
+        .catch(() => {});
+    }
+  }, [empresa?.id]);
+
+  // Cargar facturas sin proyecto para asignación manual
+  const cargarFacturasSinProyecto = async () => {
+    if (!empresa?.id) return;
+    try {
+      const r = await fetch(`/api/facturas?limit=100&empresaId=${empresa.id}`);
+      const d = await r.json();
+      setFacturasSinProyecto((d.facturas || []).filter((f: any) => !f.proyectoId));
+    } catch {}
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.nombre) { setError('Nombre es obligatorio'); return; }
+    setCreating(true); setError('');
+    try {
+      const r = await fetch('/api/proyectos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, empresaId: empresa?.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) setError(d.error || 'Error');
+      else {
+        setShowForm(false);
+        setForm({ nombre: '', codigo: '', descripcion: '', clienteId: '', presupuesto: '', fechaInicio: '', fechaFin: '' });
+        refresh();
+      }
+    } catch (e: any) { setError(e.message); }
+    finally { setCreating(false); }
+  };
+
+  const toggleSeleccion = (id: string) => {
+    const nueva = new Set(facturasSeleccionadas);
+    if (nueva.has(id)) nueva.delete(id); else nueva.add(id);
+    setFacturasSeleccionadas(nueva);
+  };
+
+  const asignarFacturas = async (proyectoId: string) => {
+    if (facturasSeleccionadas.size === 0) {
+      alert('Selecciona al menos una factura');
+      return;
+    }
+    try {
+      const r = await fetch(`/api/proyectos/${proyectoId}/asignar-factura`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ facturaIds: Array.from(facturasSeleccionadas) }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        alert(d.message);
+        setShowAsignar(null);
+        setFacturasSeleccionadas(new Set());
+        refresh();
+      } else {
+        alert(d.error || 'Error');
+      }
+    } catch (e: any) { alert(e.message); }
+  };
+
+  const eliminarProyecto = async (id: string, nombre: string) => {
+    if (!confirm(`¿Eliminar el proyecto "${nombre}"?\n\nLas facturas asociadas NO se eliminan, solo se desvinculan.`)) return;
+    try {
+      await fetch(`/api/proyectos/${id}`, { method: 'DELETE' });
+      refresh();
+    } catch (e: any) { alert(e.message); }
+  };
+
+  if (loading) return <div className="text-center py-20">Cargando proyectos...</div>;
+
+  const proyectos = data?.proyectos || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <div>
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Briefcase size={20} className="text-violet-600" /> Proyectos
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Agrupa facturas emitidas y recibidas por obra/servicio. Calcula utilidad y margen por proyecto.
+          </p>
+        </div>
+        <Button onClick={() => setShowForm(!showForm)}>
+          <Plus size={14} className="mr-2" /> {showForm ? 'Cancelar' : 'Nuevo proyecto'}
+        </Button>
+      </div>
+
+      {/* Formulario nuevo proyecto */}
+      {showForm && (
+        <Card className="p-5">
+          <h3 className="font-semibold mb-4">Crear nuevo proyecto</h3>
+          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold">Nombre del proyecto *</label>
+              <Input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej. Construcción casa cliente X" required />
+            </div>
+            <div>
+              <label className="text-xs font-semibold">Código (opcional)</label>
+              <Input value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value })} placeholder="Ej. PROY-001, OB-2024-01" />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Si usas este código en la descripción de un CFDI, se asociará automáticamente.
+              </p>
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs font-semibold">Descripción</label>
+              <Input value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Detalle del proyecto" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold">Cliente</label>
+              <select
+                value={form.clienteId}
+                onChange={e => setForm({ ...form, clienteId: e.target.value })}
+                className="w-full h-10 px-3 rounded-md border bg-background"
+              >
+                <option value="">— Sin cliente —</option>
+                {clientes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.nombre} ({c.rfc})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold">Presupuesto (MXN)</label>
+              <Input type="number" value={form.presupuesto} onChange={e => setForm({ ...form, presupuesto: e.target.value })} placeholder="0.00" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold">Fecha inicio</label>
+              <Input type="date" value={form.fechaInicio} onChange={e => setForm({ ...form, fechaInicio: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-xs font-semibold">Fecha fin estimada</label>
+              <Input type="date" value={form.fechaFin} onChange={e => setForm({ ...form, fechaFin: e.target.value })} />
+            </div>
+            {error && <div className="md:col-span-2 text-red-600 text-sm">{error}</div>}
+            <div className="md:col-span-2">
+              <Button type="submit" disabled={creating}>
+                {creating ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Plus size={14} className="mr-2" />}
+                Crear proyecto
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {/* Lista de proyectos */}
+      {proyectos.length === 0 ? (
+        <Card className="p-10 text-center text-muted-foreground">
+          <Briefcase size={40} className="mx-auto mb-3 opacity-40" />
+          <p className="text-sm">Aún no hay proyectos. Crea uno para agrupar facturas.</p>
+        </Card>
+      ) : (
+        proyectos.map((p: any) => (
+          <Card key={p.id} className="overflow-hidden">
+            {/* Header del proyecto */}
+            <div
+              className="p-4 cursor-pointer hover:bg-muted/30 transition"
+              onClick={() => setProyectoExpandido(proyectoExpandido === p.id ? null : p.id)}
+            >
+              <div className="flex justify-between items-start gap-3 flex-wrap">
+                <div className="flex-1 min-w-[200px]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-semibold">{p.nombre}</h3>
+                    {p.codigo && <Badge variant="outline" className="font-mono text-xs">{p.codigo}</Badge>}
+                    <Badge variant={p.estado === 'activo' ? 'default' : 'secondary'}>{p.estado}</Badge>
+                  </div>
+                  {p.cliente && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      👤 {p.cliente.nombre} · {p.cliente.rfc}
+                    </p>
+                  )}
+                  {p.descripcion && (
+                    <p className="text-xs text-muted-foreground mt-1">{p.descripcion}</p>
+                  )}
+                </div>
+                <div className="text-right text-xs">
+                  <div className="text-muted-foreground">{p.totales.countFacturas} factura(s)</div>
+                  <div className="text-emerald-600 font-semibold mt-1">
+                    Emitido: {fmt(p.totales.totalEmitido)}
+                  </div>
+                  <div className="text-orange-600">
+                    Recibido: {fmt(p.totales.totalRecibido)}
+                  </div>
+                  <div className={p.totales.utilidad >= 0 ? 'text-violet-600 font-bold mt-1' : 'text-red-600 font-bold mt-1'}>
+                    Utilidad: {fmt(p.totales.utilidad)} ({p.totales.margen.toFixed(1)}%)
+                  </div>
+                </div>
+              </div>
+
+              {/* Barra de presupuesto */}
+              {p.presupuesto > 0 && (
+                <div className="mt-3">
+                  <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                    <span>Presupuesto: {fmt(p.presupuesto)}</span>
+                    <span>{p.totales.porcentajePresupuesto.toFixed(1)}% usado · Resta: {fmt(p.totales.restantePresupuesto)}</span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={cn(
+                        'h-full transition-all',
+                        p.totales.porcentajePresupuesto > 100 ? 'bg-red-500' :
+                        p.totales.porcentajePresupuesto > 80 ? 'bg-amber-500' : 'bg-violet-500'
+                      )}
+                      style={{ width: `${Math.min(100, p.totales.porcentajePresupuesto)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Detalle expandido */}
+            {proyectoExpandido === p.id && (
+              <div className="border-t bg-muted/20 p-4 space-y-3">
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <h4 className="text-sm font-semibold">
+                    📋 Facturas del proyecto ({p.facturas.length})
+                  </h4>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowAsignar(showAsignar === p.id ? null : p.id);
+                        if (showAsignar !== p.id) {
+                          setFacturasSeleccionadas(new Set());
+                          cargarFacturasSinProyecto();
+                        }
+                      }}
+                    >
+                      <Plus size={12} className="mr-1" /> Asignar facturas
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        eliminarProyecto(p.id, p.nombre);
+                      }}
+                    >
+                      <Trash2 size={12} className="mr-1" /> Eliminar
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Lista de facturas asignadas */}
+                {p.facturas.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-3">
+                    Sin facturas asignadas. Usa "Asignar facturas" para vincular.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-muted/50 text-[10px] uppercase text-left">
+                          <th className="px-2 py-1">Fecha</th>
+                          <th className="px-2 py-1">Folio</th>
+                          <th className="px-2 py-1">Tipo</th>
+                          <th className="px-2 py-1">Contraparte</th>
+                          <th className="px-2 py-1">Concepto</th>
+                          <th className="px-2 py-1 text-right">Total</th>
+                          <th className="px-2 py-1 text-right">IVA</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {p.facturas.map((f: any) => (
+                          <tr key={f.id} className="border-b hover:bg-muted/30">
+                            <td className="px-2 py-1">{new Date(f.fecha).toLocaleDateString('es-MX')}</td>
+                            <td className="px-2 py-1 font-mono">{f.serie || ''}{f.folio}</td>
+                            <td className="px-2 py-1">
+                              <Badge variant={f.direccion === 'emitida' ? 'default' : 'secondary'}>
+                                {f.direccion === 'emitida' ? '↗ E' : '↙ R'}
+                              </Badge>
+                              {f.tipoComprobante === 'E' && <span className="text-amber-600 ml-1">NC</span>}
+                            </td>
+                            <td className="px-2 py-1">
+                              {f.direccion === 'emitida' ? f.receptorNombre : f.emisorNombre}
+                            </td>
+                            <td className="px-2 py-1 max-w-xs truncate" title={f.concepto || ''}>
+                              {f.concepto || '—'}
+                            </td>
+                            <td className="px-2 py-1 text-right font-mono">{fmt(f.total)}</td>
+                            <td className="px-2 py-1 text-right font-mono text-muted-foreground">{fmt(f.totalImpuestos)}</td>
+                          </tr>
+                        ))}
+                        <tr className="bg-muted/30 font-semibold">
+                          <td colSpan={5} className="px-2 py-2 text-right">TOTALES:</td>
+                          <td className="px-2 py-2 text-right font-mono">{fmt(p.totales.totalEmitido + p.totales.totalRecibido)}</td>
+                          <td className="px-2 py-2 text-right font-mono">{fmt(p.totales.ivaEmitido + p.totales.ivaRecibido)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Panel asignar facturas */}
+                {showAsignar === p.id && (
+                  <Card className="p-3 bg-background">
+                    <h5 className="text-xs font-semibold mb-2">
+                      Selecciona facturas para asignar a "{p.nombre}"
+                    </h5>
+                    {facturasSinProyecto.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-2">
+                        No hay facturas sin proyecto. Todas están asignadas o no hay facturas cargadas.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="max-h-64 overflow-y-auto border rounded">
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-background">
+                              <tr className="text-[10px] uppercase text-left">
+                                <th className="px-2 py-1"></th>
+                                <th className="px-2 py-1">Fecha</th>
+                                <th className="px-2 py-1">Folio</th>
+                                <th className="px-2 py-1">Tipo</th>
+                                <th className="px-2 py-1">Contraparte</th>
+                                <th className="px-2 py-1">Concepto</th>
+                                <th className="px-2 py-1 text-right">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {facturasSinProyecto.map((f: any) => (
+                                <tr key={f.id} className="border-b hover:bg-muted/30 cursor-pointer"
+                                    onClick={() => toggleSeleccion(f.id)}>
+                                  <td className="px-2 py-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={facturasSeleccionadas.has(f.id)}
+                                      onChange={() => toggleSeleccion(f.id)}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </td>
+                                  <td className="px-2 py-1">{new Date(f.fecha).toLocaleDateString('es-MX')}</td>
+                                  <td className="px-2 py-1 font-mono">{f.serie || ''}{f.folio}</td>
+                                  <td className="px-2 py-1">
+                                    <Badge variant={f.direccion === 'emitida' ? 'default' : 'secondary'}>
+                                      {f.direccion === 'emitida' ? '↗ E' : '↙ R'}
+                                    </Badge>
+                                  </td>
+                                  <td className="px-2 py-1">{f.direccion === 'emitida' ? f.receptorNombre : f.emisorNombre}</td>
+                                  <td className="px-2 py-1 max-w-xs truncate" title={f.concepto || ''}>{f.concepto || '—'}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{fmt(f.total)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="flex justify-between items-center mt-2">
+                          <span className="text-xs text-muted-foreground">
+                            {facturasSeleccionadas.size} seleccionada(s)
+                          </span>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => setShowAsignar(null)}>
+                              Cancelar
+                            </Button>
+                            <Button size="sm" onClick={() => asignarFacturas(p.id)}>
+                              Asignar {facturasSeleccionadas.size} factura(s)
+                            </Button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </Card>
+                )}
+              </div>
+            )}
+          </Card>
+        ))
+      )}
+
+      {/* Resumen general */}
+      {proyectos.length > 0 && (
+        <Card className="p-4 bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800">
+          <h3 className="font-semibold text-sm mb-2">📊 Resumen general de proyectos</h3>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+            <div>
+              <div className="text-muted-foreground">Proyectos activos</div>
+              <div className="text-lg font-bold">{proyectos.filter(p => p.estado === 'activo').length}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Total facturas</div>
+              <div className="text-lg font-bold">{proyectos.reduce((s, p) => s + p.totales.countFacturas, 0)}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Total emitido</div>
+              <div className="text-lg font-bold text-emerald-600">{fmt(proyectos.reduce((s, p) => s + p.totales.totalEmitido, 0))}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Total recibido</div>
+              <div className="text-lg font-bold text-orange-600">{fmt(proyectos.reduce((s, p) => s + p.totales.totalRecibido, 0))}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Utilidad total</div>
+              <div className="text-lg font-bold text-violet-600">{fmt(proyectos.reduce((s, p) => s + p.totales.utilidad, 0))}</div>
+            </div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

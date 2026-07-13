@@ -88,17 +88,24 @@ function parseCFDIXML(xmlContent: string) {
     const totalTrasladados = parseFloat(getAttr(impuestosNode, 'TotalImpuestosTrasladados')) || 0;
     const totalRetenidos = parseFloat(getAttr(impuestosNode, 'TotalImpuestosRetenidos')) || 0;
 
+    // ===== EXTRAER CONCEPTOS (descripción de productos/servicios) =====
+    // Esto nos sirve para detectar el proyecto al que pertenece la factura
+    const conceptosNode = comprobante['cfdi:Conceptos'] || comprobante['Conceptos'] || {};
+    const conceptosArray: any[] = conceptosNode['cfdi:Concepto'] || conceptosNode['Concepto'] || [];
+    const conceptosLista = Array.isArray(conceptosArray) ? conceptosArray : [conceptosArray];
+    const descripcionesConceptos: string[] = conceptosLista
+      .map((c: any) => getAttr(c, 'Descripcion'))
+      .filter((d: string) => d);
+    const conceptoTexto = descripcionesConceptos.join(' | ').slice(0, 500); // Texto completo para buscar proyecto
+
     // Detectar si el CFDI está cancelado
-    // Un CFDI cancelado tiene un nodo de cancelación en el complemento, o no tiene timbre
     let estado = 'timbrada';
     if (!uuid) {
       estado = 'sin_timbrar';
     }
-    // Verificar si tiene complemento de cancelación
     if (complemento && (complemento['tfd:CancelaCfdi'] || complemento['CancelaCfdi'])) {
       estado = 'cancelada';
     }
-    // También verificar si el nodo raíz tiene atributo de estado cancelado
     const estadoAttr = getAttr(comprobante, 'Estado') || getAttr(comprobante, 'SituacionFiscal');
     if (estadoAttr && (estadoAttr === 'Cancelado' || estadoAttr === '0' || estadoAttr === '03')) {
       estado = 'cancelada';
@@ -124,11 +131,122 @@ function parseCFDIXML(xmlContent: string) {
       receptorUsoCfdi,
       lugarExpedicion,
       estado,
+      conceptoTexto, // ← NUEVO: descripciones concatenadas
+      descripcionesConceptos, // ← NUEVO: array de descripciones individuales
     };
   } catch (e) {
     console.error('Error parseando CFDI:', e);
     return null;
   }
+}
+
+// ============================================================================
+// DETECCIÓN AUTOMÁTICA DE PROYECTO
+// ============================================================================
+// Heurística simple basada en keywords en las descripciones de los conceptos.
+// Si el concepto menciona "OBRA", "PROYECTO", "CONSTRUCCIÓN", o un código
+// como "PROY-001", "OB-2024-01", intenta matchear con un proyecto existente.
+const KEYWORDS_PROYECTO = [
+  'obra', 'proyecto', 'construccion', 'construcción', 'edificio',
+  'casa', 'local', 'oficina', 'remodelacion', 'remodelación',
+  'instalacion', 'instalación', 'pavimentacion', 'pavimentación',
+];
+
+// Patrones para extraer código de proyecto del concepto: PROY-001, OB-2024-01, PRJ-001
+const PATRON_CODIGO_PROYECTO = /\b(PROY|OB|PRJ|PRO|OBRA)[-_\s]?(\d{2,4}[-_]?\d{0,2})\b/i;
+
+async function detectarProyecto(
+  conceptoTexto: string,
+  empId: string
+): Promise<string | null> {
+  if (!conceptoTexto) return null;
+
+  // 1. Buscar código explícito en el concepto (PROY-001, OB-2024-01, etc.)
+  const matchCodigo = conceptoTexto.match(PATRON_CODIGO_PROYECTO);
+  if (matchCodigo) {
+    const codigoPosible = matchCodigo[0].toUpperCase().replace(/\s+/g, '-');
+    // Buscar proyecto por código
+    const proyecto = await db.proyecto.findFirst({
+      where: {
+        empresaId: empId,
+        OR: [
+          { codigo: { equals: codigoPosible, mode: 'insensitive' } },
+          { codigo: { contains: matchCodigo[2], mode: 'insensitive' } },
+        ],
+      },
+    });
+    if (proyecto) return proyecto.id;
+  }
+
+  // 2. Buscar en proyectos existentes cuyo nombre aparezca en el concepto
+  const proyectos = await db.proyecto.findMany({
+    where: { empresaId: empId, estado: { in: ['activo', 'pausado'] } },
+  });
+  for (const p of proyectos) {
+    if (!p.nombre) continue;
+    // Si el nombre del proyecto aparece en el concepto, asociarlo
+    if (conceptoTexto.toLowerCase().includes(p.nombre.toLowerCase())) {
+      return p.id;
+    }
+    // Si el código del proyecto aparece en el concepto
+    if (p.codigo && conceptoTexto.toLowerCase().includes(p.codigo.toLowerCase())) {
+      return p.id;
+    }
+  }
+
+  // 3. Si hay keywords de proyecto pero no encontramos match, NO creamos automáticamente
+  // porque requiere confirmación del usuario. Se queda sin proyecto.
+  return null;
+}
+
+// ============================================================================
+// CREACIÓN AUTOMÁTICA DE CLIENTES/PROVEEDORES DESDE CFDI
+// ============================================================================
+async function obtenerOcrearCliente(
+  rfc: string,
+  nombre: string,
+  empId: string
+): Promise<string | null> {
+  if (!rfc || rfc === 'XAXX000000XXX' || rfc === 'XEXX010101000') return null;
+
+  // Buscar por RFC (case-insensitive, sin unique constraint porque puede haber duplicados accidentales)
+  const existente = await db.cliente.findFirst({
+    where: { rfc: { equals: rfc, mode: 'insensitive' }, empresaId: empId },
+  });
+  if (existente) return existente.id;
+
+  // Crear nuevo cliente
+  const nuevo = await db.cliente.create({
+    data: {
+      nombre: nombre || `Cliente ${rfc}`,
+      rfc: rfc.toUpperCase(),
+      empresaId: empId,
+    },
+  });
+  return nuevo.id;
+}
+
+async function obtenerOcrearProveedor(
+  rfc: string,
+  nombre: string,
+  empId: string
+): Promise<string | null> {
+  if (!rfc || rfc === 'XAXX000000XXX' || rfc === 'XEXX010101000') return null;
+
+  const existente = await db.proveedor.findFirst({
+    where: { rfc: { equals: rfc, mode: 'insensitive' }, empresaId: empId },
+  });
+  if (existente) return existente.id;
+
+  const nuevo = await db.proveedor.create({
+    data: {
+      nombre: nombre || `Proveedor ${rfc}`,
+      rfc: rfc.toUpperCase(),
+      servicio: 'Por clasificar',
+      empresaId: empId,
+    },
+  });
+  return nuevo.id;
 }
 
 export async function POST(req: NextRequest) {
@@ -275,17 +393,20 @@ export async function POST(req: NextRequest) {
           }
 
           // ===== FACTURA NORMAL O NOTA DE CRÉDITO → Guardar en Factura =====
-          // Buscar cliente/proveedor por RFC
+          // Auto-crear o reutilizar cliente/proveedor desde el RFC del CFDI
           let clienteId: string | null = null;
           let proveedorId: string | null = null;
 
           if (direccion === 'emitida') {
-            const cliente = await db.cliente.findFirst({ where: { rfc: cfdi.receptorRfc } });
-            if (cliente) clienteId = cliente.id;
+            // Factura emitida → el receptor es el cliente
+            clienteId = await obtenerOcrearCliente(cfdi.receptorRfc, cfdi.receptorNombre, empId);
           } else {
-            const proveedor = await db.proveedor.findFirst({ where: { rfc: cfdi.emisorRfc } });
-            if (proveedor) proveedorId = proveedor.id;
+            // Factura recibida → el emisor es el proveedor
+            proveedorId = await obtenerOcrearProveedor(cfdi.emisorRfc, cfdi.emisorNombre, empId);
           }
+
+          // Detectar proyecto desde las descripciones de los conceptos
+          const proyectoId = await detectarProyecto(cfdi.conceptoTexto || '', empId);
 
           await db.factura.create({
             data: {
@@ -305,21 +426,23 @@ export async function POST(req: NextRequest) {
               empresaId: empId,
               clienteId,
               proveedorId,
+              proyectoId, // ← NUEVO: proyecto detectado (puede ser null)
               receptorRfc: cfdi.receptorRfc,
               receptorNombre: cfdi.receptorNombre,
               emisorRfc: cfdi.emisorRfc,
               emisorNombre: cfdi.emisorNombre,
-              concepto: esNotaCredito
-                ? `Nota de crédito: ${file.name}`
-                : `Importado: ${file.name}`,
+              concepto: cfdi.conceptoTexto
+                ? (esNotaCredito ? `⚠️ Nota de crédito: ${cfdi.conceptoTexto}` : cfdi.conceptoTexto)
+                : (esNotaCredito ? `Nota de crédito: ${file.name}` : `Importado: ${file.name}`),
             },
           });
 
           procesados++;
+          const msgProyecto = proyectoId ? ` 📁 [proyecto vinculado]` : '';
           detalles.push({
             archivo: file.name,
             estado: esNotaCredito ? 'nota_credito' : 'procesado',
-            mensaje: `${esNotaCredito ? '⚠️ Nota de crédito' : '🧾 Factura'} → ${cfdi.emisorNombre || 'N/A'} → ${cfdi.receptorNombre || 'N/A'}: $${cfdi.total.toFixed(2)}`,
+            mensaje: `${esNotaCredito ? '⚠️ Nota de crédito' : '🧾 Factura'} → ${cfdi.emisorNombre || 'N/A'} → ${cfdi.receptorNombre || 'N/A'}: $${cfdi.total.toFixed(2)}${msgProyecto}`,
           });
         } catch (e: any) {
           errores++;
@@ -417,15 +540,17 @@ export async function POST(req: NextRequest) {
                 procesados++;
               } else {
                 // Factura o nota de crédito → Factura
+                // Auto-crear cliente/proveedor desde RFC
                 let clienteId: string | null = null;
                 let proveedorId: string | null = null;
                 if (direccion === 'emitida') {
-                  const c = await db.cliente.findFirst({ where: { rfc: cfdi.receptorRfc } });
-                  if (c) clienteId = c.id;
+                  clienteId = await obtenerOcrearCliente(cfdi.receptorRfc, cfdi.receptorNombre, empId);
                 } else {
-                  const p = await db.proveedor.findFirst({ where: { rfc: cfdi.emisorRfc } });
-                  if (p) proveedorId = p.id;
+                  proveedorId = await obtenerOcrearProveedor(cfdi.emisorRfc, cfdi.emisorNombre, empId);
                 }
+
+                // Detectar proyecto desde concepto
+                const proyectoIdZip = await detectarProyecto(cfdi.conceptoTexto || '', empId);
 
                 await db.factura.create({
                   data: {
@@ -445,13 +570,14 @@ export async function POST(req: NextRequest) {
                     empresaId: empId,
                     clienteId,
                     proveedorId,
+                    proyectoId: proyectoIdZip,
                     receptorRfc: cfdi.receptorRfc,
                     receptorNombre: cfdi.receptorNombre,
                     emisorRfc: cfdi.emisorRfc,
                     emisorNombre: cfdi.emisorNombre,
-                    concepto: esNotaCreditoZip
-                      ? `Nota de crédito (ZIP): ${file.name}`
-                      : `Importado ZIP: ${file.name}`,
+                    concepto: cfdi.conceptoTexto
+                      ? (esNotaCreditoZip ? `⚠️ Nota de crédito: ${cfdi.conceptoTexto}` : cfdi.conceptoTexto)
+                      : (esNotaCreditoZip ? `Nota de crédito (ZIP): ${file.name}` : `Importado ZIP: ${file.name}`),
                   },
                 });
                 procesados++;
