@@ -1,32 +1,27 @@
 'use client';
 
-import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 
-// Cargar SistemaCompleto solo en el cliente (sin SSR)
-const SistemaCompleto = dynamic(() => import('@/components/sistema-completo').then(m => m.SistemaCompleto), {
-  ssr: false,
-  loading: () => (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950">
-      <Loader2 className="animate-spin text-violet-500" size={32} />
-    </div>
-  ),
-});
-
 export default function HomePage() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<'loading' | 'authed' | 'redirect'>('loading');
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
       .then(r => {
-        if (r.ok) setAuthed(true);
-        else window.location.href = '/login';
+        if (r.ok) setStatus('authed');
+        else setStatus('redirect');
       })
-      .catch(() => { window.location.href = '/login'; });
+      .catch(() => setStatus('redirect'));
   }, []);
 
-  if (authed === null) {
+  useEffect(() => {
+    if (status === 'redirect') {
+      window.location.href = '/login';
+    }
+  }, [status]);
+
+  if (status === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950">
         <Loader2 className="animate-spin text-violet-500" size={32} />
@@ -34,7 +29,15 @@ export default function HomePage() {
     );
   }
 
-  if (!authed) return null;
+  if (status === 'redirect') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <Loader2 className="animate-spin text-violet-500" size={32} />
+      </div>
+    );
+  }
 
+  // Solo cargar el sistema completo cuando sabemos que está autenticado
+  const SistemaCompleto = require('@/components/sistema-completo').SistemaCompleto;
   return <SistemaCompleto />;
 }
