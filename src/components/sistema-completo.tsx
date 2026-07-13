@@ -15,6 +15,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
+import { useEmpresa } from '@/components/empresa-provider';
+import { useRouter } from 'next/navigation';
+import {
+  Settings, KeyRound, Trash2, ShieldAlert, Lock,
+} from 'lucide-react';
 
 // ====================== TIPOS ======================
 interface Stats {
@@ -82,10 +87,31 @@ export function SistemaCompleto() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [abbaxOpen, setAbbaxOpen] = useState(false);
   const { theme, toggle } = useTheme();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [usuario, setUsuario] = useState<any>(null);
+  const { empresa, empresas, setEmpresa } = useEmpresa();
+  const router = useRouter();
+
+  // Verificar autenticación al cargar
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => {
+        if (!r.ok) throw new Error('no-auth');
+        return r.json();
+      })
+      .then(d => { setUsuario(d.usuario); })
+      .catch(() => { window.location.href = '/login'; })
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  };
 
   const cargarStats = useCallback(async () => {
     try {
-      const r = await fetch('/api/stats');
+      const r = await fetch('/api/stats', { credentials: 'include' });
       const d = await r.json();
       return d;
     } catch (e) {
@@ -95,6 +121,7 @@ export function SistemaCompleto() {
   }, []);
 
   useEffect(() => {
+    if (!authChecked) return;
     let mounted = true;
     const load = async () => {
       const s = await cargarStats();
@@ -103,7 +130,15 @@ export function SistemaCompleto() {
     load();
     const t = setInterval(load, 60000);
     return () => { mounted = false; clearInterval(t); };
-  }, []);
+  }, [authChecked, cargarStats]);
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <Loader2 className="animate-spin text-violet-500" size={32} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 dark:from-slate-950 dark:via-violet-950 dark:to-slate-950 transition-colors">
