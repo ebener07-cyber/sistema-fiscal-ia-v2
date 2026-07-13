@@ -4,9 +4,6 @@ import type { NextRequest } from 'next/server';
 /**
  * Proxy (antes middleware) — protege rutas que requieren autenticación.
  * Next.js 16 requiere "proxy" en vez de "middleware".
- *
- * El token es un base64 de un JSON con { sub, email, exp }.
- * Verificamos expiración sin importar librerías (Edge Runtime compatible).
  */
 
 const publicRoutes = ['/login', '/api/auth/login', '/api/auth/logout'];
@@ -19,11 +16,6 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Permitir archivos estáticos
-  if (pathname.startsWith('/_next') || pathname.startsWith('/favicon') || pathname.match(/\.(svg|png|jpg|ico|css|js)$/)) {
-    return NextResponse.next();
-  }
-
   // Verificar token
   const token = request.cookies.get('auth-token')?.value;
 
@@ -31,11 +23,14 @@ export function proxy(request: NextRequest) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
     }
-    const loginUrl = new URL('/login', request.url);
-    return NextResponse.redirect(loginUrl);
+    if (!pathname.startsWith('/_next')) {
+      const loginUrl = new URL('/login', request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+    return NextResponse.next();
   }
 
-  // Verificar expiración del token (base64 → JSON)
+  // Verificar expiración
   try {
     const decoded = atob(token);
     const payload = JSON.parse(decoded);
@@ -43,16 +38,19 @@ export function proxy(request: NextRequest) {
       if (pathname.startsWith('/api/')) {
         return NextResponse.json({ error: 'Token expirado' }, { status: 401 });
       }
-      const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('expired', 'true');
-      return NextResponse.redirect(loginUrl);
+      if (!pathname.startsWith('/_next')) {
+        const loginUrl = new URL('/login', request.url);
+        return NextResponse.redirect(loginUrl);
+      }
     }
   } catch {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Token inválido' }, { status: 401 });
     }
-    const loginUrl = new URL('/login', request.url);
-    return NextResponse.redirect(loginUrl);
+    if (!pathname.startsWith('/_next')) {
+      const loginUrl = new URL('/login', request.url);
+      return NextResponse.redirect(loginUrl);
+    }
   }
 
   return NextResponse.next();
@@ -60,6 +58,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|login).*)',
+    '/((?!_next/static|_next/image|favicon.ico|login|robots.txt|logo.svg|globals.css).*)',
   ],
 };
