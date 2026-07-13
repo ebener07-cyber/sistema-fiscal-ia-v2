@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
-import { ThemeProvider } from "@/components/theme-provider";
-import { EmpresaProvider } from "@/components/empresa-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sistema Fiscal IA · ERP + Abbax",
-  description: "ERP fiscal completo con asistente IA, RAG de leyes fiscales, y módulos integrados.",
+  title: "Sistema Fiscal IA",
+  description: "ERP fiscal completo con asistente IA.",
 };
 
 export default function RootLayout({
@@ -28,11 +26,7 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}>
-        <ThemeProvider>
-          <EmpresaProvider>
-            {children}
-          </EmpresaProvider>
-        </ThemeProvider>
+        {children}
         <Toaster />
       </body>
     </html>
