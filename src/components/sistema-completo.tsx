@@ -555,11 +555,11 @@ function FacturacionView() {
 function NominaView({ empresaId }: { empresaId?: string }) {
   const hoy = new Date();
   const [anioSel, setAnioSel] = useState(hoy.getFullYear());
-  const [mesSel, setMesSel] = useState(0); // 0 = Todo el año
+  const [selMes, setSelMes] = useState(0); // 0 = Todo el año
 
-  const url = mesSel === 0
+  const url = selMes === 0
     ? `/api/nomina?anio=${anioSel}`
-    : `/api/nomina?mes=${mesSel}&anio=${anioSel}`;
+    : `/api/nomina?mes=${selMes}&anio=${anioSel}`;
   const { data, loading } = useApiData<any>(url, empresaId);
 
   const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -578,9 +578,9 @@ function NominaView({ empresaId }: { empresaId?: string }) {
       {/* Pestañas por mes + Todo el año */}
       <div className="flex flex-wrap gap-1 items-center">
         <button
-          onClick={() => setMesSel(0)}
+          onClick={() => setSelMes(0)}
           className={cn('px-3 py-2 rounded-lg text-xs font-bold transition-all border mr-2',
-            mesSel === 0 ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+            selMes === 0 ? 'bg-violet-600 text-white border-violet-600 shadow-md'
             : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100')}
         >
           📅 Todo {anioSel}
@@ -590,10 +590,10 @@ function NominaView({ empresaId }: { empresaId?: string }) {
           const mesNum = i + 1;
           const datosMes = resumen.find((r: any) => r.mes === mesNum);
           const count = datosMes?.count || 0;
-          const isActive = mesSel === mesNum;
+          const isActive = selMes === mesNum;
           const hasData = count > 0;
           return (
-            <button key={m} onClick={() => setMesSel(mesNum)}
+            <button key={m} onClick={() => setSelMes(mesNum)}
               className={cn('px-3 py-2 rounded-lg text-xs font-medium transition-all border',
                 isActive ? 'bg-violet-600 text-white border-violet-600 shadow-md'
                 : hasData ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800 hover:bg-violet-100'
@@ -636,19 +636,19 @@ function NominaView({ empresaId }: { empresaId?: string }) {
       {/* Tabla de recibos */}
       {loading ? (
         <div className="text-center py-8">
-          {mesSel === 0 ? `Cargando nómina del año ${anioSel}...` : `Cargando nómina de ${meses[mesSel - 1]} ${anioSel}...`}
+          {selMes === 0 ? `Cargando nómina del año ${anioSel}...` : `Cargando nómina de ${meses[selMes - 1]} ${anioSel}...`}
         </div>
       ) : (data?.recibos?.length || 0) === 0 ? (
         <Card className="p-8 text-center text-muted-foreground">
           <Wallet size={32} className="mx-auto mb-2 opacity-40" />
           <p className="text-sm">
-            {mesSel === 0 ? `No hay recibos de nómina en ${anioSel}` : `No hay recibos en ${meses[mesSel - 1]} ${anioSel}`}
+            {selMes === 0 ? `No hay recibos de nómina en ${anioSel}` : `No hay recibos en ${meses[selMes - 1]} ${anioSel}`}
           </p>
           <p className="text-xs mt-1">Sube tus CFDIs de nómina (XML) desde el módulo SAT</p>
         </Card>
       ) : (
         <DataTableCard title={
-          mesSel === 0 ? `Nómina — Todo ${anioSel} (${data?.count || 0})` : `Nómina — ${meses[mesSel - 1]} ${anioSel} (${data?.count || 0})`
+          selMes === 0 ? `Nómina — Todo ${anioSel} (${data?.count || 0})` : `Nómina — ${meses[selMes - 1]} ${anioSel} (${data?.count || 0})`
         }>
           <table className="w-full text-sm">
             <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
@@ -682,7 +682,7 @@ function NominaView({ empresaId }: { empresaId?: string }) {
             <tfoot>
               <tr className="bg-muted/30 font-bold">
                 <td colSpan={5} className="px-4 py-2 text-right">
-                  {mesSel === 0 ? `TOTALES AÑO ${anioSel}:` : `TOTALES ${meses[mesSel - 1]} ${anioSel}:`}
+                  {selMes === 0 ? `TOTALES AÑO ${anioSel}:` : `TOTALES ${meses[selMes - 1]} ${anioSel}:`}
                 </td>
                 <td className="px-4 py-2 text-right text-emerald-600">{fmt(data?.totalPercepciones || 0)}</td>
                 <td className="px-4 py-2 text-right text-blue-600">{fmt(data?.totalISR || 0)}</td>
@@ -1063,20 +1063,20 @@ function SatView() {
       </div>
 
       {/* Botón eliminar mes */}
-      {mesSel !== 0 && (data?.count || 0) > 0 && (
+      {selMes !== 0 && (data?.count || 0) > 0 && (
         <div className="flex justify-end">
           <Button
             variant="destructive"
             size="sm"
             onClick={async () => {
-              if (!confirm(`¿Eliminar TODAS las facturas ${tab} de ${meses[mesSel - 1]} ${anioSel}?\n\nSe eliminarán ${data?.count || 0} factura(s). Esta acción no se puede deshacer.`)) return;
-              const r = await fetch(`/api/facturas/eliminar-mes?mes=${mesSel}&anio=${anioSel}&direccion=${dirParam}${empresaId ? `&empresaId=${empresaId}` : ''}`, { method: 'DELETE' });
+              if (!confirm(`¿Eliminar TODAS las facturas ${tab} de ${meses[selMes - 1]} ${anioSel}?\n\nSe eliminarán ${data?.count || 0} factura(s). Esta acción no se puede deshacer.`)) return;
+              const r = await fetch(`/api/facturas/eliminar-mes?mes=${selMes}&anio=${anioSel}&direccion=${dirParam}${empresaId ? `&empresaId=${empresaId}` : ''}`, { method: 'DELETE' });
               const d = await r.json();
               if (d.success) { alert(d.message); refresh(); }
               else alert(`Error: ${d.error}`);
             }}
           >
-            <Trash2 size={14} className="mr-2" /> Eliminar {meses[mesSel - 1]} {anioSel}
+            <Trash2 size={14} className="mr-2" /> Eliminar {meses[selMes - 1]} {anioSel}
           </Button>
         </div>
       )}

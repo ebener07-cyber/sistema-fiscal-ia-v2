@@ -1,6 +1,6 @@
 {
   "name": "nextjs_tailwind_shadcn_ts",
-  "version": "0.2.0",
+  "version": "2.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
@@ -97,5 +97,6 @@
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5"
-  }
+  },
+  "description": "Sistema Fiscal IA + Abbax \u2014 ERP completo con RAG fiscal, voz Stark, 24 modulos"
 }

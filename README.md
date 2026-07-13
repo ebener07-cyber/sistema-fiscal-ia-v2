@@ -80,3 +80,5 @@ Dashboard, Empresas, Clientes, Proveedores, Empleados, Facturación CFDI, Nómin
 - Voz con ElevenLabs (grave tipo Tony Stark)
 - RAG con 9 leyes fiscales mexicanas
 - Personalidad sarcástica pero precisa
+
+<!-- Build: Mon Jul 13 05:15:12 UTC 2026 -->
