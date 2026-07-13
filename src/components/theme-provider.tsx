@@ -10,37 +10,49 @@ interface ThemeContextValue {
   setTheme: (t: Theme) => void;
 }
 
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
+const ThemeContext = createContext<ThemeContextValue>({
+  theme: 'light',
+  toggle: () => {},
+  setTheme: () => {},
+});
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Inicializar desde localStorage o preferencia del sistema (lazy init)
-  const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return 'light';
-    const stored = localStorage.getItem('abbax-theme') as Theme | null;
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    return stored || (prefersDark ? 'dark' : 'light');
-  });
+  const [theme, setThemeState] = useState<Theme>('light');
 
-  // Sincronizar clase dark con el HTML
   useEffect(() => {
-    if (typeof document !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('abbax-theme') as Theme | null;
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const initial = stored || (prefersDark ? 'dark' : 'light');
+      setThemeState(initial);
+      document.documentElement.classList.toggle('dark', initial === 'dark');
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
       document.documentElement.classList.toggle('dark', theme === 'dark');
-    }
+    } catch {}
   }, [theme]);
 
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t);
-    if (typeof document !== 'undefined') {
+    try {
       document.documentElement.classList.toggle('dark', t === 'dark');
-    }
-    if (typeof localStorage !== 'undefined') {
       localStorage.setItem('abbax-theme', t);
-    }
+    } catch {}
   }, []);
 
   const toggle = useCallback(() => {
-    setTheme(theme === 'light' ? 'dark' : 'light');
-  }, [theme, setTheme]);
+    setThemeState(prev => {
+      const next = prev === 'light' ? 'dark' : 'light';
+      try {
+        document.documentElement.classList.toggle('dark', next === 'dark');
+        localStorage.setItem('abbax-theme', next);
+      } catch {}
+      return next;
+    });
+  }, []);
 
   return (
     <ThemeContext.Provider value={{ theme, toggle, setTheme }}>
@@ -50,7 +62,5 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useTheme() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error('useTheme debe usarse dentro de ThemeProvider');
-  return ctx;
+  return useContext(ThemeContext);
 }

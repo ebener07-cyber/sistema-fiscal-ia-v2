@@ -16,7 +16,13 @@ interface EmpresaContextValue {
   loading: boolean;
 }
 
-const EmpresaContext = createContext<EmpresaContextValue | undefined>(undefined);
+const EmpresaContext = createContext<EmpresaContextValue>({
+  empresa: null,
+  empresas: [],
+  setEmpresa: () => {},
+  cargarEmpresas: async () => {},
+  loading: true,
+});
 
 export function EmpresaProvider({ children }: { children: React.ReactNode }) {
   const [empresa, setEmpresaState] = useState<EmpresaActiva | null>(null);
@@ -32,7 +38,7 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
       }));
       setEmpresas(lista);
 
-      if (typeof localStorage !== 'undefined') {
+      try {
         const guardada = localStorage.getItem('empresa-activa');
         if (guardada) {
           const parsed = JSON.parse(guardada);
@@ -43,13 +49,13 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
             return;
           }
         }
-      }
+      } catch {}
 
-      if (lista.length > 0 && !empresa) {
+      if (lista.length > 0) {
         setEmpresaState(lista[0]);
-        if (typeof localStorage !== 'undefined') {
+        try {
           localStorage.setItem('empresa-activa', JSON.stringify(lista[0]));
-        }
+        } catch {}
       }
     } catch (e) {
       console.error('Error cargando empresas:', e);
@@ -64,9 +70,9 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
 
   const setEmpresa = useCallback((e: EmpresaActiva) => {
     setEmpresaState(e);
-    if (typeof localStorage !== 'undefined') {
+    try {
       localStorage.setItem('empresa-activa', JSON.stringify(e));
-    }
+    } catch {}
   }, []);
 
   return (
@@ -77,7 +83,5 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useEmpresa() {
-  const ctx = useContext(EmpresaContext);
-  if (!ctx) throw new Error('useEmpresa debe usarse dentro de EmpresaProvider');
-  return ctx;
+  return useContext(EmpresaContext);
 }
