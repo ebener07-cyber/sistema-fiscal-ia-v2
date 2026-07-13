@@ -1028,7 +1028,24 @@ function SatView() {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [resultados, setResultados] = useState<any[]>([]);
-  const { data, loading, refresh } = useApiData<{ facturas: any[] }>(`/api/facturas?direccion=${tab === 'recibidas' ? 'recibida' : 'emitida'}&limit=20`, empresa?.id);
+  const [anioSel, setAnioSel] = useState(new Date().getFullYear());
+  const [selMes, setSelMes] = useState(0); // 0 = Todo el año
+  const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+  // URL con filtro de mes/año/empresa
+  const url = (() => {
+    const params = new URLSearchParams({
+      direccion: tab === 'recibidas' ? 'recibida' : 'emitida',
+      limit: '50',
+      anio: String(anioSel),
+    });
+    if (selMes !== 0) params.set('mes', String(selMes));
+    if (empresa?.id) params.set('empresaId', empresa.id);
+    return `/api/facturas?${params}`;
+  })();
+
+  const { data, loading, refresh } = useApiData<{ facturas: any[]; count?: number }>(url);
+  const dirParam = tab === 'recibidas' ? 'recibida' : 'emitida';
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1083,15 +1100,46 @@ function SatView() {
         </button>
       </div>
 
-      {/* Botón eliminar mes */}
-      {selMes !== 0 && (data?.count || 0) > 0 && (
-        <div className="flex justify-end">
+      {/* Selector de mes/año + Botón eliminar mes */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={anioSel}
+            onChange={e => setAnioSel(parseInt(e.target.value))}
+            className="h-9 px-3 rounded-md border bg-background text-sm"
+          >
+            {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(a => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => setSelMes(0)}
+            className={cn('px-3 py-1.5 text-xs rounded-md border transition',
+              selMes === 0 ? 'bg-violet-600 text-white border-violet-600' : 'border-border hover:bg-muted')}
+          >
+            Todo el año
+          </button>
+          {meses.map((m, i) => {
+            const mesNum = i + 1;
+            const isActive = selMes === mesNum;
+            return (
+              <button key={m} onClick={() => setSelMes(mesNum)}
+                className={cn('px-2.5 py-1.5 text-xs rounded-md border transition',
+                  isActive ? 'bg-violet-600 text-white border-violet-600' : 'border-border hover:bg-muted')}
+              >
+                {m.slice(0, 3)}
+              </button>
+            );
+          })}
+        </div>
+
+        {selMes !== 0 && (data?.facturas?.length || 0) > 0 && (
           <Button
             variant="destructive"
             size="sm"
             onClick={async () => {
-              if (!confirm(`¿Eliminar TODAS las facturas ${tab} de ${meses[selMes - 1]} ${anioSel}?\n\nSe eliminarán ${data?.count || 0} factura(s). Esta acción no se puede deshacer.`)) return;
-              const r = await fetch(`/api/facturas/eliminar-mes?mes=${selMes}&anio=${anioSel}&direccion=${dirParam}${empresaId ? `&empresaId=${empresaId}` : ''}`, { method: 'DELETE' });
+              if (!confirm(`¿Eliminar TODAS las facturas ${tab} de ${meses[selMes - 1]} ${anioSel}?\n\nSe eliminarán ${data?.facturas?.length || 0} factura(s). Esta acción no se puede deshacer.`)) return;
+              const r = await fetch(`/api/facturas/eliminar-mes?mes=${selMes}&anio=${anioSel}&direccion=${dirParam}${empresa?.id ? `&empresaId=${empresa.id}` : ''}`, { method: 'DELETE' });
               const d = await r.json();
               if (d.success) { alert(d.message); refresh(); }
               else alert(`Error: ${d.error}`);
@@ -1099,8 +1147,8 @@ function SatView() {
           >
             <Trash2 size={14} className="mr-2" /> Eliminar {meses[selMes - 1]} {anioSel}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Upload zone */}
       <Card className="p-5">
