@@ -9,6 +9,8 @@ import { db } from '@/lib/db';
  * Siempre devuelve resumenMensual del año.
  */
 export async function GET(req: NextRequest) {
+  try {
+
   const { searchParams } = new URL(req.url);
   const empresaId = searchParams.get('empresaId');
   const mes = searchParams.get('mes');
@@ -77,4 +79,8 @@ export async function GET(req: NextRequest) {
     totalIMSS,
     resumenMensual,
   });
+  } catch (error: any) {
+    console.error('Error en src/app/api/nomina/route.ts:', error.message);
+    return NextResponse.json({ recibos: [], count: 0, totalPercepciones: 0, totalDeducciones: 0, totalNeto: 0, totalISR: 0, totalIMSS: 0, resumenMensual: [] });
+  }
 }

@@ -3,15 +3,20 @@ import { db } from '@/lib/db';
 
 /** GET /api/empresas — lista todas las empresas */
 export async function GET() {
-  const empresas = await db.empresa.findMany({
-    include: {
-      _count: {
-        select: { clientes: true, proveedores: true, facturas: true, empleados: true },
+  try {
+    const empresas = await db.empresa.findMany({
+      include: {
+        _count: {
+          select: { clientes: true, proveedores: true, facturas: true, empleados: true },
+        },
       },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-  return NextResponse.json({ empresas });
+      orderBy: { createdAt: 'desc' },
+    });
+    return NextResponse.json({ empresas });
+  } catch (error: any) {
+    console.error('Error en /api/empresas GET:', error.message);
+    return NextResponse.json({ empresas: [] });
+  }
 }
 
 /** POST /api/empresas — alta de empresa */
@@ -21,18 +26,12 @@ export async function POST(req: NextRequest) {
     const { nombre, rfc, regimenFiscal, email, telefono, direccion } = body;
 
     if (!nombre || !rfc) {
-      return NextResponse.json(
-        { error: 'Nombre y RFC son obligatorios' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Nombre y RFC son obligatorios' }, { status: 400 });
     }
 
     const existente = await db.empresa.findUnique({ where: { rfc: rfc.toUpperCase() } });
     if (existente) {
-      return NextResponse.json(
-        { error: `Ya existe una empresa con RFC ${rfc}` },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: `Ya existe una empresa con RFC ${rfc}` }, { status: 409 });
     }
 
     const empresa = await db.empresa.create({
