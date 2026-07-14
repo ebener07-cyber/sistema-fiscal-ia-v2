@@ -717,33 +717,110 @@ function EmpleadosView() {
 
 function FacturacionView() {
   const { empresa } = useEmpresa();
-  const { data, loading } = useApiData<{ facturas: any[]; total: number; iva: number }>('/api/facturas', empresa?.id);
-  if (loading) return <LoadingView message="Cargando..." />;
-  if (!data?.facturas?.length) return <EmptyState icon={FileText} message="Sin facturas" />;
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [filtroDir, setFiltroDir] = useState<'todas' | 'emitida' | 'recibida'>('todas');
+
+  const url = (() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    if (filtroDir !== 'todas') params.set('direccion', filtroDir);
+    if (empresa?.id) params.set('empresaId', empresa.id);
+    return `/api/facturas?${params}`;
+  })();
+
+  const { data, loading, refresh } = useApiData<any>(url);
+
+  if (loading) return <LoadingView message="Cargando facturas..." />;
+  if (!data?.facturas?.length) return <EmptyState icon={FileText} message="Sin facturas cargadas. Sube tus CFDIs desde el módulo SAT." />;
+
+  const facturas = data.facturas || [];
+  const totalCount = data.totalCount || 0;
+  const pagination = data.pagination || { page: 1, pageSize: 50, totalPages: 1, hasNext: false, hasPrev: false };
+
+  // Contar emitidas/recibidas del totalCount por separado
+  const emitidas = facturas.filter((f: any) => f.direccion === 'emitida').length;
+  const recibidas = facturas.filter((f: any) => f.direccion === 'recibida').length;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-fade-in">
+      {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card className="p-4 border-l-4 border-l-emerald-500">
           <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total facturas</div>
-          <div className="text-xl font-bold">{data.facturas.length}</div>
+          <div className="text-xl font-bold">{totalCount.toLocaleString('es-MX')}</div>
+          <div className="text-[10px] text-muted-foreground">En el sistema</div>
         </Card>
         <Card className="p-4 border-l-4 border-l-violet-500">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Monto total</div>
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Monto página actual</div>
           <div className="text-xl font-bold text-violet-600">{fmt(data.total)}</div>
         </Card>
         <Card className="p-4 border-l-4 border-l-blue-500">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">IVA total</div>
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">IVA página actual</div>
           <div className="text-xl font-bold text-blue-600">{fmt(data.iva)}</div>
         </Card>
         <Card className="p-4 border-l-4 border-l-amber-500">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Emitidas/Recibidas</div>
-          <div className="text-xl font-bold">
-            {data.facturas.filter(f => f.direccion === 'emitida').length} / {data.facturas.filter(f => f.direccion === 'recibida').length}
-          </div>
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">En esta página</div>
+          <div className="text-xl font-bold">{emitidas}E / {recibidas}R</div>
         </Card>
       </div>
 
-      <DataTableCard title="Facturas recientes">
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1">
+          <button
+            onClick={() => { setFiltroDir('todas'); setPage(1); }}
+            className={cn('px-3 py-1.5 text-xs rounded-md border transition',
+              filtroDir === 'todas' ? 'bg-violet-600 text-white border-violet-600' : 'border-border hover:bg-muted')}
+          >
+            Todas
+          </button>
+          <button
+            onClick={() => { setFiltroDir('emitida'); setPage(1); }}
+            className={cn('px-3 py-1.5 text-xs rounded-md border transition',
+              filtroDir === 'emitida' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-border hover:bg-muted')}
+          >
+            ↗ Emitidas
+          </button>
+          <button
+            onClick={() => { setFiltroDir('recibida'); setPage(1); }}
+            className={cn('px-3 py-1.5 text-xs rounded-md border transition',
+              filtroDir === 'recibida' ? 'bg-orange-600 text-white border-orange-600' : 'border-border hover:bg-muted')}
+          >
+            ↙ Recibidas
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Por página:</span>
+          <select
+            value={pageSize}
+            onChange={e => { setPageSize(parseInt(e.target.value)); setPage(1); }}
+            className="h-8 px-2 rounded-md border bg-background text-xs"
+          >
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={200}>200</option>
+            <option value={500}>500</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Tabla */}
+      <DataTableCard
+        title={`Facturas (${facturas.length} de ${totalCount.toLocaleString('es-MX')})`}
+        action={
+          <button
+            onClick={refresh}
+            className="text-xs text-violet-600 hover:underline"
+            title="Recargar"
+          >
+            <RefreshCw size={12} className="inline" /> Actualizar
+          </button>
+        }
+      >
         <table className="w-full text-sm">
           <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
             <th className="px-4 py-2">Folio</th><th className="px-4 py-2">Fecha</th>
@@ -751,16 +828,17 @@ function FacturacionView() {
             <th className="px-4 py-2">Tipo</th><th className="px-4 py-2 text-right">Total</th>
           </tr></thead>
           <tbody>
-            {data.facturas.map((f) => (
+            {facturas.map((f: any) => (
               <tr key={f.id} className="border-b hover:bg-muted/30">
-                <td className="px-4 py-2 font-mono text-xs">{f.folio}</td>
+                <td className="px-4 py-2 font-mono text-xs">{f.serie || ''}{f.folio}</td>
                 <td className="px-4 py-2">{new Date(f.fecha).toLocaleDateString('es-MX')}</td>
                 <td className="px-4 py-2 font-mono text-xs">{f.receptorRfc || f.emisorRfc}</td>
-                <td className="px-4 py-2 truncate max-w-[200px]">{f.concepto || '—'}</td>
+                <td className="px-4 py-2 truncate max-w-[200px]" title={f.concepto || ''}>{f.concepto || '—'}</td>
                 <td className="px-4 py-2">
                   <Badge variant={f.direccion === 'emitida' ? 'default' : 'secondary'}>
-                    {f.direccion}
+                    {f.direccion === 'emitida' ? '↗ E' : '↙ R'}
                   </Badge>
+                  {f.tipoComprobante === 'E' && <span className="ml-1 text-xs text-amber-600">NC</span>}
                 </td>
                 <td className="px-4 py-2 text-right font-semibold">{fmt(f.total)}</td>
               </tr>
@@ -768,6 +846,53 @@ function FacturacionView() {
           </tbody>
         </table>
       </DataTableCard>
+
+      {/* Paginación */}
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-xs text-muted-foreground">
+            Página <strong>{pagination.page}</strong> de <strong>{pagination.totalPages}</strong>
+          </div>
+          <div className="flex gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!pagination.hasPrev}
+              onClick={() => setPage(1)}
+              className="h-8 px-2"
+            >
+              « Primera
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!pagination.hasPrev}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              className="h-8 px-3"
+            >
+              ‹ Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!pagination.hasNext}
+              onClick={() => setPage(p => p + 1)}
+              className="h-8 px-3"
+            >
+              Siguiente ›
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!pagination.hasNext}
+              onClick={() => setPage(pagination.totalPages)}
+              className="h-8 px-2"
+            >
+              Última »
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1367,13 +1492,19 @@ function SatView() {
   const [resultados, setResultados] = useState<any[]>([]);
   const [anioSel, setAnioSel] = useState(new Date().getFullYear());
   const [selMes, setSelMes] = useState(0); // 0 = Todo el año
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-  // URL con filtro de mes/año/empresa
+  // Reset page cuando cambian los filtros
+  useEffect(() => { setPage(1); }, [tab, anioSel, selMes, empresa?.id]);
+
+  // URL con filtro de mes/año/empresa + paginación
   const url = (() => {
     const params = new URLSearchParams({
       direccion: tab === 'recibidas' ? 'recibida' : 'emitida',
-      limit: '50',
+      page: String(page),
+      pageSize: String(pageSize),
       anio: String(anioSel),
     });
     if (selMes !== 0) params.set('mes', String(selMes));
@@ -1381,8 +1512,10 @@ function SatView() {
     return `/api/facturas?${params}`;
   })();
 
-  const { data, loading, refresh } = useApiData<{ facturas: any[]; count?: number }>(url);
+  const { data, loading, refresh } = useApiData<any>(url);
   const dirParam = tab === 'recibidas' ? 'recibida' : 'emitida';
+  const pagination = data?.pagination || { page: 1, pageSize: 50, totalPages: 1, hasNext: false, hasPrev: false };
+  const totalCount = data?.totalCount || 0;
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1470,19 +1603,19 @@ function SatView() {
           })}
         </div>
 
-        {selMes !== 0 && (data?.facturas?.length || 0) > 0 && (
+        {selMes !== 0 && totalCount > 0 && (
           <Button
             variant="destructive"
             size="sm"
             onClick={async () => {
-              if (!confirm(`¿Eliminar TODAS las facturas ${tab} de ${meses[selMes - 1]} ${anioSel}?\n\nSe eliminarán ${data?.facturas?.length || 0} factura(s). Esta acción no se puede deshacer.`)) return;
+              if (!confirm(`¿Eliminar TODAS las facturas ${tab} de ${meses[selMes - 1]} ${anioSel}?\n\nSe eliminarán ${totalCount} factura(s). Esta acción no se puede deshacer.`)) return;
               const r = await fetch(`/api/facturas/eliminar-mes?mes=${selMes}&anio=${anioSel}&direccion=${dirParam}${empresa?.id ? `&empresaId=${empresa.id}` : ''}`, { method: 'DELETE' });
               const d = await r.json();
-              if (d.success) { alert(d.message); refresh(); }
-              else alert(`Error: ${d.error}`);
+              if (d.success) { toast.success('Facturas eliminadas', d.message); refresh(); }
+              else toast.error('Error', d.error);
             }}
           >
-            <Trash2 size={14} className="mr-2" /> Eliminar {meses[selMes - 1]} {anioSel}
+            <Trash2 size={14} className="mr-2" /> Eliminar {meses[selMes - 1]} {anioSel} ({totalCount})
           </Button>
         )}
       </div>
@@ -1522,31 +1655,83 @@ function SatView() {
 
       {/* Facturas cargadas */}
       {loading ? (
-        <div className="text-center py-8">Cargando facturas...</div>
+        <LoadingView message={`Cargando CFDIs ${tab}...`} />
+      ) : (data?.facturas?.length || 0) === 0 ? (
+        <EmptyState icon={Satellite} message={`Sin CFDIs ${tab} en el período seleccionado`} />
       ) : (
-        <DataTableCard title={`Facturas ${tab} (${data?.facturas?.length || 0})`}>
-          <table className="w-full text-sm">
-            <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-              <th className="px-4 py-2">Folio</th><th className="px-4 py-2">Fecha</th>
-              <th className="px-4 py-2">{tab === 'recibidas' ? 'Proveedor' : 'Cliente'}</th>
-              <th className="px-4 py-2">RFC</th>
-              <th className="px-4 py-2 text-right">Total</th>
-              <th className="px-4 py-2">UUID</th>
-            </tr></thead>
-            <tbody>
-              {(data?.facturas || []).map((f: any) => (
-                <tr key={f.id} className="border-b hover:bg-muted/30">
-                  <td className="px-4 py-2 font-mono text-xs">{f.folio}</td>
-                  <td className="px-4 py-2">{new Date(f.fecha).toLocaleDateString('es-MX')}</td>
-                  <td className="px-4 py-2 font-medium">{tab === 'recibidas' ? f.emisorNombre : f.receptorNombre}</td>
-                  <td className="px-4 py-2 font-mono text-xs">{tab === 'recibidas' ? f.emisorRfc : f.receptorRfc}</td>
-                  <td className="px-4 py-2 text-right font-semibold">{fmt(f.total)}</td>
-                  <td className="px-4 py-2 font-mono text-[10px] text-muted-foreground">{f.uuid?.slice(0, 16)}...</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </DataTableCard>
+        <>
+          <DataTableCard
+            title={`CFDIs ${tab} — Mostrando ${(data?.facturas || []).length} de ${totalCount.toLocaleString('es-MX')} factura(s)`}
+            action={
+              <div className="flex items-center gap-2">
+                <select
+                  value={pageSize}
+                  onChange={e => { setPageSize(parseInt(e.target.value)); setPage(1); }}
+                  className="h-7 px-2 rounded border bg-background text-xs"
+                >
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={500}>500</option>
+                </select>
+                <button
+                  onClick={refresh}
+                  className="text-xs text-violet-600 hover:underline"
+                  title="Recargar"
+                >
+                  <RefreshCw size={12} className="inline" />
+                </button>
+              </div>
+            }
+          >
+            <table className="w-full text-sm">
+              <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
+                <th className="px-4 py-2">Folio</th><th className="px-4 py-2">Fecha</th>
+                <th className="px-4 py-2">{tab === 'recibidas' ? 'Proveedor' : 'Cliente'}</th>
+                <th className="px-4 py-2">RFC</th>
+                <th className="px-4 py-2 text-right">Total</th>
+                <th className="px-4 py-2">UUID</th>
+              </tr></thead>
+              <tbody>
+                {(data?.facturas || []).map((f: any) => (
+                  <tr key={f.id} className="border-b hover:bg-muted/30">
+                    <td className="px-4 py-2 font-mono text-xs">{f.serie || ''}{f.folio}</td>
+                    <td className="px-4 py-2">{new Date(f.fecha).toLocaleDateString('es-MX')}</td>
+                    <td className="px-4 py-2 font-medium">{tab === 'recibidas' ? f.emisorNombre : f.receptorNombre}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{tab === 'recibidas' ? f.emisorRfc : f.receptorRfc}</td>
+                    <td className="px-4 py-2 text-right font-semibold">{fmt(f.total)}</td>
+                    <td className="px-4 py-2 font-mono text-[10px] text-muted-foreground" title={f.uuid}>
+                      {f.uuid?.slice(0, 8)}...
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DataTableCard>
+
+          {/* Paginación SatView */}
+          {pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="text-xs text-muted-foreground">
+                Página <strong>{pagination.page}</strong> de <strong>{pagination.totalPages}</strong> · Total: <strong>{totalCount.toLocaleString('es-MX')}</strong> facturas
+              </div>
+              <div className="flex gap-1">
+                <Button variant="outline" size="sm" disabled={!pagination.hasPrev} onClick={() => setPage(1)} className="h-8 px-2">
+                  « Primera
+                </Button>
+                <Button variant="outline" size="sm" disabled={!pagination.hasPrev} onClick={() => setPage(p => Math.max(1, p - 1))} className="h-8 px-3">
+                  ‹ Anterior
+                </Button>
+                <Button variant="outline" size="sm" disabled={!pagination.hasNext} onClick={() => setPage(p => p + 1)} className="h-8 px-3">
+                  Siguiente ›
+                </Button>
+                <Button variant="outline" size="sm" disabled={!pagination.hasNext} onClick={() => setPage(pagination.totalPages)} className="h-8 px-2">
+                  Última »
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

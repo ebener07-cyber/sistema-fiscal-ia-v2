@@ -33,11 +33,13 @@ export async function GET(req: NextRequest) {
         where: whereEmitidas,
         include: { cliente: true },
         orderBy: { fecha: 'asc' },
+        take: 5000,
       }),
       db.factura.findMany({
         where: whereRecibidas,
         include: { proveedor: true },
         orderBy: { fecha: 'asc' },
+        take: 5000,
       }),
     ]);
 
