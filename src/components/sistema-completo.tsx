@@ -11,7 +11,7 @@ import {
   Building2, Users, Truck, User, Wallet, ShoppingCart, Package, Banknote,
   BookOpen, Satellite, Bot, Scale, ClipboardList, BarChart3, MessageSquare,
   Moon, Sun, Menu, Search, Pin, StickyNote, AlertTriangle, Clock,
-  Upload, FileSpreadsheet, Heart, Home as HomeIcon, Plus, ShieldCheck, Briefcase,
+  Upload, FileSpreadsheet, Heart, Home as HomeIcon, Plus, ShieldCheck, Briefcase, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
@@ -149,44 +149,84 @@ export function SistemaCompleto() {
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 dark:from-slate-950 dark:via-violet-950 dark:to-slate-950 transition-colors">
       {/* SIDEBAR */}
       <aside className={cn(
-        'fixed top-0 left-0 h-full w-64 bg-slate-950 text-slate-300 z-40 transform transition-transform overflow-y-auto',
+        'fixed top-0 left-0 h-full w-64 bg-slate-950 text-slate-300 z-40 transform transition-transform duration-300 overflow-y-auto',
+        'border-r border-white/5',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
       )}>
-        <div className="p-4 border-b border-white/10 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center text-white font-bold text-sm">
+        {/* Brand header */}
+        <div className="p-4 border-b border-white/10 flex items-center gap-3 sticky top-0 bg-slate-950 z-10">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 via-fuchsia-600 to-violet-800 flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-violet-500/30">
             SF
           </div>
-          <div>
-            <div className="text-white font-bold text-sm">Sistema Fiscal IA</div>
-            <div className="text-xs text-slate-400">ERP Completo · v2.0</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-white font-bold text-sm tracking-tight">Sistema Fiscal IA</div>
+            <div className="text-[10px] text-slate-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              ERP + Abbax · v2.2
+            </div>
           </div>
         </div>
 
-        <nav className="p-3">
+        {/* Navegación */}
+        <nav className="p-3 pb-20">
           {NAV.map((sec) => (
             <div key={sec.section} className="mb-4">
-              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold px-3 mb-1">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold px-3 mb-1.5">
                 {sec.section}
               </div>
               {sec.items.map((item) => {
                 const Icon = item.icon;
+                const isActive = view === item.id;
                 return (
                   <button
                     key={item.id}
                     onClick={() => { setView(item.id); setSidebarOpen(false); }}
                     className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
-                      view === item.id ? 'bg-violet-600 text-white font-semibold' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                      'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150 group relative',
+                      isActive
+                        ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-semibold shadow-md shadow-violet-500/30'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-white hover:translate-x-0.5'
                     )}
                   >
-                    <Icon size={16} />
-                    {item.label}
+                    <Icon
+                      size={16}
+                      className={cn(
+                        'transition-transform',
+                        isActive ? 'scale-110' : 'group-hover:scale-110'
+                      )}
+                    />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {isActive && (
+                      <span className="w-1 h-1 rounded-full bg-white/80" />
+                    )}
                   </button>
                 );
               })}
             </div>
           ))}
         </nav>
+
+        {/* Footer con info del usuario */}
+        {usuario && (
+          <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-white/10 bg-slate-950/95 backdrop-blur">
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 transition">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white text-xs font-bold">
+                {usuario.nombre?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-white font-medium truncate">{usuario.nombre}</div>
+                <div className="text-[10px] text-slate-400 truncate">{usuario.email}</div>
+              </div>
+              <button
+                onClick={logout}
+                title="Cerrar sesión"
+                className="text-slate-500 hover:text-red-400 transition"
+              >
+                <Lock size={14} />
+              </button>
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Overlay mobile */}
@@ -197,36 +237,55 @@ export function SistemaCompleto() {
       {/* MAIN */}
       <div className="lg:ml-64">
         {/* TOPBAR */}
-        <header className="border-b bg-white/80 dark:bg-slate-950/80 backdrop-blur-sm sticky top-0 z-20">
+        <header className="border-b bg-white/80 dark:bg-slate-950/80 backdrop-blur-md sticky top-0 z-20">
           <div className="px-4 py-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <Button variant="ghost" size="icon" className="lg:hidden flex-shrink-0" onClick={() => setSidebarOpen(true)}>
                 <Menu size={18} />
               </Button>
-              <div>
-                <h1 className="font-bold text-lg capitalize">{NAV.flatMap(s => s.items).find(i => i.id === view)?.label || 'Dashboard'}</h1>
-                <p className="text-xs text-muted-foreground">
-                  {view === 'dashboard' ? 'Resumen general del sistema' : `Módulo ${view}`}
-                </p>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Sistema Fiscal IA</span>
+                  <span>/</span>
+                  <span className="text-foreground font-medium capitalize">
+                    {NAV.flatMap(s => s.items).find(i => i.id === view)?.label || 'Dashboard'}
+                  </span>
+                </div>
+                <h1 className="font-bold text-base md:text-lg capitalize truncate">
+                  {NAV.flatMap(s => s.items).find(i => i.id === view)?.label || 'Dashboard'}
+                </h1>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Selector de empresa — más visible */}
+              {empresas.length > 0 && (
+                <select
+                  value={empresa?.id || ''}
+                  onChange={(e) => {
+                    const sel = empresas.find(em => em.id === e.target.value);
+                    if (sel) setEmpresa(sel);
+                  }}
+                  className="h-9 px-3 pr-8 rounded-lg border bg-background text-sm font-medium hover:bg-muted/50 transition cursor-pointer max-w-[180px] truncate"
+                  title="Cambiar empresa activa"
+                >
+                  {empresas.map((e) => (
+                    <option key={e.id} value={e.id}>{e.nombre}</option>
+                  ))}
+                </select>
+              )}
+
               <div className="relative hidden md:block">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Buscar... (Ctrl+K)" className="pl-9 w-56 h-9 text-sm" />
+                <Input placeholder="Buscar... (Ctrl+K)" className="pl-9 w-48 lg:w-56 h-9 text-sm" />
               </div>
-              <Button variant="ghost" size="icon" onClick={toggle} title="Modo oscuro (Ctrl+D)">
+              <Button variant="ghost" size="icon" onClick={toggle} title="Modo oscuro/claro" className="h-9 w-9">
                 {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
               </Button>
-              <Button variant="ghost" size="icon" title="Notificaciones">
+              <Button variant="ghost" size="icon" title="Notificaciones" className="h-9 w-9 relative">
                 <Bell size={16} />
+                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
               </Button>
-              <div className="flex items-center gap-2 bg-violet-100 dark:bg-violet-900/30 px-3 py-1 rounded-full">
-                <div className="w-6 h-6 rounded-full bg-violet-600 text-white flex items-center justify-center text-[10px] font-bold">
-                  HE
-                </div>
-                <span className="text-xs font-semibold hidden sm:inline">Hernández</span>
-              </div>
             </div>
           </div>
         </header>
@@ -407,20 +466,64 @@ function useApiData<T>(url: string, empresaId?: string | null): { data: T | null
   return { data, loading, refresh: load };
 }
 
-function DataTableCard({ title, children }: { title: string; children: React.ReactNode }) {
+function DataTableCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <Card className="overflow-hidden">
-      <div className="px-4 py-3 border-b font-semibold text-sm">{title}</div>
+    <Card className="overflow-hidden animate-fade-in">
+      <div className="px-4 py-3 border-b font-semibold text-sm flex items-center justify-between gap-2">
+        <span>{title}</span>
+        {action}
+      </div>
       <div className="overflow-x-auto">{children}</div>
     </Card>
   );
 }
 
-function EmptyState({ icon: Icon, message }: { icon: any; message: string }) {
+function EmptyState({ icon: Icon, message, action }: { icon: any; message: string; action?: React.ReactNode }) {
   return (
-    <div className="text-center py-12 text-muted-foreground">
-      <Icon size={36} className="mx-auto mb-2 opacity-40" />
-      <p className="text-sm">{message}</p>
+    <div className="empty-state animate-fade-in">
+      <Icon size={40} className="empty-state-icon" />
+      <p className="text-sm mb-3">{message}</p>
+      {action}
+    </div>
+  );
+}
+
+/** Skeleton loader para tablas */
+function TableSkeleton({ cols = 5, rows = 5 }: { cols?: number; rows?: number }) {
+  return (
+    <div className="p-4 space-y-3">
+      {Array.from({ length: rows }).map((_, r) => (
+        <div key={r} className="flex gap-3">
+          {Array.from({ length: cols }).map((_, c) => (
+            <div key={c} className="skeleton h-4 flex-1" style={{ width: `${100 / cols}%` }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Loading state estándar para todas las vistas */
+function LoadingView({ message = 'Cargando...' }: { message?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 gap-3">
+      <Loader2 className="animate-spin text-primary" size={32} />
+      <p className="text-sm text-muted-foreground">{message}</p>
+    </div>
+  );
+}
+
+/** Error state estándar */
+function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="empty-state animate-fade-in">
+      <AlertTriangle size={40} className="empty-state-icon text-amber-500" />
+      <p className="text-sm mb-3">{message}</p>
+      {onRetry && (
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          <RefreshCw size={14} className="mr-2" /> Reintentar
+        </Button>
+      )}
     </div>
   );
 }
@@ -428,7 +531,7 @@ function EmptyState({ icon: Icon, message }: { icon: any; message: string }) {
 function ClientesView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ clientes: any[] }>('/api/clientes', empresa?.id);
-  if (loading) return <div className="text-center py-20">Cargando clientes...</div>;
+  if (loading) return <LoadingView message="Cargando clientes..." />;
   if (!data?.clientes?.length) return <EmptyState icon={Users} message="Sin clientes registrados" />;
   return (
     <DataTableCard title={`Clientes (${data.clientes.length})`}>
@@ -457,7 +560,7 @@ function ClientesView() {
 function ProveedoresView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ proveedores: any[] }>('/api/proveedores', empresa?.id);
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
+  if (loading) return <LoadingView message="Cargando..." />;
   if (!data?.proveedores?.length) return <EmptyState icon={Truck} message="Sin proveedores" />;
   return (
     <DataTableCard title={`Proveedores (${data.proveedores.length})`}>
@@ -486,7 +589,7 @@ function ProveedoresView() {
 function EmpleadosView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ empleados: any[] }>('/api/empleados', empresa?.id);
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
+  if (loading) return <LoadingView message="Cargando..." />;
   if (!data?.empleados?.length) return <EmptyState icon={User} message="Sin empleados" />;
   return (
     <DataTableCard title={`Empleados (${data.empleados.length})`}>
@@ -516,7 +619,7 @@ function EmpleadosView() {
 function FacturacionView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ facturas: any[]; total: number; iva: number }>('/api/facturas', empresa?.id);
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
+  if (loading) return <LoadingView message="Cargando..." />;
   if (!data?.facturas?.length) return <EmptyState icon={FileText} message="Sin facturas" />;
   return (
     <div className="space-y-4">
@@ -745,7 +848,7 @@ function NominaView({ empresaId }: { empresaId?: string }) {
 function ComprasView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ ordenes: any[] }>('/api/compras', empresa?.id);
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
+  if (loading) return <LoadingView message="Cargando..." />;
   if (!data?.ordenes?.length) return <EmptyState icon={ShoppingCart} message="Sin órdenes de compra" />;
   return (
     <DataTableCard title={`Órdenes de compra (${data.ordenes.length})`}>
@@ -791,7 +894,7 @@ function InventarioView({ empresaId }: { empresaId?: string }) {
     }
   };
 
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
+  if (loading) return <LoadingView message="Cargando..." />;
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -962,7 +1065,7 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     }
   };
 
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
+  if (loading) return <LoadingView message="Cargando..." />;
 
   return (
     <div className="space-y-4">
@@ -1127,7 +1230,7 @@ function BancosView({ empresaId }: { empresaId?: string }) {
 function ContabilidadView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ polizas: any[] }>('/api/polizas', empresa?.id);
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
+  if (loading) return <LoadingView message="Cargando..." />;
   if (!data?.polizas?.length) return <EmptyState icon={BookOpen} message="Sin pólizas" />;
   return (
     <DataTableCard title={`Pólizas (${data.polizas.length})`}>
@@ -1421,7 +1524,7 @@ function TributarioView() {
 }
 
 function FinanzasView({ stats }: { stats: Stats | null }) {
-  if (!stats) return <div className="text-center py-20">Cargando...</div>;
+  if (!stats) return <LoadingView message="Cargando datos..." />;
   const kpis = [
     { l: 'Patrimonio neto', v: '−$1,164,000', c: 'text-red-600' },
     { l: 'Activo total', v: fmt(1836000), c: 'text-emerald-600' },
@@ -1457,7 +1560,7 @@ function FinanzasView({ stats }: { stats: Stats | null }) {
 function CrmView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ oportunidades: any[] }>('/api/crm', empresa?.id);
-  if (loading) return <div className="text-center py-20">Cargando...</div>;
+  if (loading) return <LoadingView message="Cargando..." />;
   if (!data?.oportunidades?.length) return <EmptyState icon={TrendingUp} message="Sin oportunidades" />;
   return (
     <DataTableCard title={`Oportunidades (${data.oportunidades.length})`}>
@@ -1485,7 +1588,7 @@ function CrmView() {
 
 function ReportesView({ stats }: { stats: Stats | null }) {
   const { empresa } = useEmpresa();
-  if (!stats) return <div className="text-center py-20">Cargando...</div>;
+  if (!stats) return <LoadingView message="Cargando datos..." />;
   const meses = [
     { m: 'Febrero', i: 265000, e: 245000 },
     { m: 'Marzo', i: 298000, e: 267000 },
@@ -2223,7 +2326,7 @@ function EmpresasView() {
     }
   };
 
-  if (loading) return <div className="text-center py-20">Cargando empresas...</div>;
+  if (loading) return <LoadingView message="Cargando empresas..." />;
 
   return (
     <div className="space-y-4">
@@ -2388,7 +2491,7 @@ function ImssView() {
     }
   };
 
-  if (loading) return <div className="text-center py-20">Cargando IMSS...</div>;
+  if (loading) return <LoadingView message="Cargando IMSS..." />;
   if (!data) return <EmptyState icon={ShieldCheck} message="Sin datos IMSS" />;
 
   return (
@@ -2514,7 +2617,7 @@ function InfonavitView() {
     }
   };
 
-  if (loading) return <div className="text-center py-20">Cargando INFONAVIT...</div>;
+  if (loading) return <LoadingView message="Cargando INFONAVIT..." />;
   if (!data) return <EmptyState icon={HomeIcon} message="Sin datos INFONAVIT" />;
 
   return (
@@ -2886,7 +2989,7 @@ function ProyectosView() {
     } catch (e: any) { alert(e.message); }
   };
 
-  if (loading) return <div className="text-center py-20">Cargando proyectos...</div>;
+  if (loading) return <LoadingView message="Cargando proyectos..." />;
 
   const proyectos = data?.proyectos || [];
 
