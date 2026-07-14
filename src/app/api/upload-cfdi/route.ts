@@ -331,10 +331,24 @@ export async function POST(req: NextRequest) {
           const esNomina = cfdi.tipoComprobante === 'N';
           const esNotaCredito = cfdi.tipoComprobante === 'E';
           const esCancelada = cfdi.estado === 'cancelada';
+          const esPago = cfdi.tipoComprobante === 'P';
+          const esTraslado = cfdi.tipoComprobante === 'T';
 
           // Saltar CFDIs cancelados — solo procesamos activos
           if (esCancelada) {
             detalles.push({ archivo: file.name, estado: 'cancelada', mensaje: '🚫 CFDI cancelado — omitido' });
+            continue;
+          }
+
+          // Saltar CFDIs tipo Pago (P) — van en su propio reporte, no en facturación
+          if (esPago) {
+            detalles.push({ archivo: file.name, estado: 'pago', mensaje: '💳 CFDI tipo Pago (P) — omitido del concentrado' });
+            continue;
+          }
+
+          // Saltar CFDIs tipo Traslado (T) — no son facturables
+          if (esTraslado) {
+            detalles.push({ archivo: file.name, estado: 'traslado', mensaje: '🚚 CFDI tipo Traslado (T) — omitido' });
             continue;
           }
 
@@ -513,9 +527,16 @@ export async function POST(req: NextRequest) {
               const esNominaZip = cfdi.tipoComprobante === 'N';
               const esNotaCreditoZip = cfdi.tipoComprobante === 'E';
               const esCanceladaZip = cfdi.estado === 'cancelada';
+              const esPagoZip = cfdi.tipoComprobante === 'P';
+              const esTrasladoZip = cfdi.tipoComprobante === 'T';
 
               // Saltar canceladas
               if (esCanceladaZip) {
+                continue;
+              }
+
+              // Saltar Pagos y Traslados
+              if (esPagoZip || esTrasladoZip) {
                 continue;
               }
 

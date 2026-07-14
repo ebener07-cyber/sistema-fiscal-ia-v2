@@ -96,6 +96,11 @@ function parseCSV(texto: string): MovimientoImportado[] {
 }
 
 // ===== Parser de Excel (.xlsx) usando exceljs =====
+// Soporta formatos:
+//   - Genérico: Fecha | Concepto | Monto (con signo)
+//   - Banorte: CUENTA | FECHA | REFERENCIA | DESCRIPCIÓN | DEPÓSITOS | RETIROS | SALDO
+//   - BBVA: Fecha | Concepto | Depósitos | Retiros | Saldo
+//   - Cualquier banco con columnas separadas de Cargo/Abono o Depósito/Retiro
 async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
@@ -104,34 +109,71 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
   const movimientos: MovimientoImportado[] = [];
 
   for (const ws of wb.worksheets) {
-    let filaInicio = 1;
-    let colFecha = 1;
-    let colConcepto = 2;
-    let colMonto = 3;
-
-    // Detectar header en la primera fila
-    const primeraFila = ws.getRow(1);
+    // Buscar fila de headers (puede no ser la primera)
+    let headerRow = 1;
     const headers: string[] = [];
-    primeraFila.eachCell((cell, col) => {
-      headers[col] = String(cell.value || '').toLowerCase();
-    });
-
-    let tieneHeader = false;
-    for (let c = 1; c <= Math.max(headers.length, 5); c++) {
-      const h = headers[c] || '';
-      if (h.includes('fecha') || h.includes('date')) { colFecha = c; tieneHeader = true; }
-      if (h.includes('concepto') || h.includes('desc') || h.includes('detalle')) { colConcepto = c; tieneHeader = true; }
-      if (h.includes('monto') || h.includes('importe') || h.includes('amount') || h.includes('cargo') || h.includes('abono')) { colMonto = c; tieneHeader = true; }
+    for (let r = 1; r <= Math.min(10, ws.rowCount); r++) {
+      const fila = ws.getRow(r);
+      const tempHeaders: string[] = [];
+      fila.eachCell((cell, col) => {
+        tempHeaders[col] = String(cell.value || '').toLowerCase().trim();
+      });
+      const joined = tempHeaders.join('|');
+      // Detectar fila con headers de banco
+      if (
+        joined.includes('fecha') &&
+        (joined.includes('descripci') || joined.includes('concepto') || joined.includes('descrip'))
+      ) {
+        for (let c = 1; c <= tempHeaders.length; c++) headers[c] = tempHeaders[c];
+        headerRow = r;
+        break;
+      }
     }
-    if (tieneHeader) filaInicio = 2;
+
+    // Si no encontró headers, intentar con la primera fila
+    if (headers.length === 0) {
+      const primeraFila = ws.getRow(1);
+      primeraFila.eachCell((cell, col) => {
+        headers[col] = String(cell.value || '').toLowerCase().trim();
+      });
+    }
+
+    // Mapear columnas
+    let colFecha = 1, colConcepto = 2, colDeposito = 0, colRetiro = 0, colMonto = 0;
+    let colDescripcionDetallada = 0;
+    let colReferencia = 0;
+
+    for (let c = 1; c <= Math.max(headers.length, 20); c++) {
+      const h = headers[c] || '';
+      if (h.includes('fecha') && !h.includes('opera')) colFecha = c;
+      else if (h.includes('fecha')) colFecha = c; // "FECHA DE OPERACIÓN" también cuenta
+      if (h === 'descripción' || h === 'descripcion' || h.includes('descrip') || h.includes('concepto') || h.includes('detalle')) {
+        if (!colConcepto || colConcepto === 2) colConcepto = c;
+      }
+      if (h.includes('descripción detallada') || h.includes('descripcion detallada')) colDescripcionDetallada = c;
+      if (h.includes('referencia')) colReferencia = c;
+      // Depósitos / Abonos / Créditos
+      if (h.includes('depósito') || h.includes('deposito') || h.includes('abono') || h.includes('crédito') || h.includes('credito') || h.includes('ingreso')) {
+        colDeposito = c;
+      }
+      // Retiros / Cargos / Débitos
+      if (h.includes('retiro') || h.includes('cargo') || h.includes('débito') || h.includes('debito') || h.includes('egreso')) {
+        colRetiro = c;
+      }
+      // Monto único (con signo)
+      if (h.includes('monto') || h.includes('importe') || h.includes('amount') || h.includes('movimiento')) {
+        colMonto = c;
+      }
+    }
+
+    const filaInicio = headerRow + 1;
 
     for (let r = filaInicio; r <= ws.rowCount; r++) {
       const fila = ws.getRow(r);
       try {
         const cellFecha = fila.getCell(colFecha).value;
-        const cellConcepto = fila.getCell(colConcepto).value;
-        const cellMonto = fila.getCell(colMonto).value;
 
+        // Saltar filas vacías
         if (!cellFecha) continue;
 
         // Parsear fecha
@@ -147,22 +189,58 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
           } else if (cellFecha.match(/^\d{1,2}\/\d{1,2}\/\d{4}/)) {
             const [dia, mes, anio] = cellFecha.split('/');
             fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
+          } else if (cellFecha.match(/^\d{1,2}-\d{1,2}-\d{4}/)) {
+            const [dia, mes, anio] = cellFecha.split('-');
+            fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
           }
         }
         if (!fecha || isNaN(fecha.getTime())) continue;
 
-        // Concepto
-        const concepto = String(cellConcepto || 'Movimiento').trim();
+        // Concepto (principal + descripción detallada si existe)
+        const conceptoBase = String(fila.getCell(colConcepto).value || 'Movimiento').trim();
+        let concepto = conceptoBase;
+        if (colDescripcionDetallada) {
+          const detalle = String(fila.getCell(colDescripcionDetallada).value || '').trim();
+          if (detalle && detalle !== '-' && detalle !== conceptoBase) {
+            concepto = `${conceptoBase} — ${detalle}`.slice(0, 500);
+          }
+        }
+        if (colReferencia) {
+          const ref = String(fila.getCell(colReferencia).value || '').trim();
+          if (ref && ref !== '-') {
+            concepto = `Ref: ${ref} · ${concepto}`.slice(0, 500);
+          }
+        }
 
-        // Monto
+        // Calcular monto según el formato detectado
         let monto = 0;
-        if (typeof cellMonto === 'number') {
-          monto = cellMonto;
-        } else if (typeof cellMonto === 'string') {
-          const cleaned = cellMonto.replace(/[^0-9.-]/g, '').replace(',', '.');
-          monto = parseFloat(cleaned) || 0;
-        } else if (cellMonto && typeof cellMonto === 'object' && 'result' in (cellMonto as any)) {
-          monto = parseFloat(String((cellMonto as any).result)) || 0;
+
+        // Caso 1: Banorte-style — columnas separadas Depósito/Retiro
+        if (colDeposito || colRetiro) {
+          let deposito = 0, retiro = 0;
+          if (colDeposito) {
+            const val = parseNumberFromCell(fila.getCell(colDeposito).value);
+            deposito = val;
+          }
+          if (colRetiro) {
+            const val = parseNumberFromCell(fila.getCell(colRetiro).value);
+            retiro = val;
+          }
+          monto = deposito - retiro;
+        }
+        // Caso 2: Monto único con signo
+        else if (colMonto) {
+          monto = parseNumberFromCell(fila.getCell(colMonto).value);
+        }
+        // Caso 3: Fallback — buscar cualquier número en la fila después de la columna concepto
+        else {
+          for (let c = colConcepto + 1; c <= Math.min(fila.cellCount, 15); c++) {
+            const val = parseNumberFromCell(fila.getCell(c).value);
+            if (val !== 0) {
+              monto = val;
+              break;
+            }
+          }
         }
 
         if (monto === 0) continue;
@@ -175,6 +253,20 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
   }
 
   return movimientos;
+}
+
+function parseNumberFromCell(value: any): number {
+  if (value === null || value === undefined || value === '' || value === '-') return 0;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    // Limpiar: quitar $, comas, espacios, signos de moneda
+    const cleaned = value.replace(/[$,\s]/g, '').replace(/[^0-9.-]/g, '');
+    return parseFloat(cleaned) || 0;
+  }
+  if (typeof value === 'object' && 'result' in value) {
+    return parseFloat(String(value.result)) || 0;
+  }
+  return 0;
 }
 
 export async function POST(req: NextRequest) {
@@ -251,14 +343,22 @@ export async function POST(req: NextRequest) {
     }
 
     // Insertar movimientos (dedupe por fecha+concepto+monto)
+    // IMPORTANTE: Procesa TODOS los movimientos del archivo, no solo del mes seleccionado.
+    // Esto permite subir un Excel con varios meses (ej. ene-jun) y se importan todos.
     let movimientosCreados = 0;
     let movimientosDuplicados = 0;
+    let movimientosFueraRango = 0;
+    const mesesAfectados = new Set<string>();
 
     for (const mov of movimientos) {
-      // Solo procesar movimientos del mes/año correspondiente
-      if (mov.fecha.getMonth() + 1 !== mes || mov.fecha.getFullYear() !== anio) {
+      // Si la fecha es inválida o muy antigua/futura, saltar
+      const yearMov = mov.fecha.getFullYear();
+      if (yearMov < 2020 || yearMov > new Date().getFullYear() + 1) {
+        movimientosFueraRango++;
         continue;
       }
+
+      mesesAfectados.add(`${mov.fecha.getFullYear()}-${String(mov.fecha.getMonth() + 1).padStart(2, '0')}`);
 
       // Dedupe
       const existente = await db.movimientoBanco.findFirst({
@@ -287,13 +387,21 @@ export async function POST(req: NextRequest) {
       movimientosCreados++;
     }
 
-    // Calcular totales del mes
+    // Calcular totales del mes seleccionado
     const inicioMes = new Date(anio, mes - 1, 1);
     const finMes = new Date(anio, mes, 0, 23, 59, 59);
     const movimientosMes = await db.movimientoBanco.findMany({
       where: { cuentaId, fecha: { gte: inicioMes, lte: finMes } },
     });
     const saldoCalculado = movimientosMes.reduce((s, m) => s + m.monto, 0);
+
+    // Total de TODOS los movimientos de la cuenta (todos los meses)
+    const totalCuenta = await db.movimientoBanco.count({ where: { cuentaId } });
+
+    const mesesArray = Array.from(mesesAfectados).sort();
+    const messageMonths = mesesArray.length > 1
+      ? ` Meses afectados: ${mesesArray.join(', ')}.`
+      : '';
 
     return NextResponse.json({
       success: true,
@@ -303,9 +411,12 @@ export async function POST(req: NextRequest) {
       movimientosDetectados: movimientos.length,
       movimientosCreados,
       movimientosDuplicados,
+      movimientosFueraRango,
       movimientosTotales: movimientosMes.length,
+      movimientosTotalesCuenta: totalCuenta,
+      mesesAfectados: mesesArray,
       saldoDelMes: saldoCalculado,
-      message: `✅ ${formatoDetectado} procesado: ${movimientosCreados} nuevos, ${movimientosDuplicados} duplicados, ${movimientosMes.length} totales del mes.`,
+      message: `✅ ${formatoDetectado} procesado: ${movimientosCreados} nuevos, ${movimientosDuplicados} duplicados de ${movimientos.length} detectados.${messageMonths} Total en la cuenta: ${totalCuenta} movimientos.`,
     });
   } catch (e: any) {
     console.error('Error en upload-estado-cuenta:', e);

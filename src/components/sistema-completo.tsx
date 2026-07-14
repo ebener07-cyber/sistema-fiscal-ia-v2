@@ -1959,6 +1959,78 @@ function ReportesView({ stats }: { stats: Stats | null }) {
           </div>
         </div>
       </Card>
+
+      {/* Concentrado mensual tipo Excel del usuario + Conciliación */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <FileSpreadsheet size={18} className="text-violet-600" /> Concentrado Anual (estilo Excel SAT)
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Genera un Excel con la MISMA estructura que tu concentrado manual: una hoja por mes (Ene-Dic) con
+          todos los CFDIs emitidos/recibidos, una hoja "Concentrado" con totales por mes, y una hoja "NOMINA"
+          con los recibos de nómina. Excluye CFDIs tipo Pago y Cancelados automáticamente.
+        </p>
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="border rounded-lg p-4">
+            <h4 className="font-semibold mb-2 flex items-center gap-2">
+              <FileText size={16} className="text-violet-600" /> Concentrado completo
+            </h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Excel con 14 hojas (12 meses + Concentrado + Nómina). Formato idéntico a tu Excel ELECTRONICMA.
+            </p>
+            <Button
+              onClick={() => {
+                const params = new URLSearchParams({ anio: String(new Date().getFullYear()) });
+                if (empresa?.id) params.set('empresaId', empresa.id);
+                window.open(`/api/export/concentrado?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={14} className="mr-2" /> Descargar Concentrado
+            </Button>
+          </div>
+
+          <div className="border rounded-lg p-4">
+            <h4 className="font-semibold mb-2 flex items-center gap-2">
+              <AlertTriangle size={16} className="text-amber-500" /> Conciliación Excel vs Sistema
+            </h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Sube tu Excel del SAT y te dice qué CFDIs faltan en el sistema, cuáles están de más, y diferencias de monto.
+            </p>
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f || !empresa?.id) return;
+                  const fd = new FormData();
+                  fd.append('file', f);
+                  fd.append('empresaId', empresa.id);
+                  try {
+                    const r = await fetch('/api/conciliacion', { method: 'POST', body: fd });
+                    const d = await r.json();
+                    if (d.error) {
+                      toast.error('Error en conciliación', d.error);
+                    } else {
+                      toast.success('Conciliación lista', d.message);
+                      // Mostrar resumen
+                      const resumen = `=== CONCILIACIÓN ===\n\nCoincidencias: ${d.coincidencias}\nFaltantes en BD: ${d.faltantesEnBD}\nExtra en BD: ${d.extraEnBD}\nDiferencias de monto: ${d.diferenciasMonto}\n\nNÓMINA:\nExcel: ${d.nominasExcel}\nBD: ${d.nominasBD}\nFaltantes: ${d.nominasFaltantes}\n\nDetalle de faltantes (primeros 10):\n${d.detalleFaltantes.slice(0, 10).map((f: any) => `- ${f.hoja} | ${f.uuid.slice(0, 8)}... | $${f.total} | ${f.rfcReceptor}`).join('\n')}`;
+                      alert(resumen);
+                    }
+                  } catch (e: any) {
+                    toast.error('Error', e.message);
+                  }
+                  e.target.value = '';
+                }}
+                className="hidden"
+              />
+              <div className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-md text-sm font-medium transition cursor-pointer">
+                <AlertTriangle size={14} /> Subir Excel y conciliar
+              </div>
+            </label>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
