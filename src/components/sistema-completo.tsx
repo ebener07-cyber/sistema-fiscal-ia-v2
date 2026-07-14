@@ -1809,34 +1809,237 @@ function TributarioView() {
 }
 
 function FinanzasView({ stats }: { stats: Stats | null }) {
-  if (!stats) return <LoadingView message="Cargando datos..." />;
-  const kpis = [
-    { l: 'Patrimonio neto', v: '−$1,164,000', c: 'text-red-600' },
-    { l: 'Activo total', v: fmt(1836000), c: 'text-emerald-600' },
-    { l: 'Pasivo total', v: fmt(3000000), c: 'text-red-600' },
-    { l: 'Tasa de ahorro', v: '8.5%', c: 'text-amber-600' },
-    { l: 'Ratio endeudamiento', v: '89.7%', c: 'text-red-600' },
-    { l: 'Fondo emergencia', v: '32.5%', c: 'text-amber-600' },
-    { l: 'IVA por pagar', v: fmt(stats.fiscal.ivaPorPagar), c: 'text-orange-600' },
-    { l: 'Utilidad bruta', v: fmt(stats.fiscal.utilidadBruta), c: 'text-emerald-600' },
-  ];
+  const { empresa } = useEmpresa();
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!empresa?.id) return;
+    setLoading(true);
+    fetch(`/api/finanzas/analisis?empresaId=${empresa.id}`)
+      .then(r => r.json())
+      .then(d => setData(d))
+      .catch(e => console.error(e))
+      .finally(() => setLoading(false));
+  }, [empresa?.id]);
+
+  if (loading) return <LoadingView message="Analizando finanzas con datos de bancos..." />;
+  if (!data) return <ErrorState message="No se pudo cargar el análisis financiero" />;
+
+  const ind = data.indicadores || {};
+  const flujo = data.flujoMensual || [];
+  const alertas = data.alertas || [];
+  const sugerencias = data.sugerencias || [];
+  const cuentas = data.cuentasBancarias || [];
+
+  // Datos para gráfico de flujo
+  const flujoChartData = flujo.filter(f => f.ingresos > 0 || f.egresos > 0).map(f => ({
+    name: f.mesNombre.slice(0, 3),
+    Ingresos: f.ingresos,
+    Egresos: -f.egresos,
+    Neto: f.flujoNeto,
+  }));
+
+  // Color según score
+  const scoreColor = data.score >= 80 ? 'text-emerald-600' : data.score >= 60 ? 'text-amber-600' : 'text-red-600';
+  const scoreBg = data.score >= 80 ? 'border-l-emerald-500 bg-emerald-50/30' : data.score >= 60 ? 'border-l-amber-500 bg-amber-50/30' : 'border-l-red-500 bg-red-50/30';
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5 animate-fade-in">
+      {/* Calificación principal */}
+      <Card className={cn('p-6 border-l-4', scoreBg)}>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <div className="text-xs uppercase font-semibold text-muted-foreground">Calificación Financiera</div>
+            <div className={cn('text-3xl font-bold mt-1', scoreColor)}>{data.calificacion}</div>
+            <div className="text-sm text-muted-foreground mt-1">
+              Score: <strong>{data.score}/100</strong> · Análisis del {data.anio}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs uppercase font-semibold text-muted-foreground">Saldo en bancos</div>
+            <div className={cn('text-3xl font-bold mt-1', ind.saldoBancos >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+              {fmt(ind.saldoBancos)}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              ≈ {ind.mesesReservaNomina.toFixed(1)} meses de nómina
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Indicadores principales */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {kpis.map((k) => (
-          <Card key={k.l} className="p-4">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">{k.l}</div>
-            <div className={cn('text-xl font-bold mt-1', k.c)}>{k.v}</div>
-          </Card>
-        ))}
+        <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Ingresos {data.anio}</div>
+          <div className="text-xl font-bold text-emerald-600">{fmt(ind.totalEmitido)}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Gastos {data.anio}</div>
+          <div className="text-xl font-bold text-orange-600">{fmt(ind.totalRecibido)}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Utilidad operativa</div>
+          <div className={cn('text-xl font-bold', ind.utilidadOperativa >= 0 ? 'text-violet-600' : 'text-red-600')}>
+            {fmt(ind.utilidadOperativa)}
+          </div>
+          <div className="text-[10px] text-muted-foreground">Margen: {ind.margenUtilidad?.toFixed(1)}%</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-red-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">IVA por pagar</div>
+          <div className="text-xl font-bold text-red-600">{fmt(ind.ivaPorPagar)}</div>
+        </Card>
       </div>
-      <Card className="p-5 border-l-4 border-l-red-500 bg-red-50/50">
-        <h3 className="font-semibold flex items-center gap-2 mb-2">
-          🎯 Avalancha de deudas
+
+      {/* Razones financieras */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <Calculator size={16} className="text-violet-600" /> Razones Financieras
         </h3>
-        <p className="text-sm text-muted-foreground">
-          Configura tus deudas en el panel de finanzas para activar la estrategia de pago optimizada.
-        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="border rounded-lg p-3">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Razón Corriente</div>
+            <div className={cn('text-2xl font-bold', ind.razonCorriente >= 1.5 ? 'text-emerald-600' : ind.razonCorriente >= 1 ? 'text-amber-600' : 'text-red-600')}>
+              {ind.razonCorriente?.toFixed(2)}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              {ind.razonCorriente >= 1.5 ? '✅ Saludable (>1.5)' : ind.razonCorriente >= 1 ? '⚠️ Aceptable (>1)' : '🚨 Crítico (<1)'}
+            </div>
+          </div>
+          <div className="border rounded-lg p-3">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Razón Rápida (Acid Test)</div>
+            <div className={cn('text-2xl font-bold', ind.razonRapida >= 1 ? 'text-emerald-600' : 'text-amber-600')}>
+              {ind.razonRapida?.toFixed(2)}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              Liquidez inmediata sin inventarios
+            </div>
+          </div>
+          <div className="border rounded-lg p-3">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Endeudamiento CP</div>
+            <div className={cn('text-2xl font-bold', ind.razonEndeudamiento <= 0.5 ? 'text-emerald-600' : ind.razonEndeudamiento <= 0.7 ? 'text-amber-600' : 'text-red-600')}>
+              {(ind.razonEndeudamiento * 100)?.toFixed(1)}%
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              Pasivos circ. / Activos circ.
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Gráfico de flujo de caja */}
+      {flujoChartData.length > 0 && (
+        <Card className="p-5">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <BarChart3 size={16} className="text-violet-600" /> Flujo de Caja Mensual
+          </h3>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={flujoChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                <RechartsTooltip
+                  formatter={(value: any, name: any) => [fmt(value), name]}
+                  contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '12px' }}
+                />
+                <Legend wrapperStyle={{ fontSize: '11px' }} />
+                <Bar dataKey="Ingresos" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Egresos" fill="#f97316" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Neto" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      )}
+
+      {/* Alertas críticas */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <AlertTriangle size={16} className={cn(alertas.some(a => a.nivel === 'critico') ? 'text-red-500' : 'text-amber-500')} />
+          Alertas Financieras ({alertas.length})
+        </h3>
+        <div className="space-y-2">
+          {alertas.map((a, i) => (
+            <div
+              key={i}
+              className={cn(
+                'border rounded-lg p-3',
+                a.nivel === 'critico' ? 'border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800' :
+                a.nivel === 'warning' ? 'border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800' :
+                'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800'
+              )}
+            >
+              <div className={cn(
+                'font-semibold text-sm',
+                a.nivel === 'critico' ? 'text-red-700 dark:text-red-300' :
+                a.nivel === 'warning' ? 'text-amber-700 dark:text-amber-300' :
+                'text-emerald-700 dark:text-emerald-300'
+              )}>
+                {a.titulo}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">{a.descripcion}</div>
+              <div className="text-xs font-medium mt-2 flex items-start gap-1">
+                <span className="text-violet-600">💡</span>
+                <span>{a.recomendacion}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Sugerencias expertas */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <Sparkles size={16} className="text-violet-600" /> Sugerencias de Experto Financiero
+        </h3>
+        <div className="grid md:grid-cols-2 gap-3">
+          {sugerencias.map((s, i) => (
+            <div key={i} className="border rounded-lg p-3 hover:bg-muted/30 transition card-hover">
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <div className="font-semibold text-sm">{s.titulo}</div>
+                <Badge variant={s.tipo === 'corto' ? 'default' : s.tipo === 'mediano' ? 'secondary' : 'outline'}>
+                  {s.tipo === 'corto' ? 'Inmediato' : s.tipo === 'mediano' ? 'Mediano plazo' : 'Largo plazo'}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">{s.descripcion}</p>
+              <div className="text-xs text-emerald-600 font-medium mt-2">
+                📈 {s.impactoEstimado}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Cuentas bancarias */}
+      {cuentas.length > 0 && (
+        <Card className="p-5">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Banknote size={16} className="text-emerald-600" /> Cuentas Bancarias ({cuentas.length})
+          </h3>
+          <div className="grid md:grid-cols-2 gap-3">
+            {cuentas.map((c, i) => (
+              <div key={i} className="border rounded-lg p-3">
+                <div className="text-xs text-muted-foreground">{c.banco}</div>
+                <div className="font-mono text-sm">{c.cuenta}</div>
+                <div className={cn('text-lg font-bold mt-1', c.saldo >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                  {fmt(c.saldo)}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">{c.movimientos} movimientos</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Resumen ejecutivo */}
+      <Card className="p-5 bg-violet-50/30 dark:bg-violet-900/10 border-violet-200 dark:border-violet-800">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <ClipboardList size={16} className="text-violet-600" /> Resumen Ejecutivo
+        </h3>
+        <pre className="text-xs whitespace-pre-wrap font-mono bg-background/50 p-4 rounded-lg border">
+{data.resumenEjecutivo}
+        </pre>
       </Card>
     </div>
   );
@@ -3277,6 +3480,21 @@ function ProyectosView() {
   const [facturasSinProyecto, setFacturasSinProyecto] = useState<any[]>([]);
   const [showAsignar, setShowAsignar] = useState<string | null>(null);
   const [facturasSeleccionadas, setFacturasSeleccionadas] = useState<Set<string>>(new Set());
+  const [conciliacion, setConciliacion] = useState<any>(null);
+  const [showConciliacion, setShowConciliacion] = useState(false);
+
+  // Cargar conciliación (proyectos detectados + cruce con bancos)
+  const cargarConciliacion = async () => {
+    if (!empresa?.id) return;
+    try {
+      const r = await fetch(`/api/proyectos/conciliacion?empresaId=${empresa.id}`);
+      const d = await r.json();
+      setConciliacion(d);
+      setShowConciliacion(true);
+    } catch (e: any) {
+      toast.error('Error', e.message);
+    }
+  };
 
   // Cargar clientes para el formulario
   useEffect(() => {
@@ -3369,12 +3587,110 @@ function ProyectosView() {
           </h2>
           <p className="text-xs text-muted-foreground mt-1">
             Agrupa facturas emitidas y recibidas por obra/servicio. Calcula utilidad y margen por proyecto.
+            Detecta proyectos automáticamente desde el concepto de la factura.
           </p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)}>
-          <Plus size={14} className="mr-2" /> {showForm ? 'Cancelar' : 'Nuevo proyecto'}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={cargarConciliacion} title="Detecta proyectos y cruza con bancos">
+            <RefreshCw size={14} className="mr-2" /> Conciliar con bancos
+          </Button>
+          <Button onClick={() => setShowForm(!showForm)}>
+            <Plus size={14} className="mr-2" /> {showForm ? 'Cancelar' : 'Nuevo proyecto'}
+          </Button>
+        </div>
       </div>
+
+      {/* Panel de conciliación */}
+      {showConciliacion && conciliacion && (
+        <Card className="p-5 border-l-4 border-l-amber-500 bg-amber-50/30 animate-fade-in">
+          <div className="flex justify-between items-start mb-3">
+            <h3 className="font-semibold flex items-center gap-2">
+              <RefreshCw size={16} className="text-amber-600" /> Conciliación automática
+            </h3>
+            <Button variant="ghost" size="sm" onClick={() => setShowConciliacion(false)}>✕</Button>
+          </div>
+
+          {/* KPIs de conciliación */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="bg-background rounded-lg p-3 border">
+              <div className="text-[10px] uppercase text-muted-foreground">Facturas analizadas</div>
+              <div className="text-xl font-bold">{conciliacion.totalFacturas}</div>
+            </div>
+            <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-200">
+              <div className="text-[10px] uppercase text-muted-foreground">Pagadas</div>
+              <div className="text-xl font-bold text-emerald-600">{conciliacion.totalPagadas}</div>
+            </div>
+            <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200">
+              <div className="text-[10px] uppercase text-muted-foreground">Pendientes</div>
+              <div className="text-xl font-bold text-red-600">{conciliacion.totalPendientes}</div>
+            </div>
+            <div className="bg-violet-50 dark:bg-violet-900/20 rounded-lg p-3 border border-violet-200">
+              <div className="text-[10px] uppercase text-muted-foreground">% Cobranza</div>
+              <div className="text-xl font-bold text-violet-600">{conciliacion.porcentajeCobranza}%</div>
+            </div>
+          </div>
+
+          {/* Proyectos detectados automáticamente */}
+          {conciliacion.porProyecto && conciliacion.porProyecto.length > 0 && (
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold mb-2">📁 Proyectos detectados desde conceptos ({conciliacion.proyectosDetectados})</h4>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {conciliacion.porProyecto.slice(0, 15).map((p: any, i: number) => (
+                  <div key={i} className="bg-background border rounded-lg p-3">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm truncate">{p.nombre}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {p.countFacturas} factura(s) · Emitido: {fmt(p.totalEmitido)} · Recibido: {fmt(p.totalRecibido)}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 text-xs">
+                        <span className="px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
+                          {p.pagadas} pagadas
+                        </span>
+                        <span className="px-2 py-1 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+                          {p.pendientes} pendientes
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Por cliente */}
+          {conciliacion.porCliente && conciliacion.porCliente.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold mb-2">👥 Por cliente</h4>
+              <div className="overflow-x-auto bg-background rounded-lg border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Cliente</th>
+                      <th className="px-3 py-2 text-right">Facturas</th>
+                      <th className="px-3 py-2 text-right">Total</th>
+                      <th className="px-3 py-2 text-right">Pagadas</th>
+                      <th className="px-3 py-2 text-right">Pendientes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {conciliacion.porCliente.slice(0, 15).map((c: any, i: number) => (
+                      <tr key={i} className="border-b hover:bg-muted/30">
+                        <td className="px-3 py-2 font-medium truncate max-w-xs">{c.nombre}</td>
+                        <td className="px-3 py-2 text-right">{c.count}</td>
+                        <td className="px-3 py-2 text-right font-mono">{fmt(c.total)}</td>
+                        <td className="px-3 py-2 text-right text-emerald-600">{c.pagadas}</td>
+                        <td className="px-3 py-2 text-right text-red-600">{c.pendientes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Formulario nuevo proyecto */}
       {showForm && (

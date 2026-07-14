@@ -122,7 +122,9 @@ model Factura {
   serie           String?
   fecha           DateTime @default(now())
   subtotal        Float
+  descuento       Float    @default(0)
   totalImpuestos  Float    @default(0)
+  impuestoRetenido Float   @default(0)
   total           Float
   moneda          String   @default("MXN")
   tipoComprobante String   @default("I")

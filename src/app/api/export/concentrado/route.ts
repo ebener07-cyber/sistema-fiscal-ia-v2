@@ -52,6 +52,16 @@ const COLORES = {
   concentrado: 'FF6366F1', // indigo
 };
 
+// Borde delgado para todas las celdas del Concentrado
+function thinBorder() {
+  return {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -110,17 +120,17 @@ export async function GET(req: NextRequest) {
 
       const totalesEmitidas = {
         subtotal: facturasEmitidas.reduce((s, f) => s + f.subtotal, 0),
-        descuento: facturasEmitidas.reduce((s, f) => s + 0, 0), // El schema no tiene descuento separado
+        descuento: facturasEmitidas.reduce((s, f) => s + (f.descuento || 0), 0),
         impuesto: facturasEmitidas.reduce((s, f) => s + f.totalImpuestos, 0),
-        retenido: 0,
+        retenido: facturasEmitidas.reduce((s, f) => s + (f.impuestoRetenido || 0), 0),
         total: facturasEmitidas.reduce((s, f) => s + f.total, 0),
         count: facturasEmitidas.length,
       };
       const totalesRecibidas = {
         subtotal: facturasRecibidas.reduce((s, f) => s + f.subtotal, 0),
-        descuento: facturasRecibidas.reduce((s, f) => s + 0, 0),
+        descuento: facturasRecibidas.reduce((s, f) => s + (f.descuento || 0), 0),
         impuesto: facturasRecibidas.reduce((s, f) => s + f.totalImpuestos, 0),
-        retenido: 0,
+        retenido: facturasRecibidas.reduce((s, f) => s + (f.impuestoRetenido || 0), 0),
         total: facturasRecibidas.reduce((s, f) => s + f.total, 0),
         count: facturasRecibidas.length,
       };
@@ -299,68 +309,97 @@ export async function GET(req: NextRequest) {
     // ===== Hoja Concentrado =====
     const wsConc = wb.addWorksheet('Concentrado', { views: [{ showGridLines: false }] });
 
-    // Título
-    wsConc.mergeCells('A1:O1');
-    wsConc.getCell('A1').value = `${empresa?.nombre || 'EMPRESA'} — CONCENTRADO ANUAL ${anio}`;
-    wsConc.getCell('A1').font = { bold: true, size: 16, color: { argb: COLORES.header } };
-    wsConc.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
-    wsConc.getRow(1).height = 28;
+    // Definir columnas A-N (Mes + 5 Emitidas + 5 Recibidas + 1 Nómina + 1 Count opcional)
+    wsConc.columns = [
+      { width: 14 },  // A - Mes
+      { width: 16 },  // B - Emitidas Sub Total
+      { width: 14 },  // C - Emitidas Descuentos
+      { width: 14 },  // D - Emitidas Impuesto
+      { width: 14 },  // E - Emitidas Imp. Retenido
+      { width: 18 },  // F - Emitidas Total
+      { width: 16 },  // G - Recibidas Sub Total
+      { width: 14 },  // H - Recibidas Descuentos
+      { width: 14 },  // I - Recibidas Impuesto
+      { width: 14 },  // J - Recibidas Imp. Retenido
+      { width: 18 },  // K - Recibidas Total
+      { width: 16 },  // L - Nómina Total
+    ];
 
-    // Sub-títulos
+    // Fila 1: Título grande
+    wsConc.mergeCells('A1:L1');
+    const cellTitulo = wsConc.getCell('A1');
+    cellTitulo.value = `${empresa?.nombre || 'EMPRESA'}    Facturacion ${anio}`;
+    cellTitulo.font = { bold: true, size: 14, color: { argb: 'FF4B0082' } };
+    cellTitulo.alignment = { horizontal: 'left', vertical: 'middle' };
+    wsConc.getRow(1).height = 24;
+
+    // Fila 3: Encabezados principales (Mes | Facturas Emitidas | Facturas Recibidas | Nómina)
+    // A3:A4 merged "Mes/2026"
     wsConc.mergeCells('A3:A4');
-    wsConc.getCell('A3').value = 'Mes';
-    wsConc.getCell('A3').font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    wsConc.getCell('A3').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.concentrado } };
-    wsConc.getCell('A3').alignment = { horizontal: 'center', vertical: 'middle' };
+    const cellMes = wsConc.getCell('A3');
+    cellMes.value = `Mes/${anio}`;
+    cellMes.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cellMes.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.concentrado } };
+    cellMes.alignment = { horizontal: 'center', vertical: 'middle' };
+    cellMes.border = thinBorder();
 
-    // Facturas Emitidas
-    wsConc.mergeCells('B3:G3');
-    wsConc.getCell('B3').value = 'FACTURAS EMITIDAS';
-    wsConc.getCell('B3').font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    wsConc.getCell('B3').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.ingreso } };
-    wsConc.getCell('B3').alignment = { horizontal: 'center' };
+    // B3:F3 merged "Facturas Emitidas"
+    wsConc.mergeCells('B3:F3');
+    const cellEmitidas = wsConc.getCell('B3');
+    cellEmitidas.value = 'Facturas Emitidas';
+    cellEmitidas.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cellEmitidas.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.ingreso } };
+    cellEmitidas.alignment = { horizontal: 'center', vertical: 'middle' };
+    cellEmitidas.border = thinBorder();
 
-    const headersEmitidas = ['Sub Total', 'Descuentos', 'Impuesto', 'Imp. Retenido', 'Total', 'Count'];
-    headersEmitidas.forEach((h, i) => {
-      const cell = wsConc.getCell(2 + i, 4); // row 4, col B+
-      cell.value = h;
+    // G3:K3 merged "Facturas Recibidas"
+    wsConc.mergeCells('G3:K3');
+    const cellRecibidas = wsConc.getCell('G3');
+    cellRecibidas.value = 'Facturas Recibidas';
+    cellRecibidas.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cellRecibidas.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.egreso } };
+    cellRecibidas.alignment = { horizontal: 'center', vertical: 'middle' };
+    cellRecibidas.border = thinBorder();
+
+    // L3:L4 merged "NOMINA"
+    wsConc.mergeCells('L3:L4');
+    const cellNomina = wsConc.getCell('L3');
+    cellNomina.value = 'NOMINA';
+    cellNomina.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cellNomina.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.nomina } };
+    cellNomina.alignment = { horizontal: 'center', vertical: 'middle' };
+    cellNomina.border = thinBorder();
+
+    // Fila 4: Sub-encabezados (Sub Total | Descuentos | Impuesto | Imp. Retenido | Total × 2 + Total Nómina)
+    const subHeaders = [
+      { col: 'B', label: 'Sub Total' },
+      { col: 'C', label: 'Descuentos' },
+      { col: 'D', label: 'Impuesto' },
+      { col: 'E', label: 'Imp. Retenido' },
+      { col: 'F', label: 'Total' },
+      { col: 'G', label: 'Sub Total' },
+      { col: 'H', label: 'Descuentos' },
+      { col: 'I', label: 'Impuesto' },
+      { col: 'J', label: 'Imp. Retenido' },
+      { col: 'K', label: 'Total' },
+    ];
+    subHeaders.forEach(({ col, label }) => {
+      const cell = wsConc.getCell(`${col}4`);
+      cell.value = label;
       cell.font = { bold: true, size: 10 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
-      cell.alignment = { horizontal: 'center' };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = thinBorder();
+      if (['B', 'C', 'D', 'E', 'F'].includes(col)) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // verde claro
+      } else {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } }; // naranja claro
+      }
     });
 
-    // Facturas Recibidas
-    wsConc.mergeCells('H3:M3');
-    wsConc.getCell('H3').value = 'FACTURAS RECIBIDAS';
-    wsConc.getCell('H3').font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    wsConc.getCell('H3').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.egreso } };
-    wsConc.getCell('H3').alignment = { horizontal: 'center' };
+    wsConc.getRow(3).height = 22;
+    wsConc.getRow(4).height = 22;
 
-    const headersRecibidas = ['Sub Total', 'Descuentos', 'Impuesto', 'Imp. Retenido', 'Total', 'Count'];
-    headersRecibidas.forEach((h, i) => {
-      const cell = wsConc.getCell(8 + i, 4); // row 4, col H+
-      cell.value = h;
-      cell.font = { bold: true, size: 10 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
-      cell.alignment = { horizontal: 'center' };
-    });
-
-    // Nómina
-    wsConc.mergeCells('N3:O3');
-    wsConc.getCell('N3').value = 'NÓMINA';
-    wsConc.getCell('N3').font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    wsConc.getCell('N3').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.nomina } };
-    wsConc.getCell('N3').alignment = { horizontal: 'center' };
-
-    ['Total', 'Count'].forEach((h, i) => {
-      const cell = wsConc.getCell(14 + i, 4);
-      cell.value = h;
-      cell.font = { bold: true, size: 10 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
-      cell.alignment = { horizontal: 'center' };
-    });
-
-    // Filas por mes
+    // Filas 5-16: Un mes por fila
     let rowIdx = 5;
     let granTotalEmitidas = { subtotal: 0, descuento: 0, impuesto: 0, retenido: 0, total: 0, count: 0 };
     let granTotalRecibidas = { subtotal: 0, descuento: 0, impuesto: 0, retenido: 0, total: 0, count: 0 };
@@ -369,27 +408,27 @@ export async function GET(req: NextRequest) {
     totalesPorMes.forEach((tm) => {
       wsConc.getCell(`A${rowIdx}`).value = MESES_LARGO[tm.mes - 1];
       wsConc.getCell(`A${rowIdx}`).font = { bold: true };
+      wsConc.getCell(`A${rowIdx}`).border = thinBorder();
 
       wsConc.getCell(`B${rowIdx}`).value = tm.emitidas.subtotal;
       wsConc.getCell(`C${rowIdx}`).value = tm.emitidas.descuento;
       wsConc.getCell(`D${rowIdx}`).value = tm.emitidas.impuesto;
       wsConc.getCell(`E${rowIdx}`).value = tm.emitidas.retenido;
       wsConc.getCell(`F${rowIdx}`).value = tm.emitidas.total;
-      wsConc.getCell(`G${rowIdx}`).value = tm.emitidas.count;
 
-      wsConc.getCell(`H${rowIdx}`).value = tm.recibidas.subtotal;
-      wsConc.getCell(`I${rowIdx}`).value = tm.recibidas.descuento;
-      wsConc.getCell(`J${rowIdx}`).value = tm.recibidas.impuesto;
-      wsConc.getCell(`K${rowIdx}`).value = tm.recibidas.retenido;
-      wsConc.getCell(`L${rowIdx}`).value = tm.recibidas.total;
-      wsConc.getCell(`M${rowIdx}`).value = tm.recibidas.count;
+      wsConc.getCell(`G${rowIdx}`).value = tm.recibidas.subtotal;
+      wsConc.getCell(`H${rowIdx}`).value = tm.recibidas.descuento;
+      wsConc.getCell(`I${rowIdx}`).value = tm.recibidas.impuesto;
+      wsConc.getCell(`J${rowIdx}`).value = tm.recibidas.retenido;
+      wsConc.getCell(`K${rowIdx}`).value = tm.recibidas.total;
 
-      wsConc.getCell(`N${rowIdx}`).value = tm.nomina.total;
-      wsConc.getCell(`O${rowIdx}`).value = tm.nomina.count;
+      wsConc.getCell(`L${rowIdx}`).value = tm.nomina.total;
 
-      // Formato moneda
-      ['B', 'C', 'D', 'E', 'F', 'H', 'I', 'J', 'K', 'L', 'N'].forEach(col => {
-        wsConc.getCell(`${col}${rowIdx}`).numFmt = '"$"#,##0.00';
+      // Formato moneda en todas las columnas numéricas
+      ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].forEach(col => {
+        const cell = wsConc.getCell(`${col}${rowIdx}`);
+        cell.numFmt = '"$"#,##0.00';
+        cell.border = thinBorder();
       });
 
       granTotalEmitidas.subtotal += tm.emitidas.subtotal;
@@ -412,40 +451,29 @@ export async function GET(req: NextRequest) {
       rowIdx++;
     });
 
-    // Fila de GRAN TOTAL
-    wsConc.getCell(`A${rowIdx}`).value = 'TOTAL ANUAL';
-    wsConc.getCell(`A${rowIdx}`).font = { bold: true, color: { argb: 'FF7C3AED' } };
+    // Fila 17: TOTAL ANUAL
+    wsConc.getCell(`A${rowIdx}`).value = '';
     wsConc.getCell(`B${rowIdx}`).value = granTotalEmitidas.subtotal;
     wsConc.getCell(`C${rowIdx}`).value = granTotalEmitidas.descuento;
     wsConc.getCell(`D${rowIdx}`).value = granTotalEmitidas.impuesto;
     wsConc.getCell(`E${rowIdx}`).value = granTotalEmitidas.retenido;
     wsConc.getCell(`F${rowIdx}`).value = granTotalEmitidas.total;
-    wsConc.getCell(`G${rowIdx}`).value = granTotalEmitidas.count;
-    wsConc.getCell(`H${rowIdx}`).value = granTotalRecibidas.subtotal;
-    wsConc.getCell(`I${rowIdx}`).value = granTotalRecibidas.descuento;
-    wsConc.getCell(`J${rowIdx}`).value = granTotalRecibidas.impuesto;
-    wsConc.getCell(`K${rowIdx}`).value = granTotalRecibidas.retenido;
-    wsConc.getCell(`L${rowIdx}`).value = granTotalRecibidas.total;
-    wsConc.getCell(`M${rowIdx}`).value = granTotalRecibidas.count;
-    wsConc.getCell(`N${rowIdx}`).value = granTotalNomina.total;
-    wsConc.getCell(`O${rowIdx}`).value = granTotalNomina.count;
+    wsConc.getCell(`G${rowIdx}`).value = granTotalRecibidas.subtotal;
+    wsConc.getCell(`H${rowIdx}`).value = granTotalRecibidas.descuento;
+    wsConc.getCell(`I${rowIdx}`).value = granTotalRecibidas.impuesto;
+    wsConc.getCell(`J${rowIdx}`).value = granTotalRecibidas.retenido;
+    wsConc.getCell(`K${rowIdx}`).value = granTotalRecibidas.total;
+    wsConc.getCell(`L${rowIdx}`).value = granTotalNomina.total;
 
-    for (let c = 1; c <= 15; c++) {
+    for (let c = 1; c <= 12; c++) {
       const cell = wsConc.getCell(rowIdx, c);
       cell.font = { bold: true, color: { argb: 'FF7C3AED' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.total } };
+      cell.border = thinBorder();
     }
-    ['B', 'C', 'D', 'E', 'F', 'H', 'I', 'J', 'K', 'L', 'N'].forEach(col => {
+    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].forEach(col => {
       wsConc.getCell(`${col}${rowIdx}`).numFmt = '"$"#,##0.00';
     });
-
-    // Anchos de columna
-    wsConc.columns = [
-      { width: 14 }, // A - Mes
-      { width: 14 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 16 }, { width: 8 }, // B-G Emitidas
-      { width: 14 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 16 }, { width: 8 }, // H-M Recibidas
-      { width: 16 }, { width: 8 }, // N-O Nómina
-    ];
 
     // ===== Hoja NOMINA =====
     const wsNom = wb.addWorksheet('NOMINA', { views: [{ showGridLines: false }] });
