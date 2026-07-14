@@ -578,7 +578,7 @@ function NominaView({ empresaId }: { empresaId?: string }) {
   const url = selMes === 0
     ? `/api/nomina?anio=${anioSel}`
     : `/api/nomina?mes=${selMes}&anio=${anioSel}`;
-  const { data, loading } = useApiData<any>(url, empresaId);
+  const { data, loading, refresh } = useApiData<any>(url, empresaId);
 
   const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const resumen = data?.resumenMensual || [];
@@ -594,37 +594,63 @@ function NominaView({ empresaId }: { empresaId?: string }) {
       </div>
 
       {/* Pestañas por mes + Todo el año */}
-      <div className="flex flex-wrap gap-1 items-center">
-        <button
-          onClick={() => setSelMes(0)}
-          className={cn('px-3 py-2 rounded-lg text-xs font-bold transition-all border mr-2',
-            selMes === 0 ? 'bg-violet-600 text-white border-violet-600 shadow-md'
-            : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100')}
-        >
-          📅 Todo {anioSel}
-        </button>
-        <div className="h-8 w-px bg-border mx-1"></div>
-        {meses.map((m, i) => {
-          const mesNum = i + 1;
-          const datosMes = resumen.find((r: any) => r.mes === mesNum);
-          const count = datosMes?.count || 0;
-          const isActive = selMes === mesNum;
-          const hasData = count > 0;
-          return (
-            <button key={m} onClick={() => setSelMes(mesNum)}
-              className={cn('px-3 py-2 rounded-lg text-xs font-medium transition-all border',
-                isActive ? 'bg-violet-600 text-white border-violet-600 shadow-md'
-                : hasData ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800 hover:bg-violet-100'
-                : 'bg-muted/30 text-muted-foreground border-transparent hover:bg-muted/50')}
-              title={hasData ? `${count} recibo(s) · ${fmt(datosMes.totalNeto)}` : 'Sin recibos'}
-            >
-              <div className="flex flex-col items-center gap-0.5 min-w-[44px]">
-                <span>{m}</span>
-                {hasData && <span className={cn('text-[9px] font-bold', isActive ? 'text-white/80' : 'text-violet-500')}>{count}</span>}
-              </div>
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap gap-1 items-center justify-between">
+        <div className="flex flex-wrap gap-1 items-center">
+          <button
+            onClick={() => setSelMes(0)}
+            className={cn('px-3 py-2 rounded-lg text-xs font-bold transition-all border mr-2',
+              selMes === 0 ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+              : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100')}
+          >
+            📅 Todo {anioSel}
+          </button>
+          <div className="h-8 w-px bg-border mx-1"></div>
+          {meses.map((m, i) => {
+            const mesNum = i + 1;
+            const datosMes = resumen.find((r: any) => r.mes === mesNum);
+            const count = datosMes?.count || 0;
+            const isActive = selMes === mesNum;
+            const hasData = count > 0;
+            return (
+              <button key={m} onClick={() => setSelMes(mesNum)}
+                className={cn('px-3 py-2 rounded-lg text-xs font-medium transition-all border',
+                  isActive ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+                  : hasData ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800 hover:bg-violet-100'
+                  : 'bg-muted/30 text-muted-foreground border-transparent hover:bg-muted/50')}
+                title={hasData ? `${count} recibo(s) · ${fmt(datosMes.totalNeto)}` : 'Sin recibos'}
+              >
+                <div className="flex flex-col items-center gap-0.5 min-w-[44px]">
+                  <span>{m}</span>
+                  {hasData && <span className={cn('text-[9px] font-bold', isActive ? 'text-white/80' : 'text-violet-500')}>{count}</span>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Botón eliminar mes (solo si hay un mes específico seleccionado y hay recibos) */}
+        {selMes !== 0 && (data?.count || 0) > 0 && (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={async () => {
+              if (!confirm(`¿Eliminar TODOS los recibos de nómina de ${meses[selMes - 1]} ${anioSel}?\n\nSe eliminarán ${data?.count || 0} recibo(s). Esta acción no se puede deshacer.`)) return;
+              try {
+                const params = new URLSearchParams({
+                  mes: String(selMes),
+                  anio: String(anioSel),
+                });
+                if (empresaId) params.set('empresaId', empresaId);
+                const r = await fetch(`/api/nomina/eliminar-mes?${params}`, { method: 'DELETE' });
+                const d = await r.json();
+                if (d.success) { alert(d.message); refresh(); }
+                else alert(`Error: ${d.error}`);
+              } catch (e: any) { alert(`Error: ${e.message}`); }
+            }}
+          >
+            <Trash2 size={14} className="mr-2" /> Eliminar {meses[selMes - 1]} {anioSel}
+          </Button>
+        )}
       </div>
 
       {/* KPIs del periodo */}
