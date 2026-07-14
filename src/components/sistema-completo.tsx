@@ -873,6 +873,15 @@ function BancosView({ empresaId }: { empresaId?: string }) {
   const [uploadMsg, setUploadMsg] = useState('');
   const [showCuentaForm, setShowCuentaForm] = useState(false);
   const [cuentaForm, setCuentaForm] = useState({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
+  const hoy = new Date();
+  const [periodoBanco, setPeriodoBanco] = useState({
+    mes: hoy.getMonth() + 1,
+    anio: hoy.getFullYear(),
+    cuentaId: '',
+  });
+  const [eliminandoBanco, setEliminandoBanco] = useState(false);
+
+  const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
   const crearCuenta = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -891,20 +900,20 @@ function BancosView({ empresaId }: { empresaId?: string }) {
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !data?.cuentas?.length) return;
+    const cuentaIdSel = periodoBanco.cuentaId || data.cuentas[0].id;
     setUploading(true);
     setUploadMsg('');
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('cuentaId', data.cuentas[0].id);
-      const hoy = new Date();
-      formData.append('mes', String(hoy.getMonth() + 1));
-      formData.append('anio', String(hoy.getFullYear()));
+      formData.append('cuentaId', cuentaIdSel);
+      formData.append('mes', String(periodoBanco.mes));
+      formData.append('anio', String(periodoBanco.anio));
       if (empresaId) formData.append('empresaId', empresaId);
       const r = await fetch('/api/upload-estado-cuenta', { method: 'POST', body: formData });
       const d = await r.json();
       if (d.success) {
-        setUploadMsg(`✅ ${d.message} (${d.movimientosCreados} movimientos nuevos)`);
+        setUploadMsg(`✅ ${d.message}`);
         refresh();
       } else {
         setUploadMsg(`❌ ${d.error || 'Error al subir archivo'}`);
@@ -914,6 +923,42 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     } finally {
       setUploading(false);
       e.target.value = '';
+    }
+  };
+
+  const eliminarMesBanco = async () => {
+    const cuentaIdSel = periodoBanco.cuentaId || data?.cuentas?.[0]?.id;
+    if (!cuentaIdSel) {
+      alert('Primero crea una cuenta bancaria');
+      return;
+    }
+    const cuenta = data?.cuentas?.find(c => c.id === cuentaIdSel);
+    if (!confirm(
+      `¿Eliminar TODOS los movimientos de ${meses[periodoBanco.mes - 1]} ${periodoBanco.anio}?\n\n` +
+      `Cuenta: ${cuenta?.banco} ${cuenta?.cuenta}\n\n` +
+      `Esto te permite volver a subir el estado de cuenta de ese mes.\n\n` +
+      `Esta acción no se puede deshacer.`
+    )) return;
+
+    setEliminandoBanco(true);
+    try {
+      const params = new URLSearchParams({
+        cuentaId: cuentaIdSel,
+        mes: String(periodoBanco.mes),
+        anio: String(periodoBanco.anio),
+      });
+      const r = await fetch(`/api/upload-estado-cuenta?${params}`, { method: 'DELETE' });
+      const d = await r.json();
+      if (d.success) {
+        setUploadMsg(`✅ ${d.message}`);
+        refresh();
+      } else {
+        alert(d.error || 'Error');
+      }
+    } catch (e: any) {
+      alert(`Error: ${e.message}`);
+    } finally {
+      setEliminandoBanco(false);
     }
   };
 
@@ -973,16 +1018,77 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       {/* Upload estado de cuenta */}
       <Card className="p-5">
         <h3 className="font-semibold mb-2 flex items-center gap-2">
-          <Upload size={16} className="text-violet-600" /> Cargar estado de cuenta (PDF/CSV)
+          <Upload size={16} className="text-violet-600" /> Cargar estado de cuenta
         </h3>
         <p className="text-xs text-muted-foreground mb-3">
-          Sube el estado de cuenta de tu banco. Si es CSV, se importan los movimientos automáticamente.
+          Sube el estado de cuenta de tu banco. <strong>Excel (.xlsx)</strong> y <strong>CSV</strong> se importan automáticamente. PDF se guarda para referencia.
         </p>
+
+        {/* Selector de cuenta + mes + año */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+          <div>
+            <label className="text-[10px] uppercase font-semibold text-muted-foreground">Cuenta</label>
+            <select
+              value={periodoBanco.cuentaId}
+              onChange={e => setPeriodoBanco({ ...periodoBanco, cuentaId: e.target.value })}
+              className="w-full h-9 px-2 rounded-md border bg-background text-sm"
+            >
+              <option value="">— Selecciona —</option>
+              {(data?.cuentas || []).map(c => (
+                <option key={c.id} value={c.id}>{c.banco} {c.cuenta}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase font-semibold text-muted-foreground">Mes</label>
+            <select
+              value={periodoBanco.mes}
+              onChange={e => setPeriodoBanco({ ...periodoBanco, mes: parseInt(e.target.value) })}
+              className="w-full h-9 px-2 rounded-md border bg-background text-sm"
+            >
+              {meses.map((m, i) => (
+                <option key={m} value={i + 1}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase font-semibold text-muted-foreground">Año</label>
+            <select
+              value={periodoBanco.anio}
+              onChange={e => setPeriodoBanco({ ...periodoBanco, anio: parseInt(e.target.value) })}
+              className="w-full h-9 px-2 rounded-md border bg-background text-sm"
+            >
+              {Array.from({ length: 5 }, (_, i) => hoy.getFullYear() - i).map(a => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={eliminarMesBanco}
+              disabled={eliminandoBanco || !data?.cuentas?.length}
+              className="w-full"
+              title="Elimina los movimientos del mes seleccionado para que puedas volver a subir el estado de cuenta"
+            >
+              {eliminandoBanco ? (
+                <Loader2 size={14} className="mr-2 animate-spin" />
+              ) : (
+                <Trash2 size={14} className="mr-2" />
+              )}
+              Eliminar mes
+            </Button>
+          </div>
+        </div>
+
         <label className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
           <Upload size={28} className="text-muted-foreground mb-2" />
           <span className="text-sm font-medium">{uploading ? 'Procesando...' : 'Haz clic o arrastra tu archivo aquí'}</span>
-          <span className="text-xs text-muted-foreground mt-1">Formatos: CSV (auto-importa), PDF (guarda)</span>
-          <input type="file" accept=".csv,.pdf,.xlsx" onChange={handleUpload} disabled={uploading || !data?.cuentas?.length} className="hidden" />
+          <span className="text-xs text-muted-foreground mt-1">
+            Formatos: <strong>Excel (.xlsx)</strong> — auto-importa · <strong>CSV</strong> — auto-importa · <strong>PDF</strong> — guarda referencia
+          </span>
+          <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading || !data?.cuentas?.length} className="hidden" />
         </label>
         {!data?.cuentas?.length && <p className="text-xs text-amber-600 mt-2">⚠️ Primero crea una cuenta bancaria para poder subir estados de cuenta</p>}
         {uploadMsg && <div className={cn('mt-3 p-2 rounded text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>{uploadMsg}</div>}

@@ -359,6 +359,24 @@ export async function POST(req: NextRequest) {
               });
             }
 
+            // Verificar si ya existe un recibo con este UUID (dedupe)
+            // Si se eliminó el mes pero el UUID fue liberado (ON DELETE SET NULL en otro caso),
+            // no debería existir → se crea. Si existe → se marca como duplicado.
+            if (cfdi.uuid) {
+              const reciboExistente = await db.reciboNomina.findUnique({
+                where: { uuid: cfdi.uuid },
+              });
+              if (reciboExistente) {
+                duplicados++;
+                detalles.push({
+                  archivo: file.name,
+                  estado: 'duplicado',
+                  mensaje: `📋 Nómina ${cfdi.uuid} ya existe (empleado: ${cfdi.receptorNombre})`,
+                });
+                continue;
+              }
+            }
+
             // Calcular deducciones aproximadas (15% del total)
             const deducciones = cfdi.total * 0.15;
             const neto = cfdi.total - deducciones;
