@@ -16,7 +16,14 @@ import {
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
 import { useEmpresa } from '@/components/empresa-provider';
+import { useToastBridge } from '@/lib/toast';
+import { toast } from '@/lib/toast';
+import { validarRFC, validarCURP } from '@/lib/rfc-validator';
 import { useRouter } from 'next/navigation';
+import {
+  BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend,
+} from 'recharts';
 import {
   Settings, KeyRound, Trash2, ShieldAlert, Lock, Shield,
 } from 'lucide-react';
@@ -93,6 +100,7 @@ export function SistemaCompleto() {
   const [usuario, setUsuario] = useState<any>(null);
   const { empresa, empresas, setEmpresa } = useEmpresa();
   const router = useRouter();
+  useToastBridge(); // Inicializa el sistema de toasts global
 
   // Verificar autenticación al cargar
   useEffect(() => {
@@ -337,27 +345,43 @@ export function SistemaCompleto() {
 
 // ====================== DASHBOARD VIEW ======================
 function DashboardView({ stats, setView }: { stats: Stats | null; setView: (v: string) => void }) {
-  if (!stats) return <div className="text-center py-20 text-muted-foreground">Cargando dashboard...</div>;
+  const { theme } = useTheme();
+  if (!stats) return <LoadingView message="Cargando dashboard..." />;
 
   const kpis = [
     { label: 'Ingresos del mes', value: fmt(stats.fiscal.totalEmitido), sub: `${stats.fiscal.countEmitidas} facturas`, icon: TrendingUp, color: 'text-emerald-600', border: 'border-l-emerald-500' },
     { label: 'Egresos del mes', value: fmt(stats.fiscal.totalRecibido), sub: `${stats.fiscal.countRecibidas} facturas`, icon: TrendingDown, color: 'text-orange-600', border: 'border-l-orange-500' },
-    { label: 'Utilidad bruta', value: fmt(stats.fiscal.utilidadBruta), sub: `Margen ${Math.round((stats.fiscal.utilidadBruta / stats.fiscal.totalEmitido) * 100)}%`, icon: DollarSign, color: 'text-blue-600', border: 'border-l-blue-500' },
-    { label: 'IVA por pagar', value: fmt(stats.fiscal.ivaPorPagar), sub: 'Vence 17/ago', icon: Calculator, color: 'text-red-600', border: 'border-l-red-500' },
+    { label: 'Utilidad bruta', value: fmt(stats.fiscal.utilidadBruta), sub: stats.fiscal.totalEmitido > 0 ? `Margen ${Math.round((stats.fiscal.utilidadBruta / stats.fiscal.totalEmitido) * 100)}%` : 'Margen 0%', icon: DollarSign, color: 'text-blue-600', border: 'border-l-blue-500' },
+    { label: 'IVA por pagar', value: fmt(stats.fiscal.ivaPorPagar), sub: 'Vence próximo mes', icon: Calculator, color: 'text-red-600', border: 'border-l-red-500' },
     { label: 'Clientes activos', value: String(stats.catalogos.clientes), sub: 'En catálogo', icon: Users, color: 'text-violet-600', border: 'border-l-violet-500' },
     { label: 'Empleados', value: String(stats.catalogos.empleados), sub: 'Nómina al corriente', icon: User, color: 'text-fuchsia-600', border: 'border-l-fuchsia-500' },
     { label: 'Productos', value: String(stats.catalogos.productos), sub: `${stats.catalogos.stockBajo} stock bajo`, icon: Package, color: 'text-amber-600', border: 'border-l-amber-500' },
     { label: 'Chats con Abbax hoy', value: String(stats.abbax.conversacionesHoy), sub: `${stats.abbax.tareasPend} tareas pend`, icon: Zap, color: 'text-cyan-600', border: 'border-l-cyan-500' },
   ];
 
+  // Datos para gráficos
+  const chartData = [
+    { name: 'Ingresos', value: stats.fiscal.totalEmitido, fill: '#10b981' },
+    { name: 'Egresos', value: stats.fiscal.totalRecibido, fill: '#f97316' },
+    { name: 'Utilidad', value: stats.fiscal.utilidadBruta, fill: '#7c3aed' },
+  ];
+
+  const distribucionData = [
+    { name: 'Facturas emitidas', value: stats.fiscal.countEmitidas, fill: '#7c3aed' },
+    { name: 'Facturas recibidas', value: stats.fiscal.countRecibidas, fill: '#3b82f6' },
+  ];
+
+  const textColor = theme === 'dark' ? '#94a3b8' : '#475569';
+  const gridColor = theme === 'dark' ? '#1e293b' : '#e2e8f0';
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 animate-fade-in">
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {kpis.map((k) => {
           const Icon = k.icon;
           return (
-            <Card key={k.label} className={cn('p-4 border-l-4', k.border)}>
+            <Card key={k.label} className={cn('p-4 border-l-4 card-hover', k.border)}>
               <div className={cn('flex items-center gap-1.5 mb-1', k.color)}>
                 <Icon size={14} />
                 <span className="text-[10px] uppercase font-semibold tracking-wide">{k.label}</span>
@@ -369,23 +393,98 @@ function DashboardView({ stats, setView }: { stats: Stats | null; setView: (v: s
         })}
       </div>
 
+      {/* Charts: Ingresos vs Egresos + Distribución */}
+      <div className="grid md:grid-cols-3 gap-4">
+        {/* Bar chart: Ingresos vs Egresos vs Utilidad */}
+        <Card className="p-5 md:col-span-2 card-hover">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <BarChart3 size={16} className="text-violet-600" /> Resumen financiero del mes
+          </h3>
+          {stats.fiscal.totalEmitido === 0 && stats.fiscal.totalRecibido === 0 ? (
+            <EmptyState icon={BarChart3} message="Sin datos financieros este mes" />
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: textColor }} />
+                  <YAxis tick={{ fontSize: 11, fill: textColor }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                  <RechartsTooltip
+                    formatter={(value: any) => [fmt(value), 'Monto']}
+                    contentStyle={{
+                      backgroundColor: theme === 'dark' ? '#1e293b' : '#fff',
+                      border: `1px solid ${gridColor}`,
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+
+        {/* Dona: Distribución de facturas */}
+        <Card className="p-5 card-hover">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <FileText size={16} className="text-violet-600" /> Distribución de facturas
+          </h3>
+          {stats.fiscal.countEmitidas === 0 && stats.fiscal.countRecibidas === 0 ? (
+            <EmptyState icon={FileText} message="Sin facturas este mes" />
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={distribucionData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={4}
+                    dataKey="value"
+                    label={(entry: any) => `${entry.value}`}
+                    labelLine={false}
+                  >
+                    {distribucionData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip
+                    formatter={(value: any, name: any) => [`${value} factura(s)`, name]}
+                    contentStyle={{
+                      backgroundColor: theme === 'dark' ? '#1e293b' : '#fff',
+                      border: `1px solid ${gridColor}`,
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '11px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+      </div>
+
       {/* Top clientes + alertas */}
       <div className="grid md:grid-cols-2 gap-4">
-        <Card className="p-5">
+        <Card className="p-5 card-hover">
           <h3 className="font-semibold mb-3 flex items-center gap-2">
             <TrendingUp size={16} className="text-violet-600" /> Top clientes del mes
           </h3>
           {stats.topClientes.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">Sin facturas emitidas este mes</p>
+            <EmptyState icon={Users} message="Sin facturas emitidas este mes" />
           ) : (
             <ul className="space-y-2">
               {stats.topClientes.map((c, i) => (
                 <li key={c.rfc} className="flex items-center gap-3 text-sm">
-                  <span className="w-6 h-6 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center">
+                  <span className="w-6 h-6 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-xs font-bold flex items-center justify-center">
                     {i + 1}
                   </span>
                   <span className="flex-1 truncate">{c.nombre}</span>
-                  <span className="font-semibold text-violet-700">{fmt(c.total)}</span>
+                  <span className="font-semibold text-violet-700 dark:text-violet-300">{fmt(c.total)}</span>
                 </li>
               ))}
             </ul>
@@ -1032,7 +1131,7 @@ function BancosView({ empresaId }: { empresaId?: string }) {
   const eliminarMesBanco = async () => {
     const cuentaIdSel = periodoBanco.cuentaId || data?.cuentas?.[0]?.id;
     if (!cuentaIdSel) {
-      alert('Primero crea una cuenta bancaria');
+      toast.warning('Primero crea una cuenta bancaria');
       return;
     }
     const cuenta = data?.cuentas?.find(c => c.id === cuentaIdSel);
@@ -1054,12 +1153,13 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       const d = await r.json();
       if (d.success) {
         setUploadMsg(`✅ ${d.message}`);
+        toast.success('Movimientos eliminados', d.message);
         refresh();
       } else {
-        alert(d.error || 'Error');
+        toast.error('Error', d.error || 'Error');
       }
     } catch (e: any) {
-      alert(`Error: ${e.message}`);
+      toast.error('Error', e.message);
     } finally {
       setEliminandoBanco(false);
     }
@@ -2206,8 +2306,9 @@ function EmpresasView() {
       const r = await fetch(`/api/empresas/${id}`, { method: 'DELETE' });
       const d = await r.json();
       if (!r.ok) {
-        alert(d.error || 'Error al eliminar empresa');
+        toast.error('Error al eliminar', d.error || 'Error al eliminar empresa');
       } else {
+        toast.success('Empresa eliminada', `Se eliminó "${nombre}" y todos sus datos`);
         // Si la empresa eliminada era la seleccionada, limpiar selección
         if (empresa?.id === id) {
           setEmpresa(null);
@@ -2215,7 +2316,7 @@ function EmpresasView() {
         refresh();
       }
     } catch (e: any) {
-      alert(`Error: ${e.message}`);
+      toast.error('Error', e.message);
     } finally {
       setEliminando(null);
     }
@@ -2301,18 +2402,26 @@ function EmpresasView() {
       setError('Nombre y RFC son obligatorios');
       return;
     }
+    // Validar RFC mexicano
+    const rfcCheck = validarRFC(form.rfc);
+    if (!rfcCheck.valido) {
+      setError(`RFC inválido: ${rfcCheck.mensaje}`);
+      return;
+    }
     setCreating(true);
     setError('');
     try {
       const r = await fetch('/api/empresas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, rfc: rfcCheck.formateado }),
       });
       const d = await r.json();
       if (!r.ok) {
         setError(d.error || 'Error al crear empresa');
+        toast.error('Error al crear empresa', d.error);
       } else {
+        toast.success('Empresa creada', `${form.nombre} (${rfcCheck.formateado})`);
         setShowForm(false);
         setForm({ nombre: '', rfc: '', regimenFiscal: '', email: '', telefono: '', direccion: '' });
         setDatosConstancia(null);
@@ -2321,6 +2430,7 @@ function EmpresasView() {
       }
     } catch (e: any) {
       setError(e.message);
+      toast.error('Error', e.message);
     } finally {
       setCreating(false);
     }
@@ -2960,7 +3070,7 @@ function ProyectosView() {
 
   const asignarFacturas = async (proyectoId: string) => {
     if (facturasSeleccionadas.size === 0) {
-      alert('Selecciona al menos una factura');
+      toast.warning('Selecciona al menos una factura');
       return;
     }
     try {
@@ -2971,14 +3081,14 @@ function ProyectosView() {
       });
       const d = await r.json();
       if (d.ok) {
-        alert(d.message);
+        toast.success('Facturas asignadas', d.message);
         setShowAsignar(null);
         setFacturasSeleccionadas(new Set());
         refresh();
       } else {
-        alert(d.error || 'Error');
+        toast.error('Error', d.error || 'Error');
       }
-    } catch (e: any) { alert(e.message); }
+    } catch (e: any) { toast.error('Error', e.message); }
   };
 
   const eliminarProyecto = async (id: string, nombre: string) => {
