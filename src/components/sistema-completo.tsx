@@ -1517,6 +1517,8 @@ function SatView() {
   const pagination = data?.pagination || { page: 1, pageSize: 50, totalPages: 1, hasNext: false, hasPrev: false };
   const totalCount = data?.totalCount || 0;
 
+  const [forzarActualizacion, setForzarActualizacion] = useState(false);
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -1529,6 +1531,7 @@ function SatView() {
       }
       formData.append('direccion', tab === 'recibidas' ? 'recibida' : 'emitida');
       if (empresa?.id) formData.append('empresaId', empresa.id);
+      if (forzarActualizacion) formData.append('force', 'true');
 
       const r = await fetch('/api/upload-cfdi', {
         method: 'POST',
@@ -1538,6 +1541,9 @@ function SatView() {
       if (d.success) {
         setUploadMsg(`✅ ${d.message}`);
         setResultados(d.detalles || []);
+        if (forzarActualizacion) {
+          toast.success('Facturas actualizadas', `${d.procesados || 0} factura(s) con datos completos`);
+        }
         refresh();
       } else {
         setUploadMsg(`❌ ${d.error || 'Error al subir'}`);
@@ -1622,13 +1628,34 @@ function SatView() {
 
       {/* Upload zone */}
       <Card className="p-5">
-        <h3 className="font-semibold mb-2 flex items-center gap-2">
-          <Upload size={16} className="text-violet-600" /> Cargar CFDIs ({tab === 'recibidas' ? 'Recibidos' : 'Emitidos'})
-        </h3>
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <h3 className="font-semibold flex items-center gap-2">
+            <Upload size={16} className="text-violet-600" /> Cargar CFDIs ({tab === 'recibidas' ? 'Recibidos' : 'Emitidos'})
+          </h3>
+          {/* Checkbox para forzar actualización */}
+          <label className="flex items-center gap-2 text-xs cursor-pointer bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition">
+            <input
+              type="checkbox"
+              checked={forzarActualizacion}
+              onChange={e => setForzarActualizacion(e.target.checked)}
+              className="w-4 h-4 accent-amber-600"
+            />
+            <span className="font-medium text-amber-700 dark:text-amber-300">
+              🔄 Forzar actualización
+            </span>
+          </label>
+        </div>
         <p className="text-xs text-muted-foreground mb-3">
           Sube tus archivos XML (y sus PDFs opcionales) del SAT. También puedes subir un ZIP con múltiples XML.
           El sistema parsea automáticamente y guarda las facturas en la base de datos.
         </p>
+        {forzarActualizacion && (
+          <div className="mb-3 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-700 dark:text-amber-300">
+            ⚠️ <strong>Modo actualización activado:</strong> Si los CFDIs ya existen en la base de datos,
+            se actualizarán con los datos completos (descuento, impuesto retenido, concepto) en lugar de saltarlos como duplicados.
+            Útil cuando subiste facturas antes de que existieran los campos descuento/impuestoRetenido.
+          </div>
+        )}
         <label className="border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
           <Upload size={32} className="text-muted-foreground mb-2" />
           <span className="text-sm font-medium">

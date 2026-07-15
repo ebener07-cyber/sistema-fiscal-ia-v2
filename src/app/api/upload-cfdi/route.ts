@@ -313,12 +313,40 @@ export async function POST(req: NextRequest) {
           }
 
           // Verificar duplicado por UUID
+          // Si se envió force=true en el formData, en lugar de saltar, ACTUALIZA la factura existente
+          // con los nuevos datos (descuento, impuestoRetenido, concepto, etc.)
+          const forzar = formData.get('force') === 'true';
           if (cfdi.uuid) {
             const existente = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
             if (existente) {
-              duplicados++;
-              detalles.push({ archivo: file.name, estado: 'duplicado', mensaje: `UUID ${cfdi.uuid} ya existe` });
-              continue;
+              if (forzar) {
+                // Actualizar la factura existente con los datos nuevos
+                await db.factura.update({
+                  where: { id: existente.id },
+                  data: {
+                    subtotal: cfdi.subtotal,
+                    descuento: cfdi.descuento || 0,
+                    totalImpuestos: cfdi.totalImpuestos,
+                    impuestoRetenido: cfdi.impuestoRetenido || 0,
+                    total: cfdi.total,
+                    concepto: cfdi.conceptoTexto || existente.concepto,
+                    metodoPago: cfdi.metodoPago,
+                    formaPago: cfdi.formaPago,
+                    moneda: cfdi.moneda,
+                  },
+                });
+                procesados++;
+                detalles.push({
+                  archivo: file.name,
+                  estado: 'actualizado',
+                  mensaje: `🔄 Factura actualizada con datos completos (UUID ${cfdi.uuid.slice(0, 8)}...)`,
+                });
+                continue;
+              } else {
+                duplicados++;
+                detalles.push({ archivo: file.name, estado: 'duplicado', mensaje: `UUID ${cfdi.uuid} ya existe (usa force=true para actualizar)` });
+                continue;
+              }
             }
           }
 
@@ -512,6 +540,22 @@ export async function POST(req: NextRequest) {
                 const existenteFactura = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
                 const existenteNomina = await db.reciboNomina.findUnique({ where: { uuid: cfdi.uuid } });
                 if (existenteFactura || existenteNomina) {
+                  // Si force=true y es factura, actualizar con datos completos
+                  if (forzar && existenteFactura) {
+                    await db.factura.update({
+                      where: { id: existenteFactura.id },
+                      data: {
+                        subtotal: cfdi.subtotal,
+                        descuento: cfdi.descuento || 0,
+                        totalImpuestos: cfdi.totalImpuestos,
+                        impuestoRetenido: cfdi.impuestoRetenido || 0,
+                        total: cfdi.total,
+                        concepto: cfdi.conceptoTexto || existenteFactura.concepto,
+                      },
+                    });
+                    procesados++;
+                    continue;
+                  }
                   duplicados++;
                   continue;
                 }
