@@ -320,31 +320,39 @@ export async function POST(req: NextRequest) {
             const existente = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
             if (existente) {
               if (forzar) {
-                // Actualizar la factura existente con los datos nuevos
-                await db.factura.update({
-                  where: { id: existente.id },
-                  data: {
-                    subtotal: cfdi.subtotal,
-                    descuento: cfdi.descuento || 0,
-                    totalImpuestos: cfdi.totalImpuestos,
-                    impuestoRetenido: cfdi.impuestoRetenido || 0,
-                    total: cfdi.total,
-                    concepto: cfdi.conceptoTexto || existente.concepto,
-                    metodoPago: cfdi.metodoPago,
-                    formaPago: cfdi.formaPago,
-                    moneda: cfdi.moneda,
-                  },
-                });
-                procesados++;
-                detalles.push({
-                  archivo: file.name,
-                  estado: 'actualizado',
-                  mensaje: `🔄 Factura actualizada con datos completos (UUID ${cfdi.uuid.slice(0, 8)}...)`,
-                });
+                try {
+                  await db.factura.update({
+                    where: { id: existente.id },
+                    data: {
+                      subtotal: Number(cfdi.subtotal) || 0,
+                      descuento: Number(cfdi.descuento) || 0,
+                      totalImpuestos: Number(cfdi.totalImpuestos) || 0,
+                      impuestoRetenido: Number(cfdi.impuestoRetenido) || 0,
+                      total: Number(cfdi.total) || 0,
+                      concepto: cfdi.conceptoTexto || existente.concepto || null,
+                      metodoPago: cfdi.metodoPago || existente.metodoPago,
+                      formaPago: cfdi.formaPago || existente.formaPago,
+                      moneda: cfdi.moneda || existente.moneda,
+                    },
+                  });
+                  procesados++;
+                  detalles.push({
+                    archivo: file.name,
+                    estado: 'actualizado',
+                    mensaje: `🔄 Actualizada: ${cfdi.receptorNombre || cfdi.emisorNombre || ''} - $${cfdi.total.toFixed(2)}`,
+                  });
+                } catch (e: any) {
+                  errores++;
+                  detalles.push({
+                    archivo: file.name,
+                    estado: 'error',
+                    mensaje: `Error al actualizar: ${e.message}`,
+                  });
+                }
                 continue;
               } else {
                 duplicados++;
-                detalles.push({ archivo: file.name, estado: 'duplicado', mensaje: `UUID ${cfdi.uuid} ya existe (usa force=true para actualizar)` });
+                detalles.push({ archivo: file.name, estado: 'duplicado', mensaje: `UUID ${cfdi.uuid} ya existe (activa "Forzar actualización" para actualizar)` });
                 continue;
               }
             }
@@ -542,18 +550,35 @@ export async function POST(req: NextRequest) {
                 if (existenteFactura || existenteNomina) {
                   // Si force=true y es factura, actualizar con datos completos
                   if (forzar && existenteFactura) {
-                    await db.factura.update({
-                      where: { id: existenteFactura.id },
-                      data: {
-                        subtotal: cfdi.subtotal,
-                        descuento: cfdi.descuento || 0,
-                        totalImpuestos: cfdi.totalImpuestos,
-                        impuestoRetenido: cfdi.impuestoRetenido || 0,
-                        total: cfdi.total,
-                        concepto: cfdi.conceptoTexto || existenteFactura.concepto,
-                      },
-                    });
-                    procesados++;
+                    try {
+                      await db.factura.update({
+                        where: { id: existenteFactura.id },
+                        data: {
+                          subtotal: Number(cfdi.subtotal) || 0,
+                          descuento: Number(cfdi.descuento) || 0,
+                          totalImpuestos: Number(cfdi.totalImpuestos) || 0,
+                          impuestoRetenido: Number(cfdi.impuestoRetenido) || 0,
+                          total: Number(cfdi.total) || 0,
+                          concepto: cfdi.conceptoTexto || existenteFactura.concepto || null,
+                          metodoPago: cfdi.metodoPago || existenteFactura.metodoPago,
+                          formaPago: cfdi.formaPago || existenteFactura.formaPago,
+                          moneda: cfdi.moneda || existenteFactura.moneda,
+                        },
+                      });
+                      procesados++;
+                      detalles.push({
+                        archivo: entry.entryName,
+                        estado: 'actualizado',
+                        mensaje: `🔄 Actualizada: ${cfdi.receptorNombre || cfdi.emisorNombre || ''} - $${cfdi.total.toFixed(2)}`,
+                      });
+                    } catch (e: any) {
+                      errores++;
+                      detalles.push({
+                        archivo: entry.entryName,
+                        estado: 'error',
+                        mensaje: `Error al actualizar: ${e.message}`,
+                      });
+                    }
                     continue;
                   }
                   duplicados++;
@@ -671,8 +696,9 @@ export async function POST(req: NextRequest) {
                 });
                 procesados++;
               }
-            } catch (e) {
+            } catch (e: any) {
               errores++;
+              detalles.push({ archivo: entry.entryName, estado: 'error', mensaje: `ZIP error: ${e.message}` });
             }
           }
           detalles.push({
