@@ -114,25 +114,30 @@ export async function GET(req: NextRequest) {
       const facturasMes = facturas.filter(f => new Date(f.fecha).getMonth() === mes);
       const nominasMes = nominas.filter(n => new Date(n.fecha).getMonth() === mes);
 
-      // Totales
-      const facturasEmitidas = facturasMes.filter(f => f.direccion === 'emitida');
-      const facturasRecibidas = facturasMes.filter(f => f.direccion === 'recibida');
+      // ===== SEPARAR INGRESOS (I) DE NOTAS DE CRÉDITO (E) =====
+      // Los Ingresos (I) se SUMAN a los totales
+      // Las Notas de Crédito (E) se RESTAN de los totales (son devoluciones)
+      const ingresosEmitidos = facturasMes.filter(f => f.direccion === 'emitida' && f.tipoComprobante === 'I');
+      const notasCreditoEmitidas = facturasMes.filter(f => f.direccion === 'emitida' && f.tipoComprobante === 'E');
+      const ingresosRecibidos = facturasMes.filter(f => f.direccion === 'recibida' && f.tipoComprobante === 'I');
+      const notasCreditoRecibidas = facturasMes.filter(f => f.direccion === 'recibida' && f.tipoComprobante === 'E');
 
+      // ===== TOTALES: Ingresos - Notas de Crédito =====
       const totalesEmitidas = {
-        subtotal: facturasEmitidas.reduce((s, f) => s + f.subtotal, 0),
-        descuento: facturasEmitidas.reduce((s, f) => s + (f.descuento || 0), 0),
-        impuesto: facturasEmitidas.reduce((s, f) => s + f.totalImpuestos, 0),
-        retenido: facturasEmitidas.reduce((s, f) => s + (f.impuestoRetenido || 0), 0),
-        total: facturasEmitidas.reduce((s, f) => s + f.total, 0),
-        count: facturasEmitidas.length,
+        subtotal: ingresosEmitidos.reduce((s, f) => s + f.subtotal, 0) - notasCreditoEmitidas.reduce((s, f) => s + f.subtotal, 0),
+        descuento: ingresosEmitidos.reduce((s, f) => s + (f.descuento || 0), 0) + notasCreditoEmitidas.reduce((s, f) => s + (f.descuento || 0), 0),
+        impuesto: ingresosEmitidos.reduce((s, f) => s + f.totalImpuestos, 0) - notasCreditoEmitidas.reduce((s, f) => s + f.totalImpuestos, 0),
+        retenido: ingresosEmitidos.reduce((s, f) => s + (f.impuestoRetenido || 0), 0) - notasCreditoEmitidas.reduce((s, f) => s + (f.impuestoRetenido || 0), 0),
+        total: ingresosEmitidos.reduce((s, f) => s + f.total, 0) - notasCreditoEmitidas.reduce((s, f) => s + f.total, 0),
+        count: ingresosEmitidos.length + notasCreditoEmitidas.length,
       };
       const totalesRecibidas = {
-        subtotal: facturasRecibidas.reduce((s, f) => s + f.subtotal, 0),
-        descuento: facturasRecibidas.reduce((s, f) => s + (f.descuento || 0), 0),
-        impuesto: facturasRecibidas.reduce((s, f) => s + f.totalImpuestos, 0),
-        retenido: facturasRecibidas.reduce((s, f) => s + (f.impuestoRetenido || 0), 0),
-        total: facturasRecibidas.reduce((s, f) => s + f.total, 0),
-        count: facturasRecibidas.length,
+        subtotal: ingresosRecibidos.reduce((s, f) => s + f.subtotal, 0) - notasCreditoRecibidas.reduce((s, f) => s + f.subtotal, 0),
+        descuento: ingresosRecibidos.reduce((s, f) => s + (f.descuento || 0), 0) + notasCreditoRecibidas.reduce((s, f) => s + (f.descuento || 0), 0),
+        impuesto: ingresosRecibidos.reduce((s, f) => s + f.totalImpuestos, 0) - notasCreditoRecibidas.reduce((s, f) => s + f.totalImpuestos, 0),
+        retenido: ingresosRecibidos.reduce((s, f) => s + (f.impuestoRetenido || 0), 0) - notasCreditoRecibidas.reduce((s, f) => s + (f.impuestoRetenido || 0), 0),
+        total: ingresosRecibidos.reduce((s, f) => s + f.total, 0) - notasCreditoRecibidas.reduce((s, f) => s + f.total, 0),
+        count: ingresosRecibidos.length + notasCreditoRecibidas.length,
       };
       const totalesNomina = {
         total: nominasMes.reduce((s, n) => s + n.totalPercepciones, 0),
@@ -167,7 +172,9 @@ export async function GET(req: NextRequest) {
       // Mapear facturas del mes a filas
       const filasMes: any[] = [];
       // Emitidas primero (ingreso)
-      for (const f of facturasEmitidas) {
+      // ===== FILAS: Ingresos primero (positivos), luego Notas de Crédito (NEGATIVOS) =====
+      // Ingresos Emitidos (positivos)
+      for (const f of ingresosEmitidos) {
         filasMes.push({
           xml: f.uuid || '',
           rfc_emisor: f.emisorRfc || empresa?.rfc || '',
@@ -176,16 +183,16 @@ export async function GET(req: NextRequest) {
           regimen_fiscal: empresa?.regimenFiscal || '',
           rfc_receptor: f.receptorRfc || '',
           nombre_receptor: f.receptorNombre || '',
-          tipo: f.tipoComprobante === 'E' ? 'nota de crédito' : 'ingreso',
+          tipo: 'ingreso',
           serie: f.serie || '',
           folio: f.folio || '',
           fecha: new Date(f.fecha),
           sub_total: f.subtotal,
-          descuento: 0,
+          descuento: f.descuento || 0,
           total_impuesto_trasladado: f.totalImpuestos,
           nombre_impuesto: '002 - IVA',
-          total_impuesto_retenido: 0,
-          nombre_impuesto_2: '',
+          total_impuesto_retenido: f.impuestoRetenido || 0,
+          nombre_impuesto_2: f.impuestoRetenido ? '001 - ISR' : '',
           total: f.total,
           uuid: f.uuid || '',
           metodo_de_pago: f.metodoPago || '',
@@ -201,8 +208,43 @@ export async function GET(req: NextRequest) {
           fecha_consulta: new Date(),
         });
       }
-      // Recibidas después (egreso)
-      for (const f of facturasRecibidas) {
+      // Notas de Crédito Emitidas (montos NEGATIVOS para que se resten en el total)
+      for (const f of notasCreditoEmitidas) {
+        filasMes.push({
+          xml: f.uuid || '',
+          rfc_emisor: f.emisorRfc || empresa?.rfc || '',
+          nombre_emisor: f.emisorNombre || empresa?.nombre || '',
+          lugarexp: '',
+          regimen_fiscal: empresa?.regimenFiscal || '',
+          rfc_receptor: f.receptorRfc || '',
+          nombre_receptor: f.receptorNombre || '',
+          tipo: 'nota de crédito',
+          serie: f.serie || '',
+          folio: f.folio || '',
+          fecha: new Date(f.fecha),
+          sub_total: -f.subtotal,  // NEGATIVO
+          descuento: f.descuento || 0,
+          total_impuesto_trasladado: -f.totalImpuestos,  // NEGATIVO
+          nombre_impuesto: '002 - IVA',
+          total_impuesto_retenido: -(f.impuestoRetenido || 0),  // NEGATIVO
+          nombre_impuesto_2: f.impuestoRetenido ? '001 - ISR' : '',
+          total: -f.total,  // NEGATIVO
+          uuid: f.uuid || '',
+          metodo_de_pago: f.metodoPago || '',
+          forma_de_pago: f.formaPago || '',
+          moneda: f.moneda || 'MXN',
+          tipo_de_cambio: '',
+          version: '4.0',
+          uso_cfdi: '',
+          regimen_fiscal_2: '',
+          estado: f.estado || 'timbrada',
+          estatus: 'Vigente',
+          validacion_efos: '',
+          fecha_consulta: new Date(),
+        });
+      }
+      // Ingresos Recibidos (positivos)
+      for (const f of ingresosRecibidos) {
         filasMes.push({
           xml: f.uuid || '',
           rfc_emisor: f.emisorRfc || '',
@@ -211,17 +253,52 @@ export async function GET(req: NextRequest) {
           regimen_fiscal: '',
           rfc_receptor: f.receptorRfc || empresa?.rfc || '',
           nombre_receptor: f.receptorNombre || empresa?.nombre || '',
-          tipo: f.tipoComprobante === 'E' ? 'nota de crédito' : 'egreso',
+          tipo: 'egreso',
           serie: f.serie || '',
           folio: f.folio || '',
           fecha: new Date(f.fecha),
           sub_total: f.subtotal,
-          descuento: 0,
+          descuento: f.descuento || 0,
           total_impuesto_trasladado: f.totalImpuestos,
           nombre_impuesto: '002 - IVA',
-          total_impuesto_retenido: 0,
-          nombre_impuesto_2: '',
+          total_impuesto_retenido: f.impuestoRetenido || 0,
+          nombre_impuesto_2: f.impuestoRetenido ? '001 - ISR' : '',
           total: f.total,
+          uuid: f.uuid || '',
+          metodo_de_pago: f.metodoPago || '',
+          forma_de_pago: f.formaPago || '',
+          moneda: f.moneda || 'MXN',
+          tipo_de_cambio: '',
+          version: '4.0',
+          uso_cfdi: '',
+          regimen_fiscal_2: '',
+          estado: f.estado || 'timbrada',
+          estatus: 'Vigente',
+          validacion_efos: '',
+          fecha_consulta: new Date(),
+        });
+      }
+      // Notas de Crédito Recibidas (montos NEGATIVOS)
+      for (const f of notasCreditoRecibidas) {
+        filasMes.push({
+          xml: f.uuid || '',
+          rfc_emisor: f.emisorRfc || '',
+          nombre_emisor: f.emisorNombre || '',
+          lugarexp: '',
+          regimen_fiscal: '',
+          rfc_receptor: f.receptorRfc || empresa?.rfc || '',
+          nombre_receptor: f.receptorNombre || empresa?.nombre || '',
+          tipo: 'nota de crédito',
+          serie: f.serie || '',
+          folio: f.folio || '',
+          fecha: new Date(f.fecha),
+          sub_total: -f.subtotal,  // NEGATIVO
+          descuento: f.descuento || 0,
+          total_impuesto_trasladado: -f.totalImpuestos,  // NEGATIVO
+          nombre_impuesto: '002 - IVA',
+          total_impuesto_retenido: -(f.impuestoRetenido || 0),  // NEGATIVO
+          nombre_impuesto_2: f.impuestoRetenido ? '001 - ISR' : '',
+          total: -f.total,  // NEGATIVO
           uuid: f.uuid || '',
           metodo_de_pago: f.metodoPago || '',
           forma_de_pago: f.formaPago || '',
@@ -263,7 +340,7 @@ export async function GET(req: NextRequest) {
         row.height = 18;
       });
 
-      // Fila de totales al final
+      // Fila de totales al final (suma de TODAS las filas, incluyendo NC negativas)
       const filaTotales = ws.addRow({
         xml: '',
         rfc_emisor: '',
@@ -277,10 +354,10 @@ export async function GET(req: NextRequest) {
         folio: '',
         fecha: '',
         sub_total: totalesEmitidas.subtotal + totalesRecibidas.subtotal,
-        descuento: 0,
+        descuento: totalesEmitidas.descuento + totalesRecibidas.descuento,
         total_impuesto_trasladado: totalesEmitidas.impuesto + totalesRecibidas.impuesto,
         nombre_impuesto: '',
-        total_impuesto_retenido: 0,
+        total_impuesto_retenido: totalesEmitidas.retenido + totalesRecibidas.retenido,
         nombre_impuesto_2: '',
         total: totalesEmitidas.total + totalesRecibidas.total,
         uuid: '',
@@ -298,7 +375,7 @@ export async function GET(req: NextRequest) {
       });
       filaTotales.font = { bold: true, color: { argb: 'FF7C3AED' } };
       filaTotales.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.total } };
-      [12, 14, 18].forEach(col => {
+      [12, 13, 14, 16, 18].forEach(col => {
         filaTotales.getCell(col).numFmt = '"$"#,##0.00';
       });
 
