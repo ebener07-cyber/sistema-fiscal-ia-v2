@@ -1812,16 +1812,26 @@ function FinanzasView({ stats }: { stats: Stats | null }) {
   const { empresa } = useEmpresa();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [prestamosTexto, setPrestamosTexto] = useState('');
+  const [showPrestamosForm, setShowPrestamosForm] = useState(false);
 
-  useEffect(() => {
+  const cargarAnalisis = useCallback((prestamos?: string) => {
     if (!empresa?.id) return;
     setLoading(true);
-    fetch(`/api/finanzas/analisis?empresaId=${empresa.id}`)
+    const params = new URLSearchParams({ empresaId: empresa.id });
+    if (prestamos && prestamos.trim()) {
+      params.set('prestamos', prestamos.trim());
+    }
+    fetch(`/api/finanzas/analisis?${params}`)
       .then(r => r.json())
       .then(d => setData(d))
       .catch(e => console.error(e))
       .finally(() => setLoading(false));
   }, [empresa?.id]);
+
+  useEffect(() => {
+    cargarAnalisis();
+  }, [cargarAnalisis]);
 
   if (loading) return <LoadingView message="Analizando finanzas con datos de bancos..." />;
   if (!data) return <ErrorState message="No se pudo cargar el análisis financiero" />;
@@ -2031,6 +2041,92 @@ function FinanzasView({ stats }: { stats: Stats | null }) {
           </div>
         </Card>
       )}
+
+      {/* Análisis de préstamos — campo de texto */}
+      <Card className="p-5 border-l-4 border-l-amber-500 bg-amber-50/20">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-semibold flex items-center gap-2">
+            <Wallet size={16} className="text-amber-600" /> Préstamos y Deudas
+          </h3>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowPrestamosForm(!showPrestamosForm)}
+          >
+            {showPrestamosForm ? 'Cancelar' : (data.analisisPrestamos ? 'Editar' : 'Agregar')} préstamos
+          </Button>
+        </div>
+
+        {data.analisisPrestamos && !showPrestamosForm && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="bg-background rounded p-2 border text-center">
+                <div className="text-[10px] uppercase text-muted-foreground">Deuda total</div>
+                <div className="text-lg font-bold text-red-600">{fmt(data.analisisPrestamos.totalDeuda)}</div>
+              </div>
+              <div className="bg-background rounded p-2 border text-center">
+                <div className="text-[10px] uppercase text-muted-foreground">Pago mensual est.</div>
+                <div className="text-lg font-bold text-amber-600">{fmt(data.analisisPrestamos.pagoMensualEstimado)}</div>
+              </div>
+              <div className="bg-background rounded p-2 border text-center">
+                <div className="text-[10px] uppercase text-muted-foreground">Score con deuda</div>
+                <div className={cn('text-lg font-bold', data.analisisPrestamos.scoreConDeuda >= 60 ? 'text-emerald-600' : 'text-red-600')}>
+                  {data.analisisPrestamos.scoreConDeuda}/100
+                </div>
+              </div>
+              <div className="bg-background rounded p-2 border text-center">
+                <div className="text-[10px] uppercase text-muted-foreground">Razón cte. con deuda</div>
+                <div className={cn('text-lg font-bold', data.analisisPrestamos.impactoEnRazones.razonCorrienteConDeuda >= 1.5 ? 'text-emerald-600' : 'text-red-600')}>
+                  {data.analisisPrestamos.impactoEnRazones.razonCorrienteConDeuda.toFixed(2)}
+                </div>
+              </div>
+            </div>
+            <pre className="text-xs whitespace-pre-wrap font-mono bg-background p-3 rounded border">
+{data.analisisPrestamos.redaccion}
+            </pre>
+          </div>
+        )}
+
+        {showPrestamosForm && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Describe tus préstamos y deudas actuales. Incluye montos, tipos (tarjeta, nómina, hipoteca, etc.) y bancos/financieras.
+              La IA detectará automáticamente los montos y tipos para incorporarlos al análisis financiero.
+            </p>
+            <textarea
+              value={prestamosTexto}
+              onChange={e => setPrestamosTexto(e.target.value)}
+              placeholder="Ejemplo:&#10;- Tarjeta de crédito Banorte: $45,000&#10;- Préstamo de nómina: $80,000 con Santander&#10;- Crédito automotriz Ford: $150,000&#10;- Financiera Coppel: $12,000"
+              className="w-full min-h-[120px] p-3 rounded-lg border bg-background text-sm font-mono"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  cargarAnalisis(prestamosTexto);
+                  setShowPrestamosForm(false);
+                  toast.success('Préstamos analizados', 'Se incorporaron al análisis financiero');
+                }}
+                disabled={!prestamosTexto.trim()}
+              >
+                <Sparkles size={14} className="mr-2" /> Analizar con IA
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPrestamosTexto('');
+                  setShowPrestamosForm(false);
+                  cargarAnalisis();
+                }}
+              >
+                Limpiar y quitar
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
 
       {/* Resumen ejecutivo */}
       <Card className="p-5 bg-violet-50/30 dark:bg-violet-900/10 border-violet-200 dark:border-violet-800">
@@ -3483,10 +3579,21 @@ function ProyectosView() {
   const [conciliacion, setConciliacion] = useState<any>(null);
   const [showConciliacion, setShowConciliacion] = useState(false);
 
-  // Cargar conciliación (proyectos detectados + cruce con bancos)
+  // Cargar conciliación: PRIMERO auto-crea proyectos desde conceptos, DESPUÉS muestra conciliación
   const cargarConciliacion = async () => {
     if (!empresa?.id) return;
     try {
+      // 1. Auto-crear proyectos y asignar facturas
+      toast.info('Analizando conceptos...', 'Detectando proyectos automáticamente');
+      const postRes = await fetch(`/api/proyectos/conciliacion?empresaId=${empresa.id}`, { method: 'POST' });
+      const postData = await postRes.json();
+
+      if (postData.success) {
+        toast.success('Proyectos detectados', postData.message);
+        refresh(); // Recargar la lista de proyectos
+      }
+
+      // 2. Cargar conciliación con bancos
       const r = await fetch(`/api/proyectos/conciliacion?empresaId=${empresa.id}`);
       const d = await r.json();
       setConciliacion(d);

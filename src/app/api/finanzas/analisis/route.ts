@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
     const hoy = new Date();
     const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
     const empresaId = searchParams.get('empresaId') || undefined;
+    const prestamosTexto = searchParams.get('prestamos') || '';
 
     if (!empresaId) {
       return NextResponse.json({ error: 'Falta empresaId' }, { status: 400 });
@@ -308,6 +309,126 @@ export async function GET(req: NextRequest) {
       impactoEstimado: 'Optimizar carga fiscal 8-15%',
     });
 
+    // 8.5. ANÁLISIS DE PRÉSTAMOS (si el usuario proporcionó texto)
+    let analisisPrestamos: any = null;
+    if (prestamosTexto && prestamosTexto.trim().length > 10) {
+      // Extraer montos del texto (busca números con $ o sin símbolo)
+      const montosEncontrados = prestamosTexto.match(/\$?\s?[\d,]+\.?\d*/g) || [];
+      const montos = montosEncontrados
+        .map(m => parseFloat(m.replace(/[$,\s]/g, '')))
+        .filter(m => m > 1000); // Filtrar montos pequeños
+
+      const totalDeuda = montos.reduce((s, m) => s + m, 0);
+
+      // Detectar palabras clave de tipo de préstamo
+      const lowerTexto = prestamosTexto.toLowerCase();
+      const tieneFinanciera = lowerTexto.includes('financiera') || lowerTexto.includes('sofom') || lowerTexto.includes('coppel') || lowerTexto.includes('liverpural');
+      const tieneBancario = lowerTexto.includes('banco') || lowerTexto.includes('banorte') || lowerTexto.includes('bbva') || lowerTexto.includes('santander');
+      const tieneNomina = lowerTexto.includes('nómina') || lowerTexto.includes('nomina');
+      const tieneHipoteca = lowerTexto.includes('hipoteca') || lowerTexto.includes('casa') || lowerTexto.includes('departamento');
+      const tieneAuto = lowerTexto.includes('auto') || lowerTexto.includes('coche') || lowerTexto.includes('vehículo');
+      const tieneTC = lowerTexto.includes('tarjeta') || lowerTexto.includes('crédito') || lowerTexto.includes('credito');
+
+      // Calcular impacto en razones financieras
+      const pasivosAdicionales = totalDeuda;
+      const nuevosPasivosCirculantes = pasivosCirculantes + pasivosAdicionales;
+      const nuevaRazonCorriente = activosCirculantes > 0 ? activosCirculantes / nuevosPasivosCirculantes : 0;
+      const nuevoEndeudamiento = activosCirculantes > 0 ? nuevosPasivosCirculantes / activosCirculantes : 0;
+
+      // Recalcular score con deuda
+      let scoreConDeuda = score;
+      if (totalDeuda > 0) {
+        const ratioDeuda = totalDeuda / (totalEmitidoAnio || 1);
+        if (ratioDeuda > 0.5) scoreConDeuda -= 15;
+        else if (ratioDeuda > 0.3) scoreConDeuda -= 10;
+        else if (ratioDeuda > 0.15) scoreConDeuda -= 5;
+
+        if (nuevaRazonCorriente < 1) scoreConDeuda -= 10;
+      }
+      scoreConDeuda = Math.max(0, Math.min(100, scoreConDeuda));
+
+      // Alertas de préstamos
+      if (totalDeuda > 0) {
+        alertas.push({
+          nivel: totalDeuda > totalEmitidoAnio * 0.4 ? 'critico' : 'warning',
+          titulo: `💰 Deuda total: ${formatMoney(totalDeuda)}`,
+          descripcion: `Total de préstamos detectados: ${formatMoney(totalDeuda)}. Representa el ${((totalDeuda / (totalEmitidoAnio || 1)) * 100).toFixed(1)}% de tus ingresos anuales. Tipos detectados: ${[tieneFinanciera && 'Financiera', tieneBancario && 'Bancario', tieneNomina && 'Nómina', tieneHipoteca && 'Hipoteca', tieneAuto && 'Automotriz', tieneTC && 'Tarjeta de crédito'].filter(Boolean).join(', ') || 'No especificado'}.`,
+          recomendacion: totalDeuda > totalEmitidoAnio * 0.4
+            ? 'URGENTE: Tu deuda supera el 40% de ingresos. Considera consolidar deudas y negociar tasas. Estrategia "avalancha": paga primero la deuda con tasa más alta.'
+            : 'Mantener pagos al corriente. Si hay excedentes, anticipar pagos a capital para reducir intereses.',
+        });
+
+        if (nuevaRazonCorriente < 1 && razonCorriente >= 1) {
+          alertas.push({
+            nivel: 'critico',
+            titulo: '🚨 Con préstamos, razón corriente baja de 1',
+            descripcion: `Al incluir deudas (${formatMoney(totalDeuda)}), tu razón corriente baja de ${razonCorriente.toFixed(2)} a ${nuevaRazonCorriente.toFixed(2)}. Los pasivos superan a los activos circulantes.`,
+            recomendacion: 'Priorizar pago de deudas a corto plazo. Evitar nuevas deudas hasta recuperar razón > 1.5.',
+          });
+        }
+      }
+
+      // Sugerencias específicas de deudas
+      if (totalDeuda > 0) {
+        sugerencias.push({
+          tipo: 'corto',
+          titulo: '🎯 Estrategia avalancha de deudas',
+          descripcion: `Con ${formatMoney(totalDeuda)} en deudas, ordena tus préstamos por tasa de interés (más alta primero). Paga el mínimo en todos y destina todo el excedente al de mayor tasa. Una vez liquidado, ese monto se suma al siguiente.`,
+          impactoEstimado: `Ahorro estimado: 20-40% en intereses totales`,
+        });
+
+        if (tieneTC) {
+          sugerencias.push({
+            tipo: 'corto',
+            titulo: '💳 Consolidar tarjetas de crédito',
+            descripcion: 'Las tarjetas de crédito suelen tener tasas de 40-70%. Considera un crédito de nómina o liquidez (15-25%) para pagarlas y reducir intereses.',
+            impactoEstimado: 'Reducir carga financiera 30-50%',
+          });
+        }
+
+        if (tieneHipoteca) {
+          sugerencias.push({
+            tipo: 'largo',
+            titulo: '🏠 Revisar hipoteca',
+            descripcion: 'Si tienes hipoteca, evalúa refinanciar si las tasas han bajado. Los pagos hipotecarios no deben exceder 30% de tus ingresos.',
+            impactoEstimado: 'Reducir pago mensual 10-20%',
+          });
+        }
+      }
+
+      // Calcular pago mensual estimado de deudas (asumiendo 10% tasa promedio a 36 meses)
+      const pagoMensualEstimado = totalDeuda > 0 ? (totalDeuda * 0.032) : 0; // ~3.2% mensual
+
+      analisisPrestamos = {
+        textoOriginal: prestamosTexto,
+        totalDeuda,
+        montosDetectados: montos,
+        pagoMensualEstimado,
+        tiposDetectados: {
+          financiera: tieneFinanciera,
+          bancario: tieneBancario,
+          nomina: tieneNomina,
+          hipoteca: tieneHipoteca,
+          automotriz: tieneAuto,
+          tarjetaCredito: tieneTC,
+        },
+        impactoEnRazones: {
+          razonCorrienteOriginal: razonCorriente,
+          razonCorrienteConDeuda: nuevaRazonCorriente,
+          endeudamientoOriginal: razonEndeudamiento,
+          endeudamientoConDeuda: nuevoEndeudamiento,
+        },
+        scoreOriginal: score,
+        scoreConDeuda: scoreConDeuda,
+        calificacionConDeuda: scoreConDeuda >= 90 ? 'A+' : scoreConDeuda >= 80 ? 'A' : scoreConDeuda >= 70 ? 'B' : scoreConDeuda >= 60 ? 'C' : 'D',
+        redaccion: generarRedaccionPrestamos(totalDeuda, montos, tieneFinanciera, tieneBancario, tieneNomina, tieneHipoteca, tieneAuto, tieneTC, totalEmitidoAnio, saldoActualEstimado, pagoMensualEstimado),
+      };
+
+      // Actualizar score con deuda
+      score = scoreConDeuda;
+      calificacion = score >= 90 ? 'A+ — Excelente' : score >= 80 ? 'A — Muy Bueno' : score >= 70 ? 'B — Bueno' : score >= 60 ? 'C — Aceptable' : 'D — Deficiente';
+    }
+
     // 9. RESUMEN EJECUTIVO
     const resumenEjecutivo = `
 SALUD FINANCIERA: ${calificacion} (Score: ${score}/100)
@@ -386,6 +507,9 @@ ${alertas.length > 1 ? 'Requiere atención inmediata.' : 'Estado saludable.'}
         estado: p.estado,
         facturas: p._count?.facturas || 0,
       })),
+
+      // Análisis de préstamos (si se proporcionó)
+      analisisPrestamos,
     });
   } catch (e: any) {
     console.error('Error en /api/finanzas/analisis:', e);
@@ -395,4 +519,76 @@ ${alertas.length > 1 ? 'Requiere atención inmediata.' : 'Estado saludable.'}
 
 function formatMoney(n: number): string {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n || 0);
+}
+
+function generarRedaccionPrestamos(
+  totalDeuda: number,
+  montos: number[],
+  tieneFinanciera: boolean,
+  tieneBancario: boolean,
+  tieneNomina: boolean,
+  tieneHipoteca: boolean,
+  tieneAuto: boolean,
+  tieneTC: boolean,
+  ingresosAnuales: number,
+  saldoBancos: number,
+  pagoMensualEstimado: number
+): string {
+  if (totalDeuda === 0) return 'No se detectaron montos de préstamos en el texto proporcionado.';
+
+  const tipos: string[] = [];
+  if (tieneFinanciera) tipos.push('préstamo de financiera/SOFOM');
+  if (tieneBancario) tipos.push('crédito bancario');
+  if (tieneNomina) tipos.push('crédito de nómina');
+  if (tieneHipoteca) tipos.push('hipoteca');
+  if (tieneAuto) tipos.push('crédito automotriz');
+  if (tieneTC) tipos.push('tarjeta(s) de crédito');
+
+  const numDeudas = montos.length;
+  const ratioDeudaIngresos = ingresosAnuales > 0 ? (totalDeuda / ingresosAnuales) * 100 : 0;
+  const mesesParaLiquidar = pagoMensualEstimado > 0 ? totalDeuda / pagoMensualEstimado : 0;
+
+  let redaccion = `📊 ANÁLISIS DE DEUDAS Y PRÉSTAMOS\n\n`;
+  redaccion += `El usuario reporta ${numDeudas} deuda(s) por un total de ${formatMoney(totalDeuda)}.\n`;
+  redaccion += `Tipos detectados: ${tipos.join(', ') || 'no especificado'}.\n\n`;
+
+  redaccion += `IMPACTO FINANCIERO:\n`;
+  redaccion += `- La deuda representa el ${ratioDeudaIngresos.toFixed(1)}% de los ingresos anuales (${formatMoney(ingresosAnuales)}).\n`;
+  redaccion += `- Pago mensual estimado: ${formatMoney(pagoMensualEstimado)} (tasa promedio 10% a 36 meses).\n`;
+  redaccion += `- Tiempo estimado para liquidar: ${mesesParaLiquidar.toFixed(0)} meses.\n`;
+  redaccion += `- Saldo actual en bancos: ${formatMoney(saldoBancos)}.\n\n`;
+
+  if (ratioDeudaIngresos > 50) {
+    redaccion += `⚠️ EVALUACIÓN: NIVEL DE ENDEUDAMIENTO CRÍTICO\n`;
+    redaccion += `Las deudas superan el 50% de los ingresos anuales. Se recomienda acción inmediata: consolidar deudas con tasa más alta, negociar quita o reestructura con bancos/financieras, y evitar nuevo endeudamiento. Priorizar la estrategia "avalancha": liquidar primero la deuda con tasa de interés más elevada.\n\n`;
+  } else if (ratioDeudaIngresos > 30) {
+    redaccion += `⚠️ EVALUACIÓN: NIVEL DE ENDEUDAMIENTO ELEVADO\n`;
+    redaccion += `Las deudas representan entre 30% y 50% de los ingresos. Se recomienda acelerar pagos a capital, reducir gastos no esenciales, y destinar al menos 20% del flujo libre al pago anticipado de deudas. Evitar nuevas compras a crédito.\n\n`;
+  } else if (ratioDeudaIngresos > 15) {
+    redaccion += `✅ EVALUACIÓN: NIVEL DE ENDEUDAMIENTO MANEJABLE\n`;
+    redaccion += `Las deudas representan entre 15% y 30% de los ingresos. Mantener pagos al corriente y considerar anticipar pagos a capital cuando haya excedentes para reducir intereses.\n\n`;
+  } else {
+    redaccion += `✅ EVALUACIÓN: NIVEL DE ENDEUDAMIENTO BAJO\n`;
+    redaccion += `Las deudas representan menos del 15% de los ingresos. La carga financiera es manejable. Se puede considerar inversión de excedentes en lugar de anticipar pagos si las tasas de los préstamos son menores al rendimiento esperado de inversiones.\n\n`;
+  }
+
+  if (tieneTC) {
+    redaccion += `💳 RECOMENDACIÓN ESPECÍFICA — TARJETAS DE CRÉDITO:\n`;
+    redaccion += `Las tarjetas de crédito en México tienen tasas promedio de 40-70% anual. Si tienes saldo en tarjetas, prioritiza liquidarlas. Considera un crédito de nómina (15-25%) para consolidar y reducir intereses drásticamente.\n\n`;
+  }
+
+  if (tieneFinanciera) {
+    redaccion += `🏦 RECOMENDACIÓN ESPECÍFICA — FINANCIERA/SOFOM:\n`;
+    redaccion += `Las SOFOM suelen tener tasas de 30-60%. Verifica si puedes refinanciar con un banco tradicional a menor tasa. Si tienes pagos puntuales, negocia tasa preferencial.\n\n`;
+  }
+
+  redaccion += `📋 ESTRATEGIA RECOMENDADA:\n`;
+  redaccion += `1. Listar todas las deudas con: saldo, tasa, pago mensual, plazo restante.\n`;
+  redaccion += `2. Ordenar de mayor a menor tasa de interés.\n`;
+  redaccion += `3. Pagar el mínimo en todas menos la de mayor tasa.\n`;
+  redaccion += `4. Destinar TODO el excedente disponible a la de mayor tasa.\n`;
+  redaccion += `5. Al liquidarla, sumar ese pago a la siguiente deuda.\n`;
+  redaccion += `6. Repetir hasta quedar sin deudas (excepto hipoteca si la tasa es < 10%).\n`;
+
+  return redaccion;
 }

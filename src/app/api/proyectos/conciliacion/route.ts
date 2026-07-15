@@ -161,6 +161,135 @@ async function cruzarConBancos(
   };
 }
 
+/**
+ * POST /api/proyectos/conciliacion?empresaId=xxx
+ *
+ * ESCANEA TODAS las facturas sin proyecto, detecta el proyecto desde el concepto,
+ * crea el proyecto automáticamente si no existe, y asocia la factura con ese proyecto.
+ *
+ * Después de ejecutar esto, el módulo de Proyectos se llena automáticamente
+ * con los proyectos detectados de los conceptos de las facturas.
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const empresaId = searchParams.get('empresaId');
+
+    if (!empresaId) {
+      return NextResponse.json({ error: 'Falta empresaId' }, { status: 400 });
+    }
+
+    const empresa = await db.empresa.findUnique({ where: { id: empresaId } });
+    if (!empresa) {
+      return NextResponse.json({ error: 'Empresa no encontrada' }, { status: 404 });
+    }
+
+    // Obtener todas las facturas sin proyecto asignado
+    const facturasSinProyecto = await db.factura.findMany({
+      where: {
+        empresaId,
+        proyectoId: null,
+        estado: { not: 'cancelada' },
+        tipoComprobante: { in: ['I', 'E'] },
+      },
+    });
+
+    // Crear mapa de proyectos existentes por nombre (case-insensitive)
+    const proyectosExistentes = await db.proyecto.findMany({ where: { empresaId } });
+    const proyectoMap = new Map<string, string>(); // nombre_lower → id
+
+    for (const p of proyectosExistentes) {
+      proyectoMap.set(p.nombre.toLowerCase(), p.id);
+      if (p.codigo) proyectoMap.set(p.codigo.toLowerCase(), p.id);
+    }
+
+    let proyectosCreados = 0;
+    let facturasAsignadas = 0;
+    let facturasSinDeteccion = 0;
+    const proyectosResumen: any[] = [];
+    const asignaciones: any = {}; // proyectoNombre → { count, total, cliente }
+
+    for (const f of facturasSinProyecto) {
+      const concepto = f.concepto || '';
+      const proyectoDetectado = detectarProyectoDeConcepto(concepto);
+
+      if (!proyectoDetectado) {
+        facturasSinDeteccion++;
+        continue;
+      }
+
+      // Buscar si ya existe el proyecto
+      let proyectoId = proyectoMap.get(proyectoDetectado.toLowerCase());
+
+      // Si no existe, crearlo
+      if (!proyectoId) {
+        const nuevoProyecto = await db.proyecto.create({
+          data: {
+            nombre: proyectoDetectado,
+            codigo: null,
+            descripcion: `Proyecto detectado automáticamente del concepto: "${concepto.slice(0, 100)}..."`,
+            estado: 'activo',
+            empresaId,
+            // Asociar cliente si la factura es emitida
+            clienteId: f.clienteId || null,
+          },
+        });
+        proyectoId = nuevoProyecto.id;
+        proyectoMap.set(proyectoDetectado.toLowerCase(), proyectoId);
+        proyectosCreados++;
+        proyectosResumen.push({
+          nombre: proyectoDetectado,
+          facturasCount: 0,
+          totalEmitido: 0,
+          totalRecibido: 0,
+        });
+      }
+
+      // Asignar la factura al proyecto
+      await db.factura.update({
+        where: { id: f.id },
+        data: { proyectoId },
+      });
+      facturasAsignadas++;
+
+      // Actualizar resumen
+      if (!asignaciones[proyectoDetectado]) {
+        asignaciones[proyectoDetectado] = {
+          count: 0,
+          totalEmitido: 0,
+          totalRecibido: 0,
+          cliente: f.receptorNombre || f.emisorNombre,
+        };
+      }
+      asignaciones[proyectoDetectado].count++;
+      if (f.direccion === 'emitida') {
+        asignaciones[proyectoDetectado].totalEmitido += f.total;
+      } else {
+        asignaciones[proyectoDetectado].totalRecibido += f.total;
+      }
+    }
+
+    // Construir respuesta con proyectos y conciliación con bancos
+    const proyectosFinales = Object.entries(asignaciones).map(([nombre, stats]: [string, any]) => ({
+      nombre,
+      ...stats,
+    })).sort((a, b) => (b.totalEmitido + b.totalRecibido) - (a.totalEmitido + a.totalRecibido));
+
+    return NextResponse.json({
+      success: true,
+      totalFacturasEscaneadas: facturasSinProyecto.length,
+      proyectosCreados,
+      facturasAsignadas,
+      facturasSinDeteccion,
+      proyectos: proyectosFinales,
+      message: `✅ ${proyectosCreados} proyecto(s) creado(s) automáticamente, ${facturasAsignadas} factura(s) asignada(s), ${facturasSinDeteccion} sin proyecto detectable.`,
+    });
+  } catch (e: any) {
+    console.error('Error en POST /api/proyectos/conciliacion:', e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
