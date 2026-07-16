@@ -266,21 +266,27 @@ export function SistemaCompleto() {
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
-              {/* Selector de empresa — más visible */}
+              {/* Selector de empresa — más visible y robusto */}
               {empresas.length > 0 && (
-                <select
-                  value={empresa?.id || ''}
-                  onChange={(e) => {
-                    const sel = empresas.find(em => em.id === e.target.value);
-                    if (sel) setEmpresa(sel);
-                  }}
-                  className="h-9 px-3 pr-8 rounded-lg border bg-background text-sm font-medium hover:bg-muted/50 transition cursor-pointer max-w-[180px] truncate"
-                  title="Cambiar empresa activa"
-                >
-                  {empresas.map((e) => (
-                    <option key={e.id} value={e.id}>{e.nombre}</option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-2 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-lg px-2 h-9">
+                  <Building2 size={14} className="text-violet-600 flex-shrink-0" />
+                  <select
+                    value={empresa?.id || ''}
+                    onChange={(e) => {
+                      const sel = empresas.find(em => em.id === e.target.value);
+                      if (sel) {
+                        setEmpresa(sel);
+                        toast.success('Empresa cambiada', sel.nombre);
+                      }
+                    }}
+                    className="bg-transparent text-sm font-semibold hover:bg-violet-100 dark:hover:bg-violet-900/40 transition cursor-pointer outline-none max-w-[160px] truncate border-0 focus:ring-0"
+                    title={`Empresa activa: ${empresa?.nombre || 'Selecciona'}`}
+                  >
+                    {empresas.map((e) => (
+                      <option key={e.id} value={e.id}>{e.nombre}</option>
+                    ))}
+                  </select>
+                </div>
               )}
 
               <div className="relative hidden md:block">
@@ -1928,6 +1934,96 @@ function FinanzasView({ stats }: { stats: Stats | null }) {
         </Card>
       </div>
 
+      {/* KPIs Profesionales (business-analyst) */}
+      {data.kpis && (
+        <Card className="p-5 border-l-4 border-l-violet-500">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Sparkles size={16} className="text-violet-600" /> KPIs Profesionales (Business Intelligence)
+          </h3>
+
+          {/* Unit Economics */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="border rounded-lg p-3 bg-violet-50/30 dark:bg-violet-900/10">
+              <div className="text-[10px] uppercase text-muted-foreground">Ticket Promedio</div>
+              <div className="text-lg font-bold text-violet-600">{fmt(data.kpis.ticketPromedio)}</div>
+              <div className="text-[10px] text-muted-foreground">Por factura emitida</div>
+            </div>
+            <div className="border rounded-lg p-3 bg-emerald-50/30 dark:bg-emerald-900/10">
+              <div className="text-[10px] uppercase text-muted-foreground">Revenue/Empleado</div>
+              <div className="text-lg font-bold text-emerald-600">{fmt(data.kpis.revenuePerEmployee)}</div>
+              <div className="text-[10px] text-muted-foreground">Productividad anual</div>
+            </div>
+            <div className="border rounded-lg p-3 bg-orange-50/30 dark:bg-orange-900/10">
+              <div className="text-[10px] uppercase text-muted-foreground">Costo/Empleado</div>
+              <div className="text-lg font-bold text-orange-600">{fmt(data.kpis.costoPorEmpleado)}</div>
+              <div className="text-[10px] text-muted-foreground">Gastos + nómina</div>
+            </div>
+            <div className="border rounded-lg p-3 bg-blue-50/30 dark:bg-blue-900/10">
+              <div className="text-[10px] uppercase text-muted-foreground">Margen Contribución</div>
+              <div className={cn('text-lg font-bold', data.kpis.margenContribucion >= 0 ? 'text-blue-600' : 'text-red-600')}>
+                {fmt(data.kpis.margenContribucion)}
+              </div>
+              <div className="text-[10px] text-muted-foreground">{data.kpis.margenContribucionPorcentaje?.toFixed(1)}% del revenue</div>
+            </div>
+          </div>
+
+          {/* Punto Equilibrio + Burn Rate + LTV/CAC */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="border rounded-lg p-3">
+              <div className="text-[10px] uppercase text-muted-foreground">Punto de Equilibrio</div>
+              <div className="text-lg font-bold text-amber-600">{fmt(data.kpis.puntoEquilibrio)}</div>
+              <div className={cn('text-[10px]', data.kpis.distanciaEquilibrio >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                {data.kpis.distanciaEquilibrio >= 0 ? '✅' : '⚠️'} {data.kpis.revenueSobrePuntoEquilibrio?.toFixed(0)}% del objetivo
+              </div>
+            </div>
+            <div className="border rounded-lg p-3">
+              <div className="text-[10px] uppercase text-muted-foreground">Burn Rate Mensual</div>
+              <div className="text-lg font-bold text-red-600">{fmt(data.kpis.burnRateMensual)}</div>
+              <div className="text-[10px] text-muted-foreground">Salida de efectivo</div>
+            </div>
+            <div className="border rounded-lg p-3">
+              <div className="text-[10px] uppercase text-muted-foreground">Runway</div>
+              <div className={cn('text-lg font-bold', data.kpis.runwayMeses >= 6 ? 'text-emerald-600' : data.kpis.runwayMeses >= 3 ? 'text-amber-600' : 'text-red-600')}>
+                {data.kpis.runwayMeses?.toFixed(1)} meses
+              </div>
+              <div className="text-[10px] text-muted-foreground">Meses de operación</div>
+            </div>
+            <div className="border rounded-lg p-3">
+              <div className="text-[10px] uppercase text-muted-foreground">LTV / CAC</div>
+              <div className={cn('text-lg font-bold', data.kpis.ratioLtvCac >= 3 ? 'text-emerald-600' : data.kpis.ratioLtvCac >= 1 ? 'text-amber-600' : 'text-red-600')}>
+                {data.kpis.ratioLtvCac?.toFixed(1)}x
+              </div>
+              <div className="text-[10px] text-muted-foreground">Ideal &gt;3x</div>
+            </div>
+          </div>
+
+          {/* Forecasting + Top Clientes */}
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="border rounded-lg p-3">
+              <div className="text-[10px] uppercase text-muted-foreground mb-2">📈 Forecasting Fin de Año</div>
+              <div className="text-2xl font-bold text-violet-600">{fmt(data.kpis.proyeccionFinAnio)}</div>
+              <div className="text-[10px] text-muted-foreground">
+                Crecimiento estimado: +{data.kpis.crecimientoEstimado?.toFixed(1)}% vs actual ({fmt(ind.totalEmitido)})
+              </div>
+            </div>
+            <div className="border rounded-lg p-3">
+              <div className="text-[10px] uppercase text-muted-foreground mb-2">👥 Top 5 Clientes (Cohort)</div>
+              <div className="space-y-1">
+                {data.kpis.topClientes?.slice(0, 5).map((c: any, i: number) => (
+                  <div key={i} className="flex justify-between text-xs">
+                    <span className="truncate flex-1">{i + 1}. {c.rfc}</span>
+                    <span className="font-mono font-semibold ml-2">{fmt(c.totalFacturado)}</span>
+                  </div>
+                ))}
+                {(!data.kpis.topClientes || data.kpis.topClientes.length === 0) && (
+                  <div className="text-xs text-muted-foreground">Sin datos</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Razones financieras */}
       <Card className="p-5">
         <h3 className="font-semibold mb-3 flex items-center gap-2">
@@ -2860,7 +2956,7 @@ function BalanceView() {
 // ====================== EMPRESAS VIEW (con alta + constancia fiscal) ======================
 function EmpresasView() {
   const { data, loading, refresh } = useApiData<{ empresas: any[] }>('/api/empresas');
-  const { empresa, setEmpresa } = useEmpresa();
+  const { empresa, setEmpresa, cargarEmpresas } = useEmpresa();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ nombre: '', rfc: '', regimenFiscal: '', email: '', telefono: '', direccion: '' });
   const [error, setError] = useState('');
@@ -3010,6 +3106,12 @@ function EmpresasView() {
         setDatosConstancia(null);
         setMsgConstancia('');
         refresh();
+        // Recargar la lista de empresas del selector del topbar
+        await cargarEmpresas();
+        // Si es la primera empresa, seleccionarla automáticamente
+        if (!empresa && d.id) {
+          setEmpresa({ id: d.id, nombre: d.nombre, rfc: d.rfc });
+        }
       }
     } catch (e: any) {
       setError(e.message);

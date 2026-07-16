@@ -32,6 +32,7 @@ EXCLUDE_DIRS = {
     "examples", "obsidian-sync", "obsidian-vault",
     "graphify", "prompts", "docs",
     "download", ".zscripts", "agent-ctx",
+    "skills-referencia",  # ← NO subir los repos de referencia al GitHub
     "Caddyfile",  # local dev only
 }
 

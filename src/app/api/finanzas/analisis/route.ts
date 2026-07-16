@@ -429,6 +429,87 @@ export async function GET(req: NextRequest) {
       calificacion = score >= 90 ? 'A+ — Excelente' : score >= 80 ? 'A — Muy Bueno' : score >= 70 ? 'B — Bueno' : score >= 60 ? 'C — Aceptable' : 'D — Deficiente';
     }
 
+    // 8.7 KPIs PROFESIONALES (estilo business-analyst de wshobson)
+    // Cálculos avanzados de unit economics, CLV, cohort, forecasting
+    const numClientes = await db.cliente.count({ where: { empresaId } });
+    const numEmpleados = await db.empleado.count({ where: { empresaId, status: 'activo' } });
+    const ticketPromedio = facturasEmitidas.length > 0 ? totalEmitidoAnio / facturasEmitidas.length : 0;
+    const revenuePerEmployee = numEmpleados > 0 ? totalEmitidoAnio / numEmpleados : 0;
+    const costoPorEmpleado = numEmpleados > 0 ? (totalRecibidoAnio + totalNominaAnio) / numEmpleados : 0;
+    const margenContribucion = totalEmitidoAnio - totalRecibidoAnio;
+    const puntoEquilibrio = totalNominaAnio + (totalRecibidoAnio * 0.7); // Costos fijos + variables estimados
+    const revenueSobrePuntoEquilibrio = puntoEquilibrio > 0 ? (totalEmitidoAnio / puntoEquilibrio) * 100 : 0;
+    const burnRateMensual = totalNominaMes + (totalRecibidoAnio / 12 * 0.5); // Nómina + gastos fijos mensuales
+    const runwayMeses = burnRateMensual > 0 ? saldoActualEstimado / burnRateMensual : 0;
+    const ltvEstimado = numClientes > 0 ? (totalEmitidoAnio / numClientes) * 2.5 : 0; // Asumiendo retención de 2.5 años
+    const cacEstimado = totalRecibidoAnio * 0.05; // 5% de gastos en marketing/ventas (estimado)
+    const ratioLtvCac = cacEstimado > 0 ? ltvEstimado / cacEstimado : 0;
+
+    // Forecasting simple (regresión lineal con los meses que tienen datos)
+    const mesesConDatos = flujoMensual.filter(f => f.ingresos > 0 || f.egresos > 0);
+    let proyeccionFinAnio = 0;
+    if (mesesConDatos.length >= 2) {
+      const avgMensual = totalEmitidoAnio / mesesConDatos.length;
+      const mesesRestantes = 12 - mesesConDatos.length;
+      proyeccionFinAnio = totalEmitidoAnio + (avgMensual * mesesRestantes);
+    }
+
+    // Cohort analysis simple (facturación promedio por cliente top 5)
+    const topClientes = await db.factura.groupBy({
+      by: ['receptorRfc'],
+      where: {
+        empresaId,
+        direccion: 'emitida',
+        tipoComprobante: 'I',
+        fecha: { gte: inicioAnio, lte: finAnio },
+      },
+      _sum: { total: true },
+      _count: true,
+      orderBy: { _sum: { total: 'desc' } },
+      take: 5,
+    });
+
+    const kpis = {
+      // Unit Economics
+      ticketPromedio,
+      revenuePerEmployee,
+      costoPorEmpleado,
+      margenContribucion,
+      margenContribucionPorcentaje: totalEmitidoAnio > 0 ? (margenContribucion / totalEmitidoAnio) * 100 : 0,
+
+      // Punto de equilibrio
+      puntoEquilibrio,
+      revenueSobrePuntoEquilibrio,
+      distanciaEquilibrio: revenueSobrePuntoEquilibrio - 100,
+
+      // Burn rate y runway
+      burnRateMensual,
+      runwayMeses,
+
+      // CLV / CAC
+      ltvEstimado,
+      cacEstimado,
+      ratioLtvCac,
+
+      // Forecasting
+      proyeccionFinAnio,
+      crecimientoEstimado: totalEmitidoAnio > 0 ? ((proyeccionFinAnio - totalEmitidoAnio) / totalEmitidoAnio) * 100 : 0,
+
+      // Métricas operativas
+      numClientes,
+      numEmpleados,
+      facturasPorCliente: numClientes > 0 ? facturasEmitidas.length / numClientes : 0,
+      revenuePorCliente: numClientes > 0 ? totalEmitidoAnio / numClientes : 0,
+
+      // Top 5 clientes (cohort)
+      topClientes: topClientes.map(c => ({
+        rfc: c.receptorRfc,
+        totalFacturado: c._sum.total || 0,
+        numFacturas: c._count,
+        ticketPromedio: c._count > 0 ? (c._sum.total || 0) / c._count : 0,
+      })),
+    };
+
     // 9. RESUMEN EJECUTIVO
     const resumenEjecutivo = `
 SALUD FINANCIERA: ${calificacion} (Score: ${score}/100)
@@ -507,6 +588,9 @@ ${alertas.length > 1 ? 'Requiere atención inmediata.' : 'Estado saludable.'}
         estado: p.estado,
         facturas: p._count?.facturas || 0,
       })),
+
+      // KPIs profesionales (business-analyst)
+      kpis,
 
       // Análisis de préstamos (si se proporcionó)
       analisisPrestamos,
