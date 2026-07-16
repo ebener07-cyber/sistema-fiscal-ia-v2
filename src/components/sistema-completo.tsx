@@ -2344,16 +2344,21 @@ function ReportesView({ stats }: { stats: Stats | null }) {
             </p>
             <Button
               onClick={() => {
+                if (!empresa?.id) {
+                  toast.error('Sin empresa seleccionada', 'Selecciona una empresa en el topbar');
+                  return;
+                }
                 const hoy = new Date();
                 const params = new URLSearchParams({
                   mes: String(hoy.getMonth() + 1),
                   anio: String(hoy.getFullYear()),
+                  empresaId: empresa.id,
                 });
-                if (empresa?.id) params.set('empresaId', empresa.id);
                 window.open(`/api/export/facturas?${params}`, '_blank');
               }}
             >
               <FileSpreadsheet size={14} className="mr-2" /> Descargar Excel Facturas
+              {empresa?.nombre && <span className="ml-2 text-[10px] bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 rounded">{empresa.nombre}</span>}
             </Button>
           </div>
 
@@ -2367,16 +2372,21 @@ function ReportesView({ stats }: { stats: Stats | null }) {
             <Button
               variant="secondary"
               onClick={() => {
+                if (!empresa?.id) {
+                  toast.error('Sin empresa seleccionada', 'Selecciona una empresa en el topbar');
+                  return;
+                }
                 const hoy = new Date();
                 const params = new URLSearchParams({
                   mes: String(hoy.getMonth() + 1),
                   anio: String(hoy.getFullYear()),
+                  empresaId: empresa.id,
                 });
-                if (empresa?.id) params.set('empresaId', empresa.id);
                 window.open(`/api/export/nomina?${params}`, '_blank');
               }}
             >
               <FileSpreadsheet size={14} className="mr-2" /> Descargar Excel Nómina
+              {empresa?.nombre && <span className="ml-2 text-[10px] bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 rounded">{empresa.nombre}</span>}
             </Button>
           </div>
         </div>
@@ -2402,12 +2412,24 @@ function ReportesView({ stats }: { stats: Stats | null }) {
             </p>
             <Button
               onClick={() => {
-                const params = new URLSearchParams({ anio: String(new Date().getFullYear()) });
-                if (empresa?.id) params.set('empresaId', empresa.id);
+                if (!empresa?.id) {
+                  toast.error('Sin empresa seleccionada', 'Selecciona una empresa en el topbar antes de descargar');
+                  return;
+                }
+                const params = new URLSearchParams({
+                  anio: String(new Date().getFullYear()),
+                  empresaId: empresa.id,
+                });
+                toast.info('Generando concentrado...', `Empresa: ${empresa.nombre}`);
                 window.open(`/api/export/concentrado?${params}`, '_blank');
               }}
             >
               <FileSpreadsheet size={14} className="mr-2" /> Descargar Concentrado
+              {empresa?.nombre && (
+                <span className="ml-2 text-[10px] bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 rounded">
+                  {empresa.nombre}
+                </span>
+              )}
             </Button>
           </div>
 

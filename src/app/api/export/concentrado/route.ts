@@ -81,10 +81,24 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const hoy = new Date();
     const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
-    const empresaId = searchParams.get('empresaId') || undefined;
+    const empresaId = searchParams.get('empresaId');
+
+    // ===== VALIDAR que empresaId esté presente =====
+    if (!empresaId) {
+      return NextResponse.json(
+        { error: 'Falta empresaId. Selecciona una empresa antes de descargar el concentrado.' },
+        { status: 400 }
+      );
+    }
 
     // ===== Obtener empresa =====
-    const empresa = empresaId ? await db.empresa.findUnique({ where: { id: empresaId } }) : null;
+    const empresa = await db.empresa.findUnique({ where: { id: empresaId } });
+    if (!empresa) {
+      return NextResponse.json(
+        { error: 'Empresa no encontrada' },
+        { status: 404 }
+      );
+    }
 
     // ===== Obtener TODAS las facturas del año (excluyendo canceladas y tipo P=Pago) =====
     const inicioAnio = new Date(anio, 0, 1);
@@ -92,7 +106,7 @@ export async function GET(req: NextRequest) {
 
     const facturas = await db.factura.findMany({
       where: {
-        ...(empresaId ? { empresaId } : {}),
+        empresaId,
         fecha: { gte: inicioAnio, lte: finAnio },
         estado: { not: 'cancelada' },
         tipoComprobante: { in: ['I', 'E'] }, // Ingreso y Nota de crédito (NO Pago, NO Nómina)
@@ -103,7 +117,7 @@ export async function GET(req: NextRequest) {
     // ===== Obtener nómina del año =====
     const nominas = await db.reciboNomina.findMany({
       where: {
-        ...(empresaId ? { empresaId } : {}),
+        empresaId,
         fecha: { gte: inicioAnio, lte: finAnio },
       },
       include: { empleado: true },
