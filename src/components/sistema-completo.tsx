@@ -266,27 +266,21 @@ export function SistemaCompleto() {
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
-              {/* Selector de empresa — más visible y robusto */}
+              {/* Selector de empresa — más visible */}
               {empresas.length > 0 && (
-                <div className="flex items-center gap-2 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-lg px-2 h-9">
-                  <Building2 size={14} className="text-violet-600 flex-shrink-0" />
-                  <select
-                    value={empresa?.id || ''}
-                    onChange={(e) => {
-                      const sel = empresas.find(em => em.id === e.target.value);
-                      if (sel) {
-                        setEmpresa(sel);
-                        toast.success('Empresa cambiada', sel.nombre);
-                      }
-                    }}
-                    className="bg-transparent text-sm font-semibold hover:bg-violet-100 dark:hover:bg-violet-900/40 transition cursor-pointer outline-none max-w-[160px] truncate border-0 focus:ring-0"
-                    title={`Empresa activa: ${empresa?.nombre || 'Selecciona'}`}
-                  >
-                    {empresas.map((e) => (
-                      <option key={e.id} value={e.id}>{e.nombre}</option>
-                    ))}
-                  </select>
-                </div>
+                <select
+                  value={empresa?.id || ''}
+                  onChange={(e) => {
+                    const sel = empresas.find(em => em.id === e.target.value);
+                    if (sel) setEmpresa(sel);
+                  }}
+                  className="h-9 px-3 pr-8 rounded-lg border bg-background text-sm font-medium hover:bg-muted/50 transition cursor-pointer max-w-[180px] truncate"
+                  title="Cambiar empresa activa"
+                >
+                  {empresas.map((e) => (
+                    <option key={e.id} value={e.id}>{e.nombre}</option>
+                  ))}
+                </select>
               )}
 
               <div className="relative hidden md:block">
@@ -1460,33 +1454,132 @@ function BancosView({ empresaId }: { empresaId?: string }) {
 
 function ContabilidadView() {
   const { empresa } = useEmpresa();
-  const { data, loading } = useApiData<{ polizas: any[] }>('/api/polizas', empresa?.id);
-  if (loading) return <LoadingView message="Cargando..." />;
-  if (!data?.polizas?.length) return <EmptyState icon={BookOpen} message="Sin pólizas" />;
+  const { data, loading, refresh } = useApiData<{ polizas: any[] }>('/api/polizas', empresa?.id);
+  const [generando, setGenerando] = useState(false);
+  const hoy = new Date();
+
+  const generarPolizas = async () => {
+    if (!empresa?.id) {
+      toast.error('Sin empresa', 'Selecciona una empresa primero');
+      return;
+    }
+    setGenerando(true);
+    try {
+      const r = await fetch('/api/polizas/generar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          empresaId: empresa.id,
+          mes: hoy.getMonth() + 1,
+          anio: hoy.getFullYear(),
+        }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast.success('Pólizas generadas', d.message);
+        refresh();
+      } else {
+        toast.error('Error', d.error || 'No se pudieron generar');
+      }
+    } catch (e: any) {
+      toast.error('Error', e.message);
+    } finally {
+      setGenerando(false);
+    }
+  };
+
+  if (loading) return <LoadingView message="Cargando pólizas..." />;
+
+  // Calcular totales
+  const polizas = data?.polizas || [];
+  const totalCargos = polizas.reduce((s: number, p: any) => s + (p.cargo || 0), 0);
+  const totalAbonos = polizas.reduce((s: number, p: any) => s + (p.abono || 0), 0);
+  const cuadrado = Math.abs(totalCargos - totalAbonos) < 0.01;
+
   return (
-    <DataTableCard title={`Pólizas (${data.polizas.length})`}>
-      <table className="w-full text-sm">
-        <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-          <th className="px-4 py-2">Folio</th><th className="px-4 py-2">Fecha</th>
-          <th className="px-4 py-2">Tipo</th><th className="px-4 py-2">Concepto</th>
-          <th className="px-4 py-2 text-right">Cargo</th><th className="px-4 py-2">Estado</th>
-        </tr></thead>
-        <tbody>
-          {data.polizas.map((p) => (
-            <tr key={p.id} className="border-b hover:bg-muted/30">
-              <td className="px-4 py-2 font-mono text-xs">{p.folio}</td>
-              <td className="px-4 py-2">{new Date(p.fecha).toLocaleDateString('es-MX')}</td>
-              <td className="px-4 py-2"><Badge variant="secondary">{p.tipo}</Badge></td>
-              <td className="px-4 py-2 truncate max-w-[200px]">{p.concepto}</td>
-              <td className="px-4 py-2 text-right font-semibold">{fmt(p.cargo)}</td>
-              <td className="px-4 py-2">
-                <Badge variant={p.estado === 'conciliada' ? 'default' : 'secondary'}>{p.estado}</Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </DataTableCard>
+    <div className="space-y-4 animate-fade-in">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total pólizas</div>
+          <div className="text-xl font-bold">{polizas.length}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total cargos</div>
+          <div className="text-xl font-bold text-emerald-600">{fmt(totalCargos)}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total abonos</div>
+          <div className="text-xl font-bold text-orange-600">{fmt(totalAbonos)}</div>
+        </Card>
+        <Card className={cn('p-4 border-l-4 card-hover', cuadrado ? 'border-l-emerald-500' : 'border-l-red-500')}>
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Estado</div>
+          <div className={cn('text-xl font-bold', cuadrado ? 'text-emerald-600' : 'text-red-600')}>
+            {cuadrado ? '✓ Cuadrado' : '✗ Descuadre'}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            Diferencia: {fmt(Math.abs(totalCargos - totalAbonos))}
+          </div>
+        </Card>
+      </div>
+
+      {/* Botón generar */}
+      <div className="flex justify-end">
+        <Button onClick={generarPolizas} disabled={generando}>
+          {generando ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Sparkles size={14} className="mr-2" />}
+          Generar pólizas de {MESES_NOMBRE[hoy.getMonth()]} {hoy.getFullYear()}
+        </Button>
+      </div>
+
+      {/* Tabla */}
+      {polizas.length === 0 ? (
+        <EmptyState
+          icon={BookOpen}
+          message="Sin pólizas generadas. Usa el botón 'Generar pólizas' para crear automáticamente desde facturas y nómina."
+        />
+      ) : (
+        <DataTableCard title={`Pólizas (${polizas.length})`}>
+          <table className="w-full text-sm">
+            <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
+              <th className="px-4 py-2">Folio</th>
+              <th className="px-4 py-2">Fecha</th>
+              <th className="px-4 py-2">Tipo</th>
+              <th className="px-4 py-2">Concepto</th>
+              <th className="px-4 py-2 text-right">Cargo</th>
+              <th className="px-4 py-2 text-right">Abono</th>
+              <th className="px-4 py-2">Estado</th>
+            </tr></thead>
+            <tbody>
+              {polizas.map((p: any) => (
+                <tr key={p.id} className="border-b hover:bg-muted/30">
+                  <td className="px-4 py-2 font-mono text-xs">{p.folio}</td>
+                  <td className="px-4 py-2">{new Date(p.fecha).toLocaleDateString('es-MX')}</td>
+                  <td className="px-4 py-2">
+                    <Badge variant={p.tipo === 'ingreso' ? 'default' : p.tipo === 'egreso' ? 'secondary' : 'outline'}>
+                      {p.tipo}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-2 truncate max-w-[200px]" title={p.concepto}>{p.concepto}</td>
+                  <td className="px-4 py-2 text-right font-semibold text-emerald-600">{fmt(p.cargo)}</td>
+                  <td className="px-4 py-2 text-right font-semibold text-orange-600">{fmt(p.abono)}</td>
+                  <td className="px-4 py-2">
+                    <Badge variant={p.estado === 'conciliada' ? 'default' : 'secondary'}>{p.estado}</Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-muted/30 font-bold">
+                <td colSpan={4} className="px-4 py-2 text-right">TOTALES:</td>
+                <td className="px-4 py-2 text-right text-emerald-600">{fmt(totalCargos)}</td>
+                <td className="px-4 py-2 text-right text-orange-600">{fmt(totalAbonos)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </DataTableCard>
+      )}
+    </div>
   );
 }
 
@@ -1771,34 +1864,217 @@ function SatView() {
 }
 
 function IaFiscalView() {
+  const { empresa } = useEmpresa();
+  const { data: statsData } = useApiData<any>(`/api/stats?empresaId=${empresa?.id || ''}`, undefined);
+  const [simulador, setSimulador] = useState<'isr' | 'iva' | 'ptu'>('isr');
+  const [ingresosInput, setIngresosInput] = useState('');
+  const [deduccionesInput, setDeduccionesInput] = useState('');
+  const [resultado, setResultado] = useState<any>(null);
+
+  // Pre-llenar con datos reales del sistema
+  useEffect(() => {
+    if (statsData?.fiscal) {
+      setIngresosInput(String(Math.round(statsData.fiscal.totalEmitido || 0)));
+      setDeduccionesInput(String(Math.round(statsData.fiscal.totalRecibido || 0)));
+    }
+  }, [statsData]);
+
+  const calcular = () => {
+    const ingresos = parseFloat(ingresosInput) || 0;
+    const deducciones = parseFloat(deduccionesInput) || 0;
+    const utilidad = ingresos - deducciones;
+
+    if (simulador === 'isr') {
+      // ISR personas morales 2026: 30% sobre utilidad fiscal
+      const isr = utilidad > 0 ? utilidad * 0.30 : 0;
+      const utilidadDespuesISR = utilidad - isr;
+      setResultado({
+        titulo: 'Cálculo de ISR (Persona Moral — 30%)',
+        rows: [
+          { label: 'Ingresos acumulables', value: ingresos, color: 'text-emerald-600' },
+          { label: 'Deducciones autorizadas', value: -deducciones, color: 'text-orange-600' },
+          { label: 'Utilidad fiscal', value: utilidad, color: utilidad >= 0 ? 'text-blue-600' : 'text-red-600', bold: true },
+          { label: 'ISR (30%)', value: -isr, color: 'text-red-600', bold: true },
+          { label: 'Utilidad después de ISR', value: utilidadDespuesISR, color: 'text-violet-600', bold: true },
+        ],
+        info: `Tasa aplicada: 30% (LISR Art. 9 — Personas morales 2026). Base: $${utilidad.toLocaleString('es-MX')}`,
+      });
+    } else if (simulador === 'iva') {
+      // IVA: 16% trasladado - 16% acreditable
+      const ivaTrasladado = ingresos * 0.16;
+      const ivaAcreditable = deducciones * 0.16;
+      const ivaPorPagar = ivaTrasladado - ivaAcreditable;
+      setResultado({
+        titulo: 'Cálculo de IVA (16% — LIVA)',
+        rows: [
+          { label: 'Base gravable (ventas)', value: ingresos, color: 'text-emerald-600' },
+          { label: 'IVA trasladado (16%)', value: ivaTrasladado, color: 'text-violet-600' },
+          { label: 'Base gravable (compras)', value: deducciones, color: 'text-orange-600' },
+          { label: 'IVA acreditable (16%)', value: -ivaAcreditable, color: 'text-blue-600' },
+          { label: ivaPorPagar >= 0 ? 'IVA por pagar' : 'IVA a favor', value: ivaPorPagar, color: ivaPorPagar >= 0 ? 'text-red-600' : 'text-emerald-600', bold: true },
+        ],
+        info: `Tasa: 16% (LIVA Art. 1). Si es a favor, se puede compensar en el siguiente período o solicitar devolución.`,
+      });
+    } else if (simulador === 'ptu') {
+      // PTU: 10% de la utilidad fiscal repartible (después de ISR)
+      const utilidadReplicable = utilidad > 0 ? utilidad : 0;
+      const ptu = utilidadReplicable * 0.10;
+      const isr = utilidad > 0 ? utilidad * 0.30 : 0;
+      const utilidadDespuesPTU = utilidad - isr - ptu;
+      setResultado({
+        titulo: 'Cálculo de PTU (Reparto de Utilidades — LFT Art. 117)',
+        rows: [
+          { label: 'Utilidad fiscal (ingresos - deducciones)', value: utilidad, color: 'text-blue-600' },
+          { label: 'ISR (30%)', value: -isr, color: 'text-red-600' },
+          { label: 'Base repartible (utilidad - ISR)', value: utilidad - isr, color: 'text-violet-600' },
+          { label: 'PTU (10% de base repartible)', value: -ptu, color: 'text-amber-600', bold: true },
+          { label: 'Utilidad neta después de ISR + PTU', value: utilidadDespuesPTU, color: 'text-emerald-600', bold: true },
+        ],
+        info: `PTU = 10% de la utilidad gravable después de ISR. Se reparte dentro de los 60 días siguientes al cierre del ejercicio (30 mayo).`,
+      });
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="grid md:grid-cols-3 gap-3">
-        {[
-          { t: 'Simulador ISR', d: 'Calcula ISR mensual/anual', icon: Calculator },
-          { t: 'Simulador IVA', d: 'Proyecta IVA acreditable', icon: FileText },
-          { t: 'Simulador PTU', d: 'Participación de utilidades', icon: DollarSign },
-        ].map((m) => {
-          const Icon = m.icon;
-          return (
-            <Card key={m.t} className="p-5 border-l-4 border-l-violet-500">
-              <Icon size={24} className="text-violet-600 mb-2" />
-              <h3 className="font-semibold">{m.t}</h3>
-              <p className="text-xs text-muted-foreground mt-1">{m.d}</p>
-            </Card>
-          );
-        })}
+    <div className="space-y-4 animate-fade-in">
+      {/* Selector de simulador */}
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={() => setSimulador('isr')}
+          className={cn('px-4 py-2 rounded-lg text-sm font-semibold border transition flex items-center gap-2',
+            simulador === 'isr' ? 'bg-violet-600 text-white border-violet-600' : 'border-border hover:bg-muted')}
+        >
+          <Calculator size={14} /> ISR
+        </button>
+        <button
+          onClick={() => setSimulador('iva')}
+          className={cn('px-4 py-2 rounded-lg text-sm font-semibold border transition flex items-center gap-2',
+            simulador === 'iva' ? 'bg-violet-600 text-white border-violet-600' : 'border-border hover:bg-muted')}
+        >
+          <FileText size={14} /> IVA
+        </button>
+        <button
+          onClick={() => setSimulador('ptu')}
+          className={cn('px-4 py-2 rounded-lg text-sm font-semibold border transition flex items-center gap-2',
+            simulador === 'ptu' ? 'bg-violet-600 text-white border-violet-600' : 'border-border hover:bg-muted')}
+        >
+          <DollarSign size={14} /> PTU
+        </button>
       </div>
+
+      {/* Formulario */}
       <Card className="p-5">
         <h3 className="font-semibold mb-3 flex items-center gap-2">
-          <Bot size={16} className="text-violet-600" /> Chat con IA Fiscal
+          {simulador === 'isr' && <Calculator size={16} className="text-violet-600" />}
+          {simulador === 'iva' && <FileText size={16} className="text-violet-600" />}
+          {simulador === 'ptu' && <DollarSign size={16} className="text-violet-600" />}
+          Simulador de {simulador.toUpperCase()}
+          {statsData?.fiscal && (
+            <span className="ml-2 text-[10px] bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded">
+              ✓ Datos cargados del sistema
+            </span>
+          )}
         </h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          {simulador === 'isr' && 'Calcula el Impuesto Sobre la Renta para personas morales (30% sobre utilidad fiscal).'}
+          {simulador === 'iva' && 'Calcula el IVA por pagar o a favor (16% trasladado menos 16% acreditable).'}
+          {simulador === 'ptu' && 'Calcula la Participación de los Trabajadores en las Utilidades (10% de utilidad repartible).'}
+        </p>
+        <div className="grid md:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="text-xs font-semibold uppercase text-muted-foreground">
+              {simulador === 'iva' ? 'Ventas (base gravable)' : 'Ingresos acumulables'}
+            </label>
+            <Input
+              type="number"
+              value={ingresosInput}
+              onChange={e => setIngresosInput(e.target.value)}
+              placeholder="0"
+              className="mt-1 font-mono"
+            />
+            {statsData?.fiscal?.totalEmitido > 0 && (
+              <p className="text-[10px] text-emerald-600 mt-1">
+                Del sistema: {fmt(statsData.fiscal.totalEmitido)} ({statsData.fiscal.countEmitidas} facturas)
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="text-xs font-semibold uppercase text-muted-foreground">
+              {simulador === 'iva' ? 'Compras (base gravable)' : 'Deducciones autorizadas'}
+            </label>
+            <Input
+              type="number"
+              value={deduccionesInput}
+              onChange={e => setDeduccionesInput(e.target.value)}
+              placeholder="0"
+              className="mt-1 font-mono"
+            />
+            {statsData?.fiscal?.totalRecibido > 0 && (
+              <p className="text-[10px] text-orange-600 mt-1">
+                Del sistema: {fmt(statsData.fiscal.totalRecibido)} ({statsData.fiscal.countRecibidas} facturas)
+              </p>
+            )}
+          </div>
+        </div>
+        <Button onClick={calcular}>
+          <Sparkles size={14} className="mr-2" /> Calcular {simulador.toUpperCase()}
+        </Button>
+      </Card>
+
+      {/* Resultado */}
+      {resultado && (
+        <Card className="p-5 border-l-4 border-l-violet-500 animate-fade-in">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-600" /> {resultado.titulo}
+          </h3>
+          <div className="space-y-2">
+            {resultado.rows.map((r: any, i: number) => (
+              <div key={i} className={cn('flex justify-between items-center py-1.5 border-b last:border-0', r.bold && 'font-bold')}>
+                <span className="text-sm text-muted-foreground">{r.label}</span>
+                <span className={cn('text-sm font-mono', r.color)}>
+                  {r.value >= 0 ? fmt(r.value) : `(${fmt(Math.abs(r.value))})`}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-xs text-blue-700 dark:text-blue-300">
+            ℹ️ {resultado.info}
+          </div>
+        </Card>
+      )}
+
+      {/* Chat con IA Fiscal — ahora conecta a Abbax */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <Bot size={16} className="text-violet-600" /> Consulta fiscal con IA
+        </h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          ¿Tienes dudas sobre ISR, IVA, IMSS, nómina o cualquier ley fiscal? Consulta con Abbax (asistente con RAG de 9 leyes fiscales mexicanas).
+        </p>
         <div className="bg-muted/30 p-3 rounded-lg mb-3 text-sm">
-          <strong>IA:</strong> Hola, soy tu asistente fiscal. ¿En qué puedo ayudarte?
+          <strong>Abbax:</strong> Soy tu asistente fiscal. Tengo acceso al texto completo de las 9 leyes fiscales mexicanas (LISR, LIVA, CFF, LFT, LSS, LINFONAVIT, LFPDPPP, LGA, DOF). Puedo responder con el artículo exacto citado.
         </div>
         <div className="flex gap-2">
-          <Input placeholder="Escribe tu pregunta fiscal..." />
-          <Button>Enviar</Button>
+          <Input
+            placeholder="Ej: ¿Qué dice el artículo 27 de la LISR?"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
+                window.location.hash = 'abbax';
+                // Disparar evento para abrir Abbax
+                window.dispatchEvent(new CustomEvent('abrir-abbax', {
+                  detail: { pregunta: (e.target as HTMLInputElement).value }
+                }));
+                (e.target as HTMLInputElement).value = '';
+              }
+            }}
+          />
+          <Button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('abrir-abbax'));
+            }}
+          >
+            <Zap size={14} className="mr-2" /> Abrir Abbax
+          </Button>
         </div>
       </Card>
     </div>
@@ -1806,40 +2082,190 @@ function IaFiscalView() {
 }
 
 function TributarioView() {
+  const { empresa } = useEmpresa();
+  const { data, loading } = useApiData<any>(`/api/stats?empresaId=${empresa?.id || ''}`, undefined);
+  const hoy = new Date();
+  const mesActual = hoy.getMonth() + 1;
+  const anioActual = hoy.getFullYear();
+
+  if (loading) return <LoadingView message="Calculando obligaciones tributarias..." />;
+  if (!data) return <ErrorState message="No se pudieron cargar los datos tributarios" />;
+
+  // Calcular obligaciones reales basadas en los datos del sistema
+  const ivaPorPagar = data.fiscal?.ivaPorPagar || 0;
+  const totalEmitido = data.fiscal?.totalEmitido || 0;
+  const totalRecibido = data.fiscal?.totalRecibido || 0;
+  const utilidadBruta = data.fiscal?.utilidadBruta || 0;
+
+  // ISR estimado (30% para persona moral, ~25% efectivo para persona física con actividad empresarial)
+  const isrEstimado = utilidadBruta * 0.30;
+
+  // Calcular fechas de vencimiento
+  // IVA e ISR: día 17 del mes siguiente
+  // DIOT: último día del mes siguiente
+  const fechaIVA_ISR = new Date(anioActual, mesActual, 17);
+  const fechaDIOT = new Date(anioActual, mesActual + 1, 0); // último día del mes siguiente
+
+  // Generar obligaciones dinámicamente
   const obligaciones = [
-    { o: 'IVA mensual', p: 'Julio 2026', v: '17/08/2026', m: 36497, e: 'pendiente' },
-    { o: 'ISR mensual', p: 'Julio 2026', v: '17/08/2026', m: 40800, e: 'pendiente' },
-    { o: 'IVA mensual', p: 'Junio 2026', v: '17/07/2026', m: 8200, e: 'pagado' },
-    { o: 'ISR mensual', p: 'Junio 2026', v: '17/07/2026', m: 32100, e: 'pagado' },
-    { o: 'DIOT', p: 'Julio 2026', v: '31/07/2026', m: 0, e: 'urgente' },
+    {
+      o: 'IVA mensual',
+      p: `${MESES_NOMBRE[mesActual - 1]} ${anioActual}`,
+      v: fechaIVA_ISR.toLocaleDateString('es-MX'),
+      m: ivaPorPagar,
+      e: ivaPorPagar > 0 ? 'pendiente' : 'pagado',
+      dias: Math.ceil((fechaIVA_ISR.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24)),
+    },
+    {
+      o: 'ISR mensual (estimado)',
+      p: `${MESES_NOMBRE[mesActual - 1]} ${anioActual}`,
+      v: fechaIVA_ISR.toLocaleDateString('es-MX'),
+      m: isrEstimado,
+      e: isrEstimado > 0 ? 'pendiente' : 'pagado',
+      dias: Math.ceil((fechaIVA_ISR.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24)),
+    },
+    {
+      o: 'DIOT',
+      p: `${MESES_NOMBRE[mesActual - 1]} ${anioActual}`,
+      v: fechaDIOT.toLocaleDateString('es-MX'),
+      m: 0,
+      e: 'urgente',
+      dias: Math.ceil((fechaDIOT.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24)),
+    },
+    {
+      o: 'Nómina (IMSS + INFONAVIT)',
+      p: `${MESES_NOMBRE[mesActual - 1]} ${anioActual}`,
+      v: new Date(anioActual, mesActual, 20).toLocaleDateString('es-MX'),
+      m: (data.catalogos?.empleados || 0) * 1500, // Estimación: $1500 por empleado
+      e: 'pendiente',
+      dias: Math.ceil((new Date(anioActual, mesActual, 20).getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24)),
+    },
   ];
+
+  // Calcular alertas
+  const alertas: any[] = [];
+  if (ivaPorPagar > 0) {
+    alertas.push({
+      nivel: 'warning',
+      titulo: 'IVA por pagar',
+      desc: `Tienes ${fmt(ivaPorPagar)} de IVA por pagar del mes actual. Vence el ${fechaIVA_ISR.toLocaleDateString('es-MX')}.`,
+    });
+  }
+  if (isrEstimado > 0) {
+    alertas.push({
+      nivel: 'warning',
+      titulo: 'ISR estimado',
+      desc: `ISR mensual estimado: ${fmt(isrEstimado)} (30% de utilidad bruta ${fmt(utilidadBruta)}).`,
+    });
+  }
+
+  const totalPendiente = obligaciones.reduce((s: number, o: any) => s + (o.e !== 'pagado' ? o.m : 0), 0);
+
   return (
-    <DataTableCard title="Calendario tributario">
-      <table className="w-full text-sm">
-        <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-          <th className="px-4 py-2">Obligación</th><th className="px-4 py-2">Periodo</th>
-          <th className="px-4 py-2">Vencimiento</th><th className="px-4 py-2 text-right">Monto</th>
-          <th className="px-4 py-2">Estado</th>
-        </tr></thead>
-        <tbody>
-          {obligaciones.map((o, i) => (
-            <tr key={i} className="border-b hover:bg-muted/30">
-              <td className="px-4 py-2 font-medium">{o.o}</td>
-              <td className="px-4 py-2">{o.p}</td>
-              <td className="px-4 py-2">{o.v}</td>
-              <td className="px-4 py-2 text-right font-semibold">{o.m > 0 ? fmt(o.m) : '—'}</td>
-              <td className="px-4 py-2">
-                <Badge variant={o.e === 'pagado' ? 'default' : o.e === 'urgente' ? 'destructive' : 'secondary'}>
-                  {o.e}
-                </Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </DataTableCard>
+    <div className="space-y-4 animate-fade-in">
+      {/* KPIs tributarios */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">IVA por pagar</div>
+          <div className={cn('text-xl font-bold', ivaPorPagar > 0 ? 'text-red-600' : 'text-emerald-600')}>{fmt(ivaPorPagar)}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-amber-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">ISR estimado (30%)</div>
+          <div className="text-xl font-bold text-amber-600">{fmt(isrEstimado)}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Utilidad bruta</div>
+          <div className={cn('text-xl font-bold', utilidadBruta >= 0 ? 'text-emerald-600' : 'text-red-600')}>{fmt(utilidadBruta)}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-red-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total pendiente</div>
+          <div className="text-xl font-bold text-red-600">{fmt(totalPendiente)}</div>
+        </Card>
+      </div>
+
+      {/* Alertas */}
+      {alertas.length > 0 && (
+        <Card className="p-4 bg-amber-50/50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800">
+          <h3 className="font-semibold mb-2 flex items-center gap-2 text-sm">
+            <AlertTriangle size={14} className="text-amber-500" /> Alertas tributarias
+          </h3>
+          <div className="space-y-1">
+            {alertas.map((a, i) => (
+              <div key={i} className="text-xs text-amber-700 dark:text-amber-300">
+                <strong>{a.titulo}:</strong> {a.desc}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Calendario */}
+      <DataTableCard title={`Calendario tributario — ${MESES_NOMBRE[mesActual - 1]} ${anioActual}`}>
+        <table className="w-full text-sm">
+          <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
+            <th className="px-4 py-2">Obligación</th>
+            <th className="px-4 py-2">Periodo</th>
+            <th className="px-4 py-2">Vencimiento</th>
+            <th className="px-4 py-2">Días restantes</th>
+            <th className="px-4 py-2 text-right">Monto estimado</th>
+            <th className="px-4 py-2">Estado</th>
+          </tr></thead>
+          <tbody>
+            {obligaciones.map((o: any, i: number) => (
+              <tr key={i} className="border-b hover:bg-muted/30">
+                <td className="px-4 py-2 font-medium">{o.o}</td>
+                <td className="px-4 py-2">{o.p}</td>
+                <td className="px-4 py-2">{o.v}</td>
+                <td className="px-4 py-2">
+                  <span className={cn(
+                    'text-xs font-semibold px-2 py-0.5 rounded',
+                    o.dias < 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' :
+                    o.dias <= 7 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
+                    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                  )}>
+                    {o.dias < 0 ? `Vencido ${Math.abs(o.dias)}d` : `${o.dias}d`}
+                  </span>
+                </td>
+                <td className="px-4 py-2 text-right font-semibold">{o.m > 0 ? fmt(o.m) : '—'}</td>
+                <td className="px-4 py-2">
+                  <Badge variant={o.e === 'pagado' ? 'default' : o.e === 'urgente' ? 'destructive' : 'secondary'}>
+                    {o.e}
+                  </Badge>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </DataTableCard>
+
+      {/* Resumen fiscal del mes */}
+      <Card className="p-5 bg-violet-50/30 dark:bg-violet-900/10">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <Calculator size={16} className="text-violet-600" /> Resumen fiscal del mes
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground">Facturas emitidas</div>
+            <div className="font-bold text-emerald-600">{fmt(totalEmitido)}</div>
+            <div className="text-[10px] text-muted-foreground">{data.fiscal?.countEmitidas || 0} factura(s)</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground">Facturas recibidas</div>
+            <div className="font-bold text-orange-600">{fmt(totalRecibido)}</div>
+            <div className="text-[10px] text-muted-foreground">{data.fiscal?.countRecibidas || 0} factura(s)</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground">IVA traslado</div>
+            <div className="font-bold text-violet-600">{fmt(data.fiscal?.ivaEmitido || 0)}</div>
+            <div className="text-[10px] text-muted-foreground">IVA acreditable: {fmt(data.fiscal?.ivaRecibido || 0)}</div>
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }
+
+const MESES_NOMBRE = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 function FinanzasView({ stats }: { stats: Stats | null }) {
   const { empresa } = useEmpresa();
@@ -1933,96 +2359,6 @@ function FinanzasView({ stats }: { stats: Stats | null }) {
           <div className="text-xl font-bold text-red-600">{fmt(ind.ivaPorPagar)}</div>
         </Card>
       </div>
-
-      {/* KPIs Profesionales (business-analyst) */}
-      {data.kpis && (
-        <Card className="p-5 border-l-4 border-l-violet-500">
-          <h3 className="font-semibold mb-3 flex items-center gap-2">
-            <Sparkles size={16} className="text-violet-600" /> KPIs Profesionales (Business Intelligence)
-          </h3>
-
-          {/* Unit Economics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="border rounded-lg p-3 bg-violet-50/30 dark:bg-violet-900/10">
-              <div className="text-[10px] uppercase text-muted-foreground">Ticket Promedio</div>
-              <div className="text-lg font-bold text-violet-600">{fmt(data.kpis.ticketPromedio)}</div>
-              <div className="text-[10px] text-muted-foreground">Por factura emitida</div>
-            </div>
-            <div className="border rounded-lg p-3 bg-emerald-50/30 dark:bg-emerald-900/10">
-              <div className="text-[10px] uppercase text-muted-foreground">Revenue/Empleado</div>
-              <div className="text-lg font-bold text-emerald-600">{fmt(data.kpis.revenuePerEmployee)}</div>
-              <div className="text-[10px] text-muted-foreground">Productividad anual</div>
-            </div>
-            <div className="border rounded-lg p-3 bg-orange-50/30 dark:bg-orange-900/10">
-              <div className="text-[10px] uppercase text-muted-foreground">Costo/Empleado</div>
-              <div className="text-lg font-bold text-orange-600">{fmt(data.kpis.costoPorEmpleado)}</div>
-              <div className="text-[10px] text-muted-foreground">Gastos + nómina</div>
-            </div>
-            <div className="border rounded-lg p-3 bg-blue-50/30 dark:bg-blue-900/10">
-              <div className="text-[10px] uppercase text-muted-foreground">Margen Contribución</div>
-              <div className={cn('text-lg font-bold', data.kpis.margenContribucion >= 0 ? 'text-blue-600' : 'text-red-600')}>
-                {fmt(data.kpis.margenContribucion)}
-              </div>
-              <div className="text-[10px] text-muted-foreground">{data.kpis.margenContribucionPorcentaje?.toFixed(1)}% del revenue</div>
-            </div>
-          </div>
-
-          {/* Punto Equilibrio + Burn Rate + LTV/CAC */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="border rounded-lg p-3">
-              <div className="text-[10px] uppercase text-muted-foreground">Punto de Equilibrio</div>
-              <div className="text-lg font-bold text-amber-600">{fmt(data.kpis.puntoEquilibrio)}</div>
-              <div className={cn('text-[10px]', data.kpis.distanciaEquilibrio >= 0 ? 'text-emerald-600' : 'text-red-600')}>
-                {data.kpis.distanciaEquilibrio >= 0 ? '✅' : '⚠️'} {data.kpis.revenueSobrePuntoEquilibrio?.toFixed(0)}% del objetivo
-              </div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-[10px] uppercase text-muted-foreground">Burn Rate Mensual</div>
-              <div className="text-lg font-bold text-red-600">{fmt(data.kpis.burnRateMensual)}</div>
-              <div className="text-[10px] text-muted-foreground">Salida de efectivo</div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-[10px] uppercase text-muted-foreground">Runway</div>
-              <div className={cn('text-lg font-bold', data.kpis.runwayMeses >= 6 ? 'text-emerald-600' : data.kpis.runwayMeses >= 3 ? 'text-amber-600' : 'text-red-600')}>
-                {data.kpis.runwayMeses?.toFixed(1)} meses
-              </div>
-              <div className="text-[10px] text-muted-foreground">Meses de operación</div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-[10px] uppercase text-muted-foreground">LTV / CAC</div>
-              <div className={cn('text-lg font-bold', data.kpis.ratioLtvCac >= 3 ? 'text-emerald-600' : data.kpis.ratioLtvCac >= 1 ? 'text-amber-600' : 'text-red-600')}>
-                {data.kpis.ratioLtvCac?.toFixed(1)}x
-              </div>
-              <div className="text-[10px] text-muted-foreground">Ideal &gt;3x</div>
-            </div>
-          </div>
-
-          {/* Forecasting + Top Clientes */}
-          <div className="grid md:grid-cols-2 gap-3">
-            <div className="border rounded-lg p-3">
-              <div className="text-[10px] uppercase text-muted-foreground mb-2">📈 Forecasting Fin de Año</div>
-              <div className="text-2xl font-bold text-violet-600">{fmt(data.kpis.proyeccionFinAnio)}</div>
-              <div className="text-[10px] text-muted-foreground">
-                Crecimiento estimado: +{data.kpis.crecimientoEstimado?.toFixed(1)}% vs actual ({fmt(ind.totalEmitido)})
-              </div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-[10px] uppercase text-muted-foreground mb-2">👥 Top 5 Clientes (Cohort)</div>
-              <div className="space-y-1">
-                {data.kpis.topClientes?.slice(0, 5).map((c: any, i: number) => (
-                  <div key={i} className="flex justify-between text-xs">
-                    <span className="truncate flex-1">{i + 1}. {c.rfc}</span>
-                    <span className="font-mono font-semibold ml-2">{fmt(c.totalFacturado)}</span>
-                  </div>
-                ))}
-                {(!data.kpis.topClientes || data.kpis.topClientes.length === 0) && (
-                  <div className="text-xs text-muted-foreground">Sin datos</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
 
       {/* Razones financieras */}
       <Card className="p-5">
@@ -2344,21 +2680,16 @@ function ReportesView({ stats }: { stats: Stats | null }) {
             </p>
             <Button
               onClick={() => {
-                if (!empresa?.id) {
-                  toast.error('Sin empresa seleccionada', 'Selecciona una empresa en el topbar');
-                  return;
-                }
                 const hoy = new Date();
                 const params = new URLSearchParams({
                   mes: String(hoy.getMonth() + 1),
                   anio: String(hoy.getFullYear()),
-                  empresaId: empresa.id,
                 });
+                if (empresa?.id) params.set('empresaId', empresa.id);
                 window.open(`/api/export/facturas?${params}`, '_blank');
               }}
             >
               <FileSpreadsheet size={14} className="mr-2" /> Descargar Excel Facturas
-              {empresa?.nombre && <span className="ml-2 text-[10px] bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 rounded">{empresa.nombre}</span>}
             </Button>
           </div>
 
@@ -2372,21 +2703,16 @@ function ReportesView({ stats }: { stats: Stats | null }) {
             <Button
               variant="secondary"
               onClick={() => {
-                if (!empresa?.id) {
-                  toast.error('Sin empresa seleccionada', 'Selecciona una empresa en el topbar');
-                  return;
-                }
                 const hoy = new Date();
                 const params = new URLSearchParams({
                   mes: String(hoy.getMonth() + 1),
                   anio: String(hoy.getFullYear()),
-                  empresaId: empresa.id,
                 });
+                if (empresa?.id) params.set('empresaId', empresa.id);
                 window.open(`/api/export/nomina?${params}`, '_blank');
               }}
             >
               <FileSpreadsheet size={14} className="mr-2" /> Descargar Excel Nómina
-              {empresa?.nombre && <span className="ml-2 text-[10px] bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 rounded">{empresa.nombre}</span>}
             </Button>
           </div>
         </div>
@@ -2412,24 +2738,12 @@ function ReportesView({ stats }: { stats: Stats | null }) {
             </p>
             <Button
               onClick={() => {
-                if (!empresa?.id) {
-                  toast.error('Sin empresa seleccionada', 'Selecciona una empresa en el topbar antes de descargar');
-                  return;
-                }
-                const params = new URLSearchParams({
-                  anio: String(new Date().getFullYear()),
-                  empresaId: empresa.id,
-                });
-                toast.info('Generando concentrado...', `Empresa: ${empresa.nombre}`);
+                const params = new URLSearchParams({ anio: String(new Date().getFullYear()) });
+                if (empresa?.id) params.set('empresaId', empresa.id);
                 window.open(`/api/export/concentrado?${params}`, '_blank');
               }}
             >
               <FileSpreadsheet size={14} className="mr-2" /> Descargar Concentrado
-              {empresa?.nombre && (
-                <span className="ml-2 text-[10px] bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 rounded">
-                  {empresa.nombre}
-                </span>
-              )}
             </Button>
           </div>
 
@@ -2978,7 +3292,7 @@ function BalanceView() {
 // ====================== EMPRESAS VIEW (con alta + constancia fiscal) ======================
 function EmpresasView() {
   const { data, loading, refresh } = useApiData<{ empresas: any[] }>('/api/empresas');
-  const { empresa, setEmpresa, cargarEmpresas } = useEmpresa();
+  const { empresa, setEmpresa } = useEmpresa();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ nombre: '', rfc: '', regimenFiscal: '', email: '', telefono: '', direccion: '' });
   const [error, setError] = useState('');
@@ -3128,12 +3442,6 @@ function EmpresasView() {
         setDatosConstancia(null);
         setMsgConstancia('');
         refresh();
-        // Recargar la lista de empresas del selector del topbar
-        await cargarEmpresas();
-        // Si es la primera empresa, seleccionarla automáticamente
-        if (!empresa && d.id) {
-          setEmpresa({ id: d.id, nombre: d.nombre, rfc: d.rfc });
-        }
       }
     } catch (e: any) {
       setError(e.message);

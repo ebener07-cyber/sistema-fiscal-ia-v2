@@ -50,11 +50,6 @@ const COLORES = {
   nomina: 'FF3B82F6',  // blue
   total: 'FFEDE9FE',   // violet light
   concentrado: 'FF6366F1', // indigo
-  // Estándares financieros Anthropic
-  input: 'FF0000FF',     // Azul — inputs hardcoded
-  formula: 'FF000000',   // Negro — fórmulas y cálculos
-  link: 'FF008000',      // Verde — links a otras hojas
-  warning: 'FFFFFF00',   // Amarillo background — requiere atención
 };
 
 // Borde delgado para todas las celdas del Concentrado
@@ -67,38 +62,15 @@ function thinBorder() {
   };
 }
 
-// Formato financiero profesional Anthropic:
-// - Ceros como "-" en vez de "$0.00"
-// - Negativos con paréntesis (123) en vez de -123
-// - Símbolo $ y separadores de miles
-const FMT_MONEDA = '"$"#,##0.00;("$"#,##0.00);"-"';
-const FMT_MONEDA_DECIMAL = '"$"#,##0.00;("$"#,##0.00);"-"';
-const FMT_PORCENTAJE = '0.0%;(0.0%);"-"';
-const FMT_NUMERO = '#,##0;(#,##0);"-"';
-
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const hoy = new Date();
     const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
-    const empresaId = searchParams.get('empresaId');
-
-    // ===== VALIDAR que empresaId esté presente =====
-    if (!empresaId) {
-      return NextResponse.json(
-        { error: 'Falta empresaId. Selecciona una empresa antes de descargar el concentrado.' },
-        { status: 400 }
-      );
-    }
+    const empresaId = searchParams.get('empresaId') || undefined;
 
     // ===== Obtener empresa =====
-    const empresa = await db.empresa.findUnique({ where: { id: empresaId } });
-    if (!empresa) {
-      return NextResponse.json(
-        { error: 'Empresa no encontrada' },
-        { status: 404 }
-      );
-    }
+    const empresa = empresaId ? await db.empresa.findUnique({ where: { id: empresaId } }) : null;
 
     // ===== Obtener TODAS las facturas del año (excluyendo canceladas y tipo P=Pago) =====
     const inicioAnio = new Date(anio, 0, 1);
@@ -106,7 +78,7 @@ export async function GET(req: NextRequest) {
 
     const facturas = await db.factura.findMany({
       where: {
-        empresaId,
+        ...(empresaId ? { empresaId } : {}),
         fecha: { gte: inicioAnio, lte: finAnio },
         estado: { not: 'cancelada' },
         tipoComprobante: { in: ['I', 'E'] }, // Ingreso y Nota de crédito (NO Pago, NO Nómina)
@@ -117,7 +89,7 @@ export async function GET(req: NextRequest) {
     // ===== Obtener nómina del año =====
     const nominas = await db.reciboNomina.findMany({
       where: {
-        empresaId,
+        ...(empresaId ? { empresaId } : {}),
         fecha: { gte: inicioAnio, lte: finAnio },
       },
       include: { empleado: true },
@@ -361,7 +333,7 @@ export async function GET(req: NextRequest) {
         row.getCell(11).numFmt = 'DD/MM/YYYY';
         // Formato moneda
         [12, 13, 14, 16, 18].forEach(col => {
-          row.getCell(col).numFmt = FMT_MONEDA;
+          row.getCell(col).numFmt = '"$"#,##0.00';
         });
         // UUID en monoespacio
         row.getCell(19).font = { name: 'Consolas', size: 9 };
@@ -404,7 +376,7 @@ export async function GET(req: NextRequest) {
       filaTotales.font = { bold: true, color: { argb: 'FF7C3AED' } };
       filaTotales.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.total } };
       [12, 13, 14, 16, 18].forEach(col => {
-        filaTotales.getCell(col).numFmt = FMT_MONEDA;
+        filaTotales.getCell(col).numFmt = '"$"#,##0.00';
       });
 
       // Freeze panes (primera fila + primeras 2 columnas)
@@ -532,7 +504,7 @@ export async function GET(req: NextRequest) {
       // Formato moneda en todas las columnas numéricas
       ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].forEach(col => {
         const cell = wsConc.getCell(`${col}${rowIdx}`);
-        cell.numFmt = FMT_MONEDA;
+        cell.numFmt = '"$"#,##0.00';
         cell.border = thinBorder();
       });
 
@@ -577,7 +549,7 @@ export async function GET(req: NextRequest) {
       cell.border = thinBorder();
     }
     ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].forEach(col => {
-      wsConc.getCell(`${col}${rowIdx}`).numFmt = FMT_MONEDA;
+      wsConc.getCell(`${col}${rowIdx}`).numFmt = '"$"#,##0.00';
     });
 
     // ===== Hoja NOMINA =====
@@ -631,7 +603,7 @@ export async function GET(req: NextRequest) {
       });
       row.getCell(9).numFmt = 'DD/MM/YYYY';
       [10, 11, 12, 13, 14, 15, 16].forEach(col => {
-        row.getCell(col).numFmt = FMT_MONEDA;
+        row.getCell(col).numFmt = '"$"#,##0.00';
       });
       row.getCell(1).font = { name: 'Consolas', size: 9 };
       row.getCell(17).font = { name: 'Consolas', size: 9 };
@@ -661,7 +633,7 @@ export async function GET(req: NextRequest) {
     filaTotalNom.font = { bold: true, color: { argb: COLORES.nomina } };
     filaTotalNom.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
     [10, 11, 12, 13, 14, 15, 16].forEach(col => {
-      filaTotalNom.getCell(col).numFmt = FMT_MONEDA;
+      filaTotalNom.getCell(col).numFmt = '"$"#,##0.00';
     });
 
     wsNom.views = [{ freeze: 'A2', showGridLines: false }];

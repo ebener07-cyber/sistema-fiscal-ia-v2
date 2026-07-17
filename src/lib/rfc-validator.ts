@@ -35,23 +35,11 @@ export interface ResultadoRFC {
 }
 
 function extraerFechaRFC(rfc: string): { fecha: Date | null; mensaje: string } {
-  // Persona física (13 chars): 4 letras + 6 dígitos (fecha AA MM DD) + 3 homoclave
-  //   Ejemplo: GOMP850415AB1 → letras=GOMP, fecha=850415 (1985-04-15), homo=AB1
-  // Persona moral (12 chars): 3 letras + 6 dígitos (fecha AA MM DD) + 3 homoclave
-  //   Ejemplo: ELE210615XXX → letras=ELE, fecha=210615 (2021-06-15), homo=XXX
-  const offset = rfc.length === 13 ? 4 : 3;
-  const anioStr = rfc.substring(offset, offset + 2);
-  const mesStr = rfc.substring(offset + 2, offset + 4);
-  const diaStr = rfc.substring(offset + 4, offset + 6);
-
-  // Verificar que sean dígitos (puede venir basura si el RFC es inválido)
-  if (!/^\d{2}$/.test(anioStr) || !/^\d{2}$/.test(mesStr) || !/^\d{2}$/.test(diaStr)) {
-    return { fecha: null, mensaje: `Caracteres no numéricos en la fecha del RFC (${anioStr}${mesStr}${diaStr})` };
-  }
-
-  const anio = parseInt(anioStr);
-  const mes = parseInt(mesStr);
-  const dia = parseInt(diaStr);
+  // La fecha está en las posiciones 3-9 (persona física) o 2-8 (moral)
+  const offset = rfc.length === 13 ? 3 : 2;
+  const anio = parseInt(rfc.substring(offset, offset + 2));
+  const mes = parseInt(rfc.substring(offset + 2, offset + 4));
+  const dia = parseInt(rfc.substring(offset + 4, offset + 6));
 
   // Convertir año de 2 dígitos a 4
   const anioCompleto = anio < 30 ? 2000 + anio : 1900 + anio;

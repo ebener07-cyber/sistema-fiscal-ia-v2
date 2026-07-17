@@ -28,8 +28,6 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
   const [empresa, setEmpresaState] = useState<EmpresaActiva | null>(null);
   const [empresas, setEmpresas] = useState<EmpresaActiva[]>([]);
   const [loading, setLoading] = useState(true);
-  // Versión para forzar re-render cuando cambia la empresa (las vistas dependen de esto)
-  const [version, setVersion] = useState(0);
 
   const cargarEmpresas = useCallback(async () => {
     try {
@@ -72,7 +70,6 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
 
   const setEmpresa = useCallback((e: EmpresaActiva | null) => {
     setEmpresaState(e);
-    setVersion(v => v + 1); // Forzar re-render de las vistas que dependen de empresa
     try {
       if (e) {
         localStorage.setItem('empresa-activa', JSON.stringify(e));
@@ -83,7 +80,7 @@ export function EmpresaProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <EmpresaContext.Provider value={{ empresa, empresas, setEmpresa, cargarEmpresas, loading, version }}>
+    <EmpresaContext.Provider value={{ empresa, empresas, setEmpresa, cargarEmpresas, loading }}>
       {children}
     </EmpresaContext.Provider>
   );

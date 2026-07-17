@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: archify/package-lock.json
+      - name: Install renderer dependencies
+        run: npm ci
+        working-directory: archify
+      - name: Tests must pass before releasing
+        run: npm test
+        working-directory: archify
+      - name: Tag must match package.json version
+        run: |
+          pkg_version="$(node -p "require('./archify/package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg_version" != "$tag" ]; then
+            echo "::error::tag v$tag does not match archify/package.json version $pkg_version"
+            exit 1
+          fi
+      - name: Build skill archive
+        run: scripts/build-zip.sh
+      - name: Committed zip must match the build (same gate as CI)
+        run: |
+          mkdir /tmp/fresh /tmp/checked
+          unzip -q archify.zip -d /tmp/fresh
+          git checkout HEAD -- archify.zip
+          unzip -q archify.zip -d /tmp/checked
+          diff -r /tmp/fresh/archify /tmp/checked/archify
+      - name: Create GitHub Release with the zip attached
+        uses: softprops/action-gh-release@v2
+        with:
+          files: archify.zip
+          generate_release_notes: true
