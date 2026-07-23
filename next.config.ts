@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  serverExternalPackages: ['canvas', 'pdfjs-dist'],
+  serverExternalPackages: ['canvas', 'pdfjs-dist', 'pdf-parse'],
 };
 
 export default nextConfig;

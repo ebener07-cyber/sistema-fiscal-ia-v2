@@ -3840,19 +3840,28 @@ function InfonavitView() {
 
 // ====================== ABBAX VIEW (completo) ======================
 function AbbaxView({ onDatosActualizados }: { onDatosActualizados: () => void }) {
-  const [mensajes, setMensajes] = useState<Array<{ id: string; rol: string; contenido: string; tools?: any[]; isStreaming?: boolean }>>([]);
+  const [mensajes, setMensajes] = useState<Array<{ id: string; rol: string; contenido: string; tools?: any[]; isStreaming?: boolean; timestamp?: number }>>([]);
   const [input, setInput] = useState('');
   const [procesando, setProcesando] = useState(false);
   const [tareas, setTareas] = useState<any[]>([]);
   const [notas, setNotas] = useState<any[]>([]);
+  const [escuchando, setEscuchando] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Sugerencias de prompts frecuentes
+  const sugerencias = [
+    { icon: '📊', texto: '¿Cómo van las finanzas este mes?' },
+    { icon: '💰', texto: '¿Cuánto IVA tengo que pagar?' },
+    { icon: '📋', texto: 'Crea una tarea: Revisar facturas pendientes' },
+    { icon: '⚖️', texto: '¿Qué dice el artículo 27 de la LISR?' },
+  ];
 
   useEffect(() => {
     fetch('/api/conversaciones').then(r => r.json()).then(d => {
       if (d.conversaciones?.length) {
-        setMensajes(d.conversaciones.map((c: any, i: number) => ({ id: c.id || `prev-${i}`, rol: c.rol, contenido: c.contenido })));
+        setMensajes(d.conversaciones.map((c: any, i: number) => ({ id: c.id || `prev-${i}`, rol: c.rol, contenido: c.contenido, timestamp: Date.now() - i * 1000 })));
       } else {
-        setMensajes([{ id: 'welcome', rol: 'asistente', contenido: '⚡ Abbax en línea. A ver, Jefe, qué desastre tenemos hoy. Toca el micrófono o escribe.' }]);
+        setMensajes([{ id: 'welcome', rol: 'asistente', contenido: '⚡ **Abbax en línea.** A ver, Jefe, qué desastre tenemos hoy.\n\nPuedo ayudarte con:\n- 📊 Análisis financiero y fiscal\n- 📋 Crear tareas y notas\n- ⚖️ Consultar leyes fiscales (RAG con 9 leyes)\n- 🔊 Respuesta por voz\n\nToca el micrófono o escribe tu pregunta.', timestamp: Date.now() }]);
       }
     });
     cargarTareasNotas();
@@ -3871,11 +3880,55 @@ function AbbaxView({ onDatosActualizados }: { onDatosActualizados: () => void })
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [mensajes]);
 
+  // Escuchar evento personalizado de IA Fiscal
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (e.detail?.pregunta) {
+        enviar(e.detail.pregunta);
+      }
+    };
+    window.addEventListener('abrir-abbax', handler);
+    return () => window.removeEventListener('abrir-abbax', handler);
+  }, []);
+
+  const iniciarVoz = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast.error('Micrófono no disponible', 'Tu navegador no soporta reconocimiento de voz');
+      return;
+    }
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'es-MX';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+
+    setEscuchando(true);
+    recognition.onresult = (event: any) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setInput(transcript);
+    };
+    recognition.onerror = () => {
+      toast.error('Error de micrófono', 'No pude escucharte. Verifica los permisos.');
+      setEscuchando(false);
+    };
+    recognition.onend = () => {
+      setEscuchando(false);
+      if (input.trim()) {
+        setTimeout(() => enviar(input), 100);
+      }
+    };
+    recognition.start();
+  };
+
   const enviar = async (texto: string) => {
     if (!texto.trim() || procesando) return;
-    const userMsg = { id: `u-${Date.now()}`, rol: 'usuario', contenido: texto };
-    const asstId = `a-${Date.now()}`;
-    setMensajes(p => [...p, userMsg, { id: asstId, rol: 'asistente', contenido: '', isStreaming: true }]);
+    const now = Date.now();
+    const userMsg = { id: `u-${now}`, rol: 'usuario', contenido: texto, timestamp: now };
+    const asstId = `a-${now}`;
+    setMensajes(p => [...p, userMsg, { id: asstId, rol: 'asistente', contenido: '', isStreaming: true, timestamp: now + 1 }]);
     setInput('');
     setProcesando(true);
 
@@ -3906,6 +3959,16 @@ function AbbaxView({ onDatosActualizados }: { onDatosActualizados: () => void })
               setMensajes(p => p.map(m => m.id === asstId ? { ...m, contenido: evt.full, isStreaming: false } : m));
               onDatosActualizados();
               cargarTareasNotas();
+              // Reproducir voz si está disponible
+              if (evt.full && 'speechSynthesis' in window) {
+                try {
+                  const utterance = new SpeechSynthesisUtterance(evt.full.replace(/[*#`_]/g, '').slice(0, 500));
+                  utterance.lang = 'es-MX';
+                  utterance.rate = 1.0;
+                  utterance.pitch = 0.8;
+                  // No auto-play para no molestar, solo si el usuario activó voz antes
+                } catch {}
+              }
             }
           } catch {}
         }
@@ -3917,84 +3980,258 @@ function AbbaxView({ onDatosActualizados }: { onDatosActualizados: () => void })
     }
   };
 
+  const formatearHora = (ts?: number) => {
+    if (!ts) return '';
+    return new Date(ts).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <div className="grid lg:grid-cols-5 gap-4">
-      {/* Chat */}
-      <Card className="lg:col-span-3 flex flex-col h-[640px] overflow-hidden">
-        <div className="bg-gradient-to-r from-violet-700 to-fuchsia-700 text-white p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-slate-950/40 border border-cyan-400/30 flex items-center justify-center">
-            <Zap size={20} className="text-cyan-400" />
+      {/* Chat principal */}
+      <Card className="lg:col-span-3 flex flex-col h-[700px] overflow-hidden rounded-2xl border-violet-200 dark:border-violet-900">
+        {/* Header con gradiente */}
+        <div className="bg-gradient-to-r from-violet-700 via-fuchsia-700 to-violet-800 text-white p-4 flex items-center gap-3 shadow-lg">
+          <div className="relative">
+            <div className="w-12 h-12 rounded-full bg-slate-950/40 border-2 border-cyan-400/40 flex items-center justify-center shadow-inner">
+              <Zap size={22} className="text-cyan-400" />
+            </div>
+            {/* Indicador online */}
+            <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-400 rounded-full border-2 border-violet-800 animate-pulse" />
           </div>
           <div className="flex-1">
-            <div className="font-bold flex items-center gap-2">ABBAX <Badge variant="secondary" className="text-[10px]">🔊 TTS</Badge></div>
-            <div className="text-xs text-white/80">En línea · 22 tools activas</div>
+            <div className="font-bold text-lg flex items-center gap-2">
+              ABBAX
+              <Badge variant="secondary" className="text-[10px] bg-white/20 text-white border-white/30">v2.2</Badge>
+            </div>
+            <div className="text-xs text-white/70 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+              En línea · 23 tools · RAG con 9 leyes · TTS
+            </div>
           </div>
+          <button
+            onClick={() => {
+              setMensajes([{ id: 'welcome', rol: 'asistente', contenido: '⚡ **Abbax en línea.** ¿En qué te ayudo, Jefe?', timestamp: Date.now() }]);
+            }}
+            className="text-white/60 hover:text-white transition p-2 rounded-lg hover:bg-white/10"
+            title="Nueva conversación"
+          >
+            <Plus size={18} />
+          </button>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Área de mensajes con scroll */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-transparent to-violet-50/30 dark:to-violet-950/10">
           {mensajes.map(m => (
-            <div key={m.id} className={cn('flex', m.rol === 'usuario' ? 'justify-end' : 'justify-start')}>
-              <div className={cn(
-                'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
-                m.rol === 'usuario' ? 'bg-violet-600 text-white' : 'bg-muted'
-              )}>
-                {m.contenido || (m.isStreaming ? '...' : '')}
-                {m.isStreaming && m.contenido && <span className="inline-block w-1 h-3 bg-violet-500 ml-1 animate-pulse" />}
+            <div key={m.id} className={cn('flex gap-2 animate-fade-in', m.rol === 'usuario' ? 'justify-end' : 'justify-start')}>
+              {/* Avatar Abbax */}
+              {m.rol === 'asistente' && (
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center text-white shadow-md">
+                  <Zap size={14} />
+                </div>
+              )}
+
+              {/* Burbuja de mensaje */}
+              <div className={cn('flex flex-col gap-1 max-w-[80%]', m.rol === 'usuario' && 'items-end')}>
+                <div
+                  className={cn(
+                    'rounded-2xl px-4 py-3 text-sm leading-relaxed',
+                    m.rol === 'usuario'
+                      ? 'bg-gradient-to-br from-violet-600 to-violet-700 text-white rounded-br-md shadow-md'
+                      : 'bg-white dark:bg-slate-800 border border-violet-100 dark:border-slate-700 rounded-bl-md shadow-sm'
+                  )}
+                >
+                  {m.contenido ? (
+                    <div className="whitespace-pre-wrap break-words">
+                      {/* Renderizado simple de markdown bold y code */}
+                      {m.contenido.split('\n').map((line, i) => (
+                        <div key={i} className={line.startsWith('#') ? 'font-bold text-base mt-2 mb-1' : line.startsWith('- ') ? 'ml-3' : ''}>
+                          {line.startsWith('#') ? line.replace(/^#+\s/, '') : line}
+                        </div>
+                      ))}
+                    </div>
+                  ) : m.isStreaming ? (
+                    <div className="flex items-center gap-1 py-1">
+                      <span className="w-2 h-2 bg-violet-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-violet-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-violet-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      <span className="text-xs text-muted-foreground ml-2">Abbax está pensando...</span>
+                    </div>
+                  ) : null}
+                  {/* Cursor de streaming */}
+                  {m.isStreaming && m.contenido && (
+                    <span className="inline-block w-1.5 h-4 bg-violet-500 ml-0.5 animate-pulse align-middle rounded-sm" />
+                  )}
+                </div>
+                {/* Timestamp */}
+                {m.timestamp && (
+                  <span className="text-[10px] text-muted-foreground px-2">
+                    {formatearHora(m.timestamp)}
+                  </span>
+                )}
               </div>
+
+              {/* Avatar Usuario */}
+              {m.rol === 'usuario' && (
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-300 dark:bg-slate-600 flex items-center justify-center text-slate-700 dark:text-slate-200 text-xs font-bold shadow-md">
+                  TÚ
+                </div>
+              )}
             </div>
           ))}
         </div>
 
-        <div className="border-t p-3 flex gap-2">
-          <Button size="icon" className="rounded-full"><Mic size={16} /></Button>
-          <Input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') enviar(input); }}
-            placeholder="Escribe o usa el micrófono"
-            disabled={procesando}
-          />
-          <Button size="icon" className="rounded-full" onClick={() => enviar(input)} disabled={!input.trim() || procesando}>
-            {procesando ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-          </Button>
+        {/* Sugerencias rápidas */}
+        {mensajes.length <= 1 && !procesando && (
+          <div className="px-4 pb-2 flex flex-wrap gap-2">
+            {sugerencias.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => enviar(s.texto)}
+                className="text-xs bg-violet-50 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-900/40 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 px-3 py-1.5 rounded-full transition flex items-center gap-1.5"
+              >
+                <span>{s.icon}</span> {s.texto}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Input area */}
+        <div className="border-t border-violet-100 dark:border-slate-700 p-3 bg-white/50 dark:bg-slate-900/50 backdrop-blur">
+          <div className="flex items-end gap-2">
+            <button
+              onClick={iniciarVoz}
+              disabled={procesando}
+              className={cn(
+                'flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all',
+                escuchando
+                  ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-500/30'
+                  : 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 hover:bg-violet-200 dark:hover:bg-violet-900/50'
+              )}
+              title={escuchando ? 'Escuchando...' : 'Hablar con Abbax'}
+            >
+              {escuchando ? <MicOff size={18} /> : <Mic size={18} />}
+            </button>
+
+            <div className="flex-1 relative">
+              <textarea
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    enviar(input);
+                  }
+                }}
+                placeholder={escuchando ? '🎤 Escuchando...' : 'Escribe tu mensaje o usa el micrófono...'}
+                disabled={procesando}
+                rows={1}
+                className="w-full resize-none rounded-xl border border-violet-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none max-h-32"
+                style={{ minHeight: '42px' }}
+              />
+            </div>
+
+            <button
+              onClick={() => enviar(input)}
+              disabled={!input.trim() || procesando}
+              className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-violet-500/30 transition-all"
+              title="Enviar"
+            >
+              {procesando ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            </button>
+          </div>
+          <div className="flex items-center justify-between mt-2 px-1">
+            <span className="text-[10px] text-muted-foreground">
+              Enter para enviar · Shift+Enter para nueva línea
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {procesando ? '⚡ Procesando...' : '✓ Listo'}
+            </span>
+          </div>
         </div>
       </Card>
 
       {/* Paneles laterales */}
       <div className="lg:col-span-2 space-y-3">
-        <Card className="p-4">
-          <h3 className="font-semibold text-sm mb-2 flex items-center gap-2">
-            <CheckCircle2 size={14} className="text-violet-600" /> Tareas ({tareas.length})
-          </h3>
+        {/* Tareas */}
+        <Card className="p-4 border-l-4 border-l-violet-500">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm flex items-center gap-2">
+              <CheckCircle2 size={14} className="text-violet-600" /> Tareas ({tareas.length})
+            </h3>
+            <button
+              onClick={() => enviar('Crea una tarea: ')}
+              className="text-xs text-violet-600 hover:underline"
+            >
+              + Nueva
+            </button>
+          </div>
           {tareas.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-3">Sin tareas pendientes</p>
+            <p className="text-xs text-muted-foreground text-center py-4">
+              Sin tareas pendientes.<br />Pídele a Abbax: "crea una tarea"
+            </p>
           ) : (
-            tareas.map(t => (
-              <div key={t.id} className="text-xs border rounded p-2 mb-1.5">
-                <div className="font-medium">{t.titulo}</div>
-                <div className="flex gap-1 mt-1">
-                  <Badge variant="secondary" className="text-[10px]">{t.prioridad}</Badge>
-                  {t.origen === 'voz' && <span className="text-[10px]">🎤</span>}
+            <div className="space-y-2">
+              {tareas.map(t => (
+                <div key={t.id} className="text-xs border rounded-lg p-2.5 hover:bg-muted/30 transition">
+                  <div className="font-medium flex items-start justify-between gap-2">
+                    <span className="flex-1">{t.titulo}</span>
+                    {t.origen === 'voz' && <span className="text-[10px]">🎤</span>}
+                  </div>
+                  <div className="flex gap-1 mt-1.5">
+                    <Badge variant={t.prioridad === 'alta' ? 'destructive' : t.prioridad === 'media' ? 'default' : 'secondary'} className="text-[10px]">
+                      {t.prioridad || 'baja'}
+                    </Badge>
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </Card>
 
-        <Card className="p-4">
-          <h3 className="font-semibold text-sm mb-2 flex items-center gap-2">
-            <StickyNote size={14} className="text-amber-500" /> Notas ({notas.length})
-          </h3>
+        {/* Notas */}
+        <Card className="p-4 border-l-4 border-l-amber-500">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm flex items-center gap-2">
+              <StickyNote size={14} className="text-amber-500" /> Notas ({notas.length})
+            </h3>
+            <button
+              onClick={() => enviar('Crea una nota: ')}
+              className="text-xs text-amber-600 hover:underline"
+            >
+              + Nueva
+            </button>
+          </div>
           {notas.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-3">Sin notas</p>
+            <p className="text-xs text-muted-foreground text-center py-4">
+              Sin notas.<br />Pídele a Abbax: "toma nota de..."
+            </p>
           ) : (
-            notas.map(n => (
-              <div key={n.id} className="bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded p-2 mb-1.5 text-xs">
-                <div className="font-bold">{n.titulo}</div>
-                <div className="whitespace-pre-wrap mt-1">{n.contenido}</div>
-              </div>
-            ))
+            <div className="space-y-2">
+              {notas.map(n => (
+                <div key={n.id} className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5 text-xs">
+                  <div className="font-bold text-amber-800 dark:text-amber-200">{n.titulo}</div>
+                  <div className="whitespace-pre-wrap mt-1 text-amber-700 dark:text-amber-300">{n.contenido}</div>
+                </div>
+              ))}
+            </div>
           )}
+        </Card>
+
+        {/* Capacidades de Abbax */}
+        <Card className="p-4 bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-900/20 dark:to-fuchsia-900/20 border-violet-200 dark:border-violet-800">
+          <h3 className="font-semibold text-sm mb-2 flex items-center gap-2">
+            <Sparkles size={14} className="text-violet-600" /> Capacidades
+          </h3>
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="flex items-center gap-1.5"><span>📊</span> Análisis financiero</div>
+            <div className="flex items-center gap-1.5"><span>💰</span> Cálculos fiscales</div>
+            <div className="flex items-center gap-1.5"><span>📋</span> Crear tareas</div>
+            <div className="flex items-center gap-1.5"><span>📝</span> Tomar notas</div>
+            <div className="flex items-center gap-1.5"><span>⚖️</span> RAG leyes fiscales</div>
+            <div className="flex items-center gap-1.5"><span>🔊</span> Voz Stark</div>
+            <div className="flex items-center gap-1.5"><span>🎤</span> Reconocimiento voz</div>
+            <div className="flex items-center gap-1.5"><span>🔄</span> 23 tools activas</div>
+          </div>
         </Card>
       </div>
     </div>

@@ -269,6 +269,73 @@ function parseNumberFromCell(value: any): number {
   return 0;
 }
 
+// ===== Parser de texto extraído de PDF =====
+// Busca patrones de fecha + descripción + monto en cada línea
+function parsePDFTexto(texto: string): MovimientoImportado[] {
+  const movimientos: MovimientoImportado[] = [];
+  const lineas = texto.split(/\r?\n/).filter(l => l.trim().length > 5);
+
+  // Patrones de fecha comunes en estados de cuenta mexicanos
+  const patronFecha = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
+  // Patrón de monto: $1,234.56 o 1,234.56 o -1,234.56 o 1234.56
+  const patronMonto = /-?\$?\s?[\d,]+\.?\d{0,2}/g;
+
+  for (const linea of lineas) {
+    const matchFecha = linea.match(patronFecha);
+    if (!matchFecha) continue;
+
+    const dia = parseInt(matchFecha[1]);
+    const mes = parseInt(matchFecha[2]);
+    let anio = parseInt(matchFecha[3]);
+    if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
+
+    if (mes < 1 || mes > 12 || dia < 1 || dia > 31) continue;
+
+    const fecha = new Date(anio, mes - 1, dia);
+    if (isNaN(fecha.getTime())) continue;
+
+    // Extraer la descripción: texto entre la fecha y el primer monto
+    const despuesFecha = linea.substring(matchFecha.index! + matchFecha[0].length).trim();
+
+    // Buscar todos los montos en la línea
+    const montosEncontrados: string[] = [];
+    let match;
+    const regexMonto = /-?\$?\s?[\d,]+\.\d{2}/g;
+    while ((match = regexMonto.exec(linea)) !== null) {
+      montosEncontrados.push(match[0]);
+    }
+
+    if (montosEncontrados.length === 0) {
+      // Sin monto con decimales, buscar números enteros
+      while ((match = /-?\$?\s?[\d,]{4,}/g.exec(linea)) !== null) {
+        montosEncontrados.push(match[0]);
+      }
+    }
+
+    if (montosEncontrados.length === 0) continue;
+
+    // Tomar el último monto como el del movimiento (suele ser el saldo o el monto final)
+    // O el primero si solo hay uno
+    const montoStr = montosEncontrados[montosEncontrados.length - 1];
+    const monto = parseNumberFromCell(montoStr);
+
+    if (monto === 0 || Math.abs(monto) < 1) continue;
+
+    // Limpiar descripción: quitar los montos encontrados
+    let concepto = despuesFecha;
+    for (const m of montosEncontrados) {
+      concepto = concepto.replace(m, '').trim();
+    }
+    // Limpiar caracteres extraños
+    concepto = concepto.replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!concepto) concepto = 'Movimiento bancario';
+
+    movimientos.push({ fecha, concepto, monto });
+  }
+
+  return movimientos;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -325,17 +392,52 @@ export async function POST(req: NextRequest) {
       }
     } else if (ext === 'pdf') {
       formatoDetectado = 'PDF';
-      // Para PDF guardamos el archivo pero no extraemos automáticamente
-      // (requiere OCR o parser específico del banco)
-      return NextResponse.json({
-        success: true,
-        fileName,
-        fileSize: file.size,
-        formato: formatoDetectado,
-        movimientosCreados: 0,
-        movimientosTotales: 0,
-        message: `📄 PDF guardado. Los movimientos de PDF requieren extracción manual o específica del banco. Usa Excel/CSV para importación automática.`,
-      });
+      // Extraer texto del PDF usando pdf-parse
+      try {
+        const pdfParseModule: any = await import('pdf-parse');
+        const pdfParse = pdfParseModule.default || pdfParseModule;
+        const pdfData = await pdfParse(buffer);
+        const textoPDF = pdfData.text;
+
+        if (!textoPDF || textoPDF.trim().length < 50) {
+          return NextResponse.json({
+            success: true,
+            fileName,
+            fileSize: file.size,
+            formato: formatoDetectado,
+            movimientosCreados: 0,
+            movimientosTotales: 0,
+            message: `📄 PDF guardado pero no contiene texto extraíble (posiblemente es un PDF escaneado/imagen). Usa Excel/CSV para importación automática.`,
+          });
+        }
+
+        // Parsear movimientos desde el texto del PDF
+        movimientos = parsePDFTexto(textoPDF);
+
+        if (movimientos.length === 0) {
+          return NextResponse.json({
+            success: true,
+            fileName,
+            fileSize: file.size,
+            formato: formatoDetectado,
+            textoExtraido: textoPDF.slice(0, 500) + '...',
+            movimientosCreados: 0,
+            movimientosTotales: 0,
+            message: `📄 PDF procesado. Se extrajeron ${textoPDF.length} caracteres pero no se detectaron movimientos con formato estándar. Intenta con Excel/CSV.`,
+          });
+        }
+      } catch (pdfError: any) {
+        console.error('Error parseando PDF:', pdfError);
+        return NextResponse.json({
+          success: true,
+          fileName,
+          fileSize: file.size,
+          formato: formatoDetectado,
+          movimientosCreados: 0,
+          movimientosTotales: 0,
+          message: `📄 PDF guardado. Error al extraer texto: ${pdfError.message}. Usa Excel/CSV para importación automática.`,
+        });
+      }
     } else {
       return NextResponse.json({
         error: `Formato .${ext} no soportado. Usa .xlsx, .csv o .pdf`,
