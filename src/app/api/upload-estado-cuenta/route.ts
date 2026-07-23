@@ -270,6 +270,100 @@ function parseNumberFromCell(value: any): number {
 }
 
 // ===== Parser de texto extraído de PDF =====
+
+/**
+ * Extrae texto de un PDF sin usar librerías externas (compatible con Vercel serverless).
+ * 
+ * Funciona buscando texto en los content streams del PDF:
+ * 1. Busca streams entre "stream" y "endstream"
+ * 2. Intenta descomprimir con zlib si están comprimidos con FlateDecode
+ * 3. Extrae texto de operadores Tj y TJ dentro de bloques BT/ET
+ */
+function extraerTextoPDF(buffer: Buffer): string {
+  const zlib = require('zlib');
+  const textoCompleto: string[] = [];
+
+  // Convertir buffer a string latin1 para preservar bytes
+  const pdfStr = buffer.toString('latin1');
+
+  // Buscar todos los streams en el PDF
+  const streamRegex = /stream\r?\n([\s\S]*?)endstream/g;
+  let streamMatch;
+
+  while ((streamMatch = streamRegex.exec(pdfStr)) !== null) {
+    const streamData = streamMatch[1];
+
+    try {
+      // Intentar descomprimir con FlateDecode (zlib)
+      let decompressed: string;
+      try {
+        const compressed = Buffer.from(streamData, 'latin1');
+        const decompressedBuffer = zlib.inflateSync(compressed);
+        decompressed = decompressedBuffer.toString('latin1');
+      } catch {
+        // Si no se puede descomprimir, usar el texto tal cual
+        decompressed = streamData;
+      }
+
+      // Extraer texto de operadores Tj: (texto) Tj
+      const tjRegex = /\(([^)]{1,200})\)\s*Tj/g;
+      let tjMatch;
+      while ((tjMatch = tjRegex.exec(decompressed)) !== null) {
+        const text = decodePdfString(tjMatch[1]);
+        if (text && text.trim()) {
+          textoCompleto.push(text);
+        }
+      }
+
+      // Extraer texto de operadores TJ: [(texto1) -250 (texto2)] TJ
+      const tjArrayRegex = /\[([^\]]{1,500})\]\s*TJ/g;
+      let tjArrayMatch;
+      while ((tjArrayMatch = tjArrayRegex.exec(decompressed)) !== null) {
+        const arrayContent = tjArrayMatch[1];
+        // Extraer todos los strings entre paréntesis
+        const stringParts: string[] = [];
+        const partRegex = /\(([^)]{1,200})\)/g;
+        let partMatch;
+        while ((partMatch = partRegex.exec(arrayContent)) !== null) {
+          stringParts.push(decodePdfString(partMatch[1]));
+        }
+        if (stringParts.length > 0) {
+          textoCompleto.push(stringParts.join(''));
+        }
+      }
+    } catch {
+      // Saltar streams que no se pueden procesar
+      continue;
+    }
+  }
+
+  // También buscar texto que no esté en streams (algunos PDFs simples)
+  const simpleTextRegex = /\(([\w\s\/\-\.,$:#áéíóúñÁÉÍÓÚÑ]{3,80})\)\s*Tj/g;
+  let simpleMatch;
+  while ((simpleMatch = simpleTextRegex.exec(pdfStr)) !== null) {
+    const text = simpleMatch[1];
+    if (text && text.trim().length > 2) {
+      textoCompleto.push(text);
+    }
+  }
+
+  return textoCompleto.join('\n');
+}
+
+/**
+ * Decodifica un string de PDF (maneja escapes básicos)
+ */
+function decodePdfString(str: string): string {
+  return str
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\\(/g, '(')
+    .replace(/\\\)/g, ')')
+    .replace(/\\\\/g, '\\')
+    .trim();
+}
+
 // Busca patrones de fecha + descripción + monto en cada línea
 function parsePDFTexto(texto: string): MovimientoImportado[] {
   const movimientos: MovimientoImportado[] = [];
@@ -392,14 +486,11 @@ export async function POST(req: NextRequest) {
       }
     } else if (ext === 'pdf') {
       formatoDetectado = 'PDF';
-      // Extraer texto del PDF usando pdf-parse
+      // Extraer texto del PDF usando extractor puro (sin pdf-parse que falla en Vercel)
       try {
-        const pdfParseModule: any = await import('pdf-parse');
-        const pdfParse = pdfParseModule.default || pdfParseModule;
-        const pdfData = await pdfParse(buffer);
-        const textoPDF = pdfData.text;
+        const textoPDF = extraerTextoPDF(buffer);
 
-        if (!textoPDF || textoPDF.trim().length < 50) {
+        if (!textoPDF || textoPDF.trim().length < 20) {
           return NextResponse.json({
             success: true,
             fileName,
@@ -407,11 +498,11 @@ export async function POST(req: NextRequest) {
             formato: formatoDetectado,
             movimientosCreados: 0,
             movimientosTotales: 0,
-            message: `📄 PDF guardado pero no contiene texto extraíble (posiblemente es un PDF escaneado/imagen). Usa Excel/CSV para importación automática.`,
+            message: `📄 PDF guardado pero no se pudo extraer texto (PDF escaneado o comprimido). Usa Excel/CSV para importación automática.`,
           });
         }
 
-        // Parsear movimientos desde el texto del PDF
+        // Parsear movimientos desde el texto extraído
         movimientos = parsePDFTexto(textoPDF);
 
         if (movimientos.length === 0) {
@@ -423,11 +514,11 @@ export async function POST(req: NextRequest) {
             textoExtraido: textoPDF.slice(0, 500) + '...',
             movimientosCreados: 0,
             movimientosTotales: 0,
-            message: `📄 PDF procesado. Se extrajeron ${textoPDF.length} caracteres pero no se detectaron movimientos con formato estándar. Intenta con Excel/CSV.`,
+            message: `📄 PDF procesado. Se extrajeron ${textoPDF.length} caracteres pero no se detectaron movimientos con formato de fecha + monto. Intenta con Excel/CSV.`,
           });
         }
       } catch (pdfError: any) {
-        console.error('Error parseando PDF:', pdfError);
+        console.error('Error procesando PDF:', pdfError);
         return NextResponse.json({
           success: true,
           fileName,
@@ -435,7 +526,7 @@ export async function POST(req: NextRequest) {
           formato: formatoDetectado,
           movimientosCreados: 0,
           movimientosTotales: 0,
-          message: `📄 PDF guardado. Error al extraer texto: ${pdfError.message}. Usa Excel/CSV para importación automática.`,
+          message: `📄 PDF guardado. Error al procesar: ${pdfError.message}. Usa Excel/CSV para importación automática.`,
         });
       }
     } else {
