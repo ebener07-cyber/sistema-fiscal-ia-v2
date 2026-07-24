@@ -56,3 +56,5 @@ server.log
 !/skills/auditoria-fiscal/
 /skills/auditoria-fiscal/*.md
 !/skills/auditoria-fiscal/laws/
+# Never commit middleware.ts (use proxy.ts)
+src/middleware.ts
