@@ -365,69 +365,187 @@ function decodePdfString(str: string): string {
 }
 
 // Busca patrones de fecha + descripción + monto en cada línea
+// Soporta formatos:
+//   - DD/MM/YYYY, DD-MM-YYYY (fechas numéricas)
+//   - DD-ENE-26 (fechas con mes abreviado en español — formato Banorte)
 function parsePDFTexto(texto: string): MovimientoImportado[] {
   const movimientos: MovimientoImportado[] = [];
-  const lineas = texto.split(/\r?\n/).filter(l => l.trim().length > 5);
+  const lineas = texto.split(/\r?\n/);
 
-  // Patrones de fecha comunes en estados de cuenta mexicanos
-  const patronFecha = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
-  // Patrón de monto: $1,234.56 o 1,234.56 o -1,234.56 o 1234.56
-  const patronMonto = /-?\$?\s?[\d,]+\.?\d{0,2}/g;
+  // Mapeo de meses abreviados en español (formato Banorte: 08-ENE-26)
+  const MESES_ES: Record<string, number> = {
+    'ENE': 0, 'FEB': 1, 'MAR': 2, 'ABR': 3, 'MAY': 4, 'JUN': 5,
+    'JUL': 6, 'AGO': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DIC': 11,
+    'ENERO': 0, 'FEBRERO': 1, 'MARZO': 2, 'ABRIL': 3, 'MAYO': 4, 'JUNIO': 5,
+    'JULIO': 6, 'AGOSTO': 7, 'SEPTIEMBRE': 8, 'OCTUBRE': 9, 'NOVIEMBRE': 10, 'DICIEMBRE': 11,
+  };
 
-  for (const linea of lineas) {
-    const matchFecha = linea.match(patronFecha);
-    if (!matchFecha) continue;
+  // Patrón de fecha numérica: DD/MM/YYYY o DD-MM-YYYY
+  const patronFechaNum = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
+  // Patrón de fecha Banorte: DD-ENE-26 (día + mes abreviado + año 2 dígitos)
+  const patronFechaBanorte = /(\d{1,2})-([A-Z]{3,9})-(\d{2,4})/;
 
-    const dia = parseInt(matchFecha[1]);
-    const mes = parseInt(matchFecha[2]);
-    let anio = parseInt(matchFecha[3]);
-    if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
+  // Patrones de palabras clave para identificar depósitos vs retiros
+  const keywordsDeposito = ['RECIBIDO', 'DEPOSITO', 'DEPÓSITO', 'DISPOSICION', 'INTERESES', 'ABONO', 'DEVOLUCION', 'REEMBOLSO'];
+  const keywordsRetiro = ['COMPRA', 'PAGO', 'RETIRO', 'CARGO', 'TRASPASO', 'COMISION', 'COMISIÓN', 'TRANSFER'];
 
-    if (mes < 1 || mes > 12 || dia < 1 || dia > 31) continue;
+  // Variable para rastrear el saldo anterior (para determinar depósito vs retiro)
+  let saldoAnterior: number | null = null;
 
-    const fecha = new Date(anio, mes - 1, dia);
-    if (isNaN(fecha.getTime())) continue;
+  // Procesar línea por línea, agrupando bloques de movimientos
+  let i = 0;
+  while (i < lineas.length) {
+    const linea = lineas[i].trim();
+    if (!linea || linea.length < 5) { i++; continue; }
 
-    // Extraer la descripción: texto entre la fecha y el primer monto
-    const despuesFecha = linea.substring(matchFecha.index! + matchFecha[0].length).trim();
+    // Intentar parsear fecha de esta línea
+    let fecha: Date | null = null;
+    let fechaMatch: RegExpMatchArray | null = null;
+    let restoLinea = linea;
 
-    // Buscar todos los montos en la línea
-    const montosEncontrados: string[] = [];
-    let match;
-    const regexMonto = /-?\$?\s?[\d,]+\.\d{2}/g;
-    while ((match = regexMonto.exec(linea)) !== null) {
-      montosEncontrados.push(match[0]);
-    }
+    // Intentar formato Banorte primero (DD-ENE-26)
+    const matchBanorte = linea.match(patronFechaBanorte);
+    if (matchBanorte) {
+      const dia = parseInt(matchBanorte[1]);
+      const mesStr = matchBanorte[2].toUpperCase();
+      const mes = MESES_ES[mesStr];
+      let anio = parseInt(matchBanorte[3]);
+      if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
 
-    if (montosEncontrados.length === 0) {
-      // Sin monto con decimales, buscar números enteros
-      while ((match = /-?\$?\s?[\d,]{4,}/g.exec(linea)) !== null) {
-        montosEncontrados.push(match[0]);
+      if (mes !== undefined && dia >= 1 && dia <= 31) {
+        fecha = new Date(anio, mes, dia);
+        fechaMatch = matchBanorte;
+        restoLinea = linea.substring(matchBanorte.index! + matchBanorte[0].length).trim();
       }
     }
 
-    if (montosEncontrados.length === 0) continue;
+    // Si no es Banorte, intentar formato numérico
+    if (!fecha) {
+      const matchNum = linea.match(patronFechaNum);
+      if (matchNum) {
+        const dia = parseInt(matchNum[1]);
+        const mes = parseInt(matchNum[2]) - 1;
+        let anio = parseInt(matchNum[3]);
+        if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
 
-    // Tomar el último monto como el del movimiento (suele ser el saldo o el monto final)
-    // O el primero si solo hay uno
-    const montoStr = montosEncontrados[montosEncontrados.length - 1];
-    const monto = parseNumberFromCell(montoStr);
-
-    if (monto === 0 || Math.abs(monto) < 1) continue;
-
-    // Limpiar descripción: quitar los montos encontrados
-    let concepto = despuesFecha;
-    for (const m of montosEncontrados) {
-      concepto = concepto.replace(m, '').trim();
+        if (mes >= 0 && mes <= 11 && dia >= 1 && dia <= 31) {
+          fecha = new Date(anio, mes, dia);
+          fechaMatch = matchNum;
+          restoLinea = linea.substring(matchNum.index! + matchNum[0].length).trim();
+        }
+      }
     }
-    // Limpiar caracteres extraños
-    concepto = concepto.replace(/\s+/g, ' ').trim().slice(0, 300);
+
+    if (!fecha || isNaN(fecha.getTime())) { i++; continue; }
+
+    // ===== Acumular descripción y buscar línea de montos =====
+    let concepto = restoLinea;
+    let montoEncontrado: number | null = null;
+    let saldoEncontrado: number | null = null;
+
+    // Buscar montos en la línea actual (puede que fecha y monto estén juntos)
+    const montosLineaActual = extraerMontos(linea);
+    if (montosLineaActual.length >= 2) {
+      montoEncontrado = montosLineaActual[0];
+      saldoEncontrado = montosLineaActual[1];
+      // Quitar montos del concepto
+      concepto = quitarMontos(concepto);
+    } else if (montosLineaActual.length === 1 && concepto.length < 30) {
+      // Solo un monto y concepto corto — puede ser un movimiento simple
+      montoEncontrado = montosLineaActual[0];
+      concepto = quitarMontos(concepto);
+    }
+
+    // Si no se encontraron montos en la línea actual, buscar en líneas siguientes
+    if (montoEncontrado === null) {
+      let j = i + 1;
+      while (j < lineas.length && j < i + 10) {
+        const lineaSiguiente = lineas[j].trim();
+        if (!lineaSiguiente) { j++; continue; }
+
+        // Si encontramos otra fecha, ya no hay montos para este movimiento
+        if (patronFechaBanorte.test(lineaSiguiente) || patronFechaNum.test(lineaSiguiente)) {
+          break;
+        }
+
+        const montosSiguiente = extraerMontos(lineaSiguiente);
+        if (montosSiguiente.length >= 2) {
+          montoEncontrado = montosSiguiente[0];
+          saldoEncontrado = montosSiguiente[1];
+          break;
+        } else if (montosSiguiente.length === 1 && j > i + 1) {
+          // Una sola cantidad después de varias líneas de descripción
+          montoEncontrado = montosSiguiente[0];
+          break;
+        }
+
+        // Acumular como parte de la descripción
+        concepto += ' ' + lineaSiguiente;
+        j++;
+      }
+    }
+
+    if (montoEncontrado === null || Math.abs(montoEncontrado) < 0.5) { i++; continue; }
+
+    // ===== Determinar si es depósito o retiro =====
+    let montoFinal = montoEncontrado;
+
+    // Método 1: Comparar con saldo anterior
+    if (saldoEncontrado !== null && saldoAnterior !== null) {
+      const diferencia = saldoEncontrado - saldoAnterior;
+      // Si la diferencia coincide con el monto (±0.5%), usar el signo de la diferencia
+      if (Math.abs(Math.abs(diferencia) - montoEncontrado) < montoEncontrado * 0.01) {
+        montoFinal = diferencia; // Positive = deposit, negative = withdrawal
+      } else if (diferencia < 0) {
+        // El saldo bajó — es un retiro
+        montoFinal = -montoEncontrado;
+      }
+      // Si el saldo subió, es un depósito (mantener positivo)
+    } else {
+      // Método 2: Usar keywords del concepto
+      const conceptoUpper = concepto.toUpperCase();
+      const esDeposito = keywordsDeposito.some(k => conceptoUpper.includes(k));
+      const esRetiro = keywordsRetiro.some(k => conceptoUpper.includes(k));
+
+      if (esRetiro && !esDeposito) {
+        montoFinal = -montoEncontrado;
+      }
+      // Si es depósito o no se puede determinar, mantener positivo
+    }
+
+    // Actualizar saldo anterior
+    if (saldoEncontrado !== null) {
+      saldoAnterior = saldoEncontrado;
+    }
+
+    // Limpiar concepto
+    concepto = quitarMontos(concepto).replace(/\s+/g, ' ').trim().slice(0, 300);
     if (!concepto) concepto = 'Movimiento bancario';
 
-    movimientos.push({ fecha, concepto, monto });
+    movimientos.push({ fecha, concepto, monto: montoFinal });
+    i++;
   }
 
   return movimientos;
+}
+
+// Extrae montos numéricos de una línea (formato: 80,000.00 o $1,234.56)
+function extraerMontos(linea: string): number[] {
+  const montos: number[] = [];
+  const regex = /-?\$?\s?[\d,]+\.\d{2}/g;
+  let match;
+  while ((match = regex.exec(linea)) !== null) {
+    const valor = parseFloat(match[0].replace(/[$,\s]/g, ''));
+    if (!isNaN(valor) && Math.abs(valor) > 0.5) {
+      montos.push(valor);
+    }
+  }
+  return montos;
+}
+
+// Quita los montos de un texto para dejar solo la descripción
+function quitarMontos(texto: string): string {
+  return texto.replace(/-?\$?\s?[\d,]+\.\d{2}/g, '').trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -486,9 +604,70 @@ export async function POST(req: NextRequest) {
       }
     } else if (ext === 'pdf') {
       formatoDetectado = 'PDF';
-      // Extraer texto del PDF usando extractor puro (sin pdf-parse que falla en Vercel)
+      // Extraer texto del PDF usando pdfjs-dist legacy con polyfills para Vercel serverless
       try {
-        const textoPDF = extraerTextoPDF(buffer);
+        // Polyfill de DOMMatrix para Vercel serverless (pdfjs-dist lo necesita)
+        if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+          (globalThis as any).DOMMatrix = class DOMMatrix {
+            private _a: number; private _b: number; private _c: number; private _d: number;
+            private _e: number; private _f: number;
+            constructor(init?: any) {
+              if (Array.isArray(init)) {
+                this._a = init[0] || 1; this._b = init[1] || 0;
+                this._c = init[2] || 0; this._d = init[3] || 1;
+                this._e = init[4] || 0; this._f = init[5] || 0;
+              } else {
+                this._a = 1; this._b = 0; this._c = 0; this._d = 1; this._e = 0; this._f = 0;
+              }
+            }
+            get a() { return this._a; }
+            get b() { return this._b; }
+            get c() { return this._c; }
+            get d() { return this._d; }
+            get e() { return this._e; }
+            get f() { return this._f; }
+            multiply(other: any) { return this; }
+            translate(x: number, y: number) { return this; }
+            scale(s: number) { return this; }
+          };
+        }
+
+        // Polyfill de Path2D
+        if (typeof (globalThis as any).Path2D === 'undefined') {
+          (globalThis as any).Path2D = class Path2D {
+            constructor() {}
+            moveTo() {} lineTo() {} closePath() {} arc() {} rect() {} ellipse() {}
+          };
+        }
+
+        const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.js');
+        const data = new Uint8Array(buffer);
+        const loadingTask = pdfjsLib.getDocument({
+          data,
+          useSystemFonts: true,
+          disableFontFace: true,
+          isEvalSupported: false,
+        });
+        const pdfDoc = await loadingTask.promise;
+
+        let textoPDF = '';
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+          const page = await pdfDoc.getPage(i);
+          const content = await page.getTextContent();
+          // Unir items de texto en líneas basándose en coordenada Y
+          let lineaActual = '';
+          let yAnterior: number | null = null;
+          for (const item of content.items) {
+            const y = item.transform ? item.transform[5] : 0;
+            if (yAnterior !== null && Math.abs(y - yAnterior) > 2) {
+              textoPDF += lineaActual.trim() + '\n';
+              lineaActual = '';
+            }
+            lineaActual += (item.str || '') + ' ';
+            yAnterior = y;
+          }
+          if (lineaActual.trim()) textoPDF += lineaActual.trim() + '\n';
+        }
 
         if (!textoPDF || textoPDF.trim().length < 20) {
           return NextResponse.json({
@@ -498,7 +677,7 @@ export async function POST(req: NextRequest) {
             formato: formatoDetectado,
             movimientosCreados: 0,
             movimientosTotales: 0,
-            message: `📄 PDF guardado pero no se pudo extraer texto (PDF escaneado o comprimido). Usa Excel/CSV para importación automática.`,
+            message: `📄 PDF guardado pero no se pudo extraer texto. Usa Excel/CSV.`,
           });
         }
 
@@ -514,7 +693,7 @@ export async function POST(req: NextRequest) {
             textoExtraido: textoPDF.slice(0, 500) + '...',
             movimientosCreados: 0,
             movimientosTotales: 0,
-            message: `📄 PDF procesado. Se extrajeron ${textoPDF.length} caracteres pero no se detectaron movimientos con formato de fecha + monto. Intenta con Excel/CSV.`,
+            message: `📄 PDF procesado (${textoPDF.length} chars) pero no se detectaron movimientos. Intenta con Excel/CSV.`,
           });
         }
       } catch (pdfError: any) {
@@ -526,7 +705,7 @@ export async function POST(req: NextRequest) {
           formato: formatoDetectado,
           movimientosCreados: 0,
           movimientosTotales: 0,
-          message: `📄 PDF guardado. Error al procesar: ${pdfError.message}. Usa Excel/CSV para importación automática.`,
+          message: `📄 PDF guardado. Error: ${pdfError.message}. Usa Excel/CSV.`,
         });
       }
     } else {
@@ -590,6 +769,19 @@ export async function POST(req: NextRequest) {
 
     // Total de TODOS los movimientos de la cuenta (todos los meses)
     const totalCuenta = await db.movimientoBanco.count({ where: { cuentaId } });
+
+    // Actualizar el saldo de la cuenta con la suma de TODOS los movimientos
+    const todosMovimientos = await db.movimientoBanco.findMany({
+      where: { cuentaId },
+      select: { monto: true },
+    });
+    const saldoTotalCalculado = todosMovimientos.reduce((s, m) => s + m.monto, 0);
+
+    // Actualizar el saldo en la cuenta bancaria
+    await db.cuentaBancaria.update({
+      where: { id: cuentaId },
+      data: { saldo: saldoTotalCalculado },
+    });
 
     const mesesArray = Array.from(mesesAfectados).sort();
     const messageMonths = mesesArray.length > 1
