@@ -1,26 +1,92 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
+/**
+ * GET /api/bancos?empresaId=xxx&mes=7&anio=2026&cuentaId=xxx&page=1&pageSize=50
+ *
+ * Devuelve:
+ *   - cuentas: lista de cuentas bancarias con saldo y count de movimientos
+ *   - movimientos: movimientos del mes/año seleccionado (o todos si no hay filtro)
+ *   - resumen: totales de ingresos, egresos y saldo del periodo
+ */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const empresaId = searchParams.get('empresaId');
-    const [cuentas, movimientos] = await Promise.all([
-      db.cuentaBancaria.findMany({
-        where: empresaId ? { empresaId } : undefined,
-        include: { _count: { select: { movimientos: true } } },
-      }),
+    const empresaId = searchParams.get('empresaId') || undefined;
+    const mes = searchParams.get('mes');
+    const anio = searchParams.get('anio');
+    const cuentaIdFiltro = searchParams.get('cuentaId');
+    const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
+    const pageSize = Math.min(Math.max(1, parseInt(searchParams.get('pageSize') ?? '100')), 500);
+
+    // ===== Cuentas =====
+    const cuentas = await db.cuentaBancaria.findMany({
+      where: empresaId ? { empresaId } : undefined,
+      include: { _count: { select: { movimientos: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // ===== Movimientos con filtro opcional de mes/año =====
+    const whereMov: any = {};
+    if (empresaId) whereMov.cuenta = { empresaId };
+    if (cuentaIdFiltro) whereMov.cuentaId = cuentaIdFiltro;
+
+    if (mes && anio) {
+      const inicioMes = new Date(parseInt(anio), parseInt(mes) - 1, 1);
+      const finMes = new Date(parseInt(anio), parseInt(mes), 0, 23, 59, 59);
+      whereMov.fecha = { gte: inicioMes, lte: finMes };
+    } else if (anio) {
+      const inicioAnio = new Date(parseInt(anio), 0, 1);
+      const finAnio = new Date(parseInt(anio), 11, 31, 23, 59, 59);
+      whereMov.fecha = { gte: inicioAnio, lte: finAnio };
+    }
+
+    const [movimientos, totalMovimientos] = await Promise.all([
       db.movimientoBanco.findMany({
-        where: empresaId ? { cuenta: { empresaId } } : undefined,
-        include: { cuenta: true },
+        where: whereMov,
+        include: { cuenta: { select: { banco: true, cuenta: true } } },
         orderBy: { fecha: 'desc' },
-        take: 20,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
       }),
+      db.movimientoBanco.count({ where: whereMov }),
     ]);
-    return NextResponse.json({ cuentas, movimientos });
+
+    // ===== Resumen del periodo =====
+    const totalIngresos = movimientos
+      .filter(m => m.monto > 0)
+      .reduce((s, m) => s + m.monto, 0);
+    const totalEgresos = movimientos
+      .filter(m => m.monto < 0)
+      .reduce((s, m) => s + Math.abs(m.monto), 0);
+
+    return NextResponse.json({
+      cuentas,
+      movimientos,
+      totalMovimientos,
+      pagination: {
+        page,
+        pageSize,
+        totalPages: Math.ceil(totalMovimientos / pageSize),
+        hasNext: page * pageSize < totalMovimientos,
+        hasPrev: page > 1,
+      },
+      resumen: {
+        totalIngresos,
+        totalEgresos,
+        flujoNeto: totalIngresos - totalEgresos,
+        countMovimientos: movimientos.length,
+      },
+    });
   } catch (error: any) {
     console.error('Error en /api/bancos:', error.message);
-    return NextResponse.json({ cuentas: [], movimientos: [] });
+    return NextResponse.json({
+      cuentas: [],
+      movimientos: [],
+      totalMovimientos: 0,
+      pagination: { page: 1, pageSize: 100, totalPages: 0, hasNext: false, hasPrev: false },
+      resumen: { totalIngresos: 0, totalEgresos: 0, flujoNeto: 0, countMovimientos: 0 },
+    });
   }
 }
 

@@ -632,86 +632,145 @@ function ClientesView() {
   const { data, loading } = useApiData<{ clientes: any[] }>('/api/clientes', empresa?.id);
   if (loading) return <LoadingView message="Cargando clientes..." />;
   if (!data?.clientes?.length) return <EmptyState icon={Users} message="Sin clientes registrados" />;
+
+  const totalFacturas = data.clientes.reduce((s: number, c: any) => s + (c._count?.facturas || 0), 0);
+  const totalSaldo = data.clientes.reduce((s: number, c: any) => s + (c.saldo || 0), 0);
+
   return (
-    <DataTableCard title={`Clientes (${data.clientes.length})`}>
-      <table className="w-full text-sm">
-        <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-          <th className="px-4 py-2">Nombre</th><th className="px-4 py-2">RFC</th>
-          <th className="px-4 py-2">Email</th><th className="px-4 py-2">Facturas</th>
-          <th className="px-4 py-2">Saldo</th>
-        </tr></thead>
-        <tbody>
-          {data.clientes.map((c) => (
-            <tr key={c.id} className="border-b hover:bg-muted/30">
-              <td className="px-4 py-2 font-medium">{c.nombre}</td>
-              <td className="px-4 py-2 font-mono text-xs">{c.rfc}</td>
-              <td className="px-4 py-2 text-muted-foreground">{c.email || '—'}</td>
-              <td className="px-4 py-2"><Badge variant="secondary">{c._count.facturas}</Badge></td>
-              <td className="px-4 py-2 font-semibold">{fmt(c.saldo)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </DataTableCard>
+    <div className="space-y-4 animate-fade-in">
+      {/* KPIs */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total clientes</div>
+          <div className="text-xl font-bold text-violet-600">{data.clientes.length}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total facturas</div>
+          <div className="text-xl font-bold text-emerald-600">{totalFacturas}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-amber-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Saldo total</div>
+          <div className="text-xl font-bold text-amber-600">{fmt(totalSaldo)}</div>
+        </Card>
+      </div>
+
+      {/* Cards de clientes en grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {data.clientes.map((c: any) => (
+          <Card key={c.id} className="p-4 card-hover border-l-4 border-l-violet-400">
+            <div className="flex items-start gap-2 mb-2">
+              <div className="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold text-sm flex-shrink-0">
+                {c.nombre.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm truncate" title={c.nombre}>{c.nombre}</div>
+                <div className="font-mono text-[10px] text-muted-foreground">{c.rfc}</div>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Badge variant="secondary" className="text-[10px]">{c._count?.facturas || 0} facturas</Badge>
+              <span className="font-semibold text-violet-600">{fmt(c.saldo)}</span>
+            </div>
+            {c.email && <div className="text-[10px] text-muted-foreground mt-1 truncate">✉️ {c.email}</div>}
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }
 
 function ProveedoresView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ proveedores: any[] }>('/api/proveedores', empresa?.id);
-  if (loading) return <LoadingView message="Cargando..." />;
-  if (!data?.proveedores?.length) return <EmptyState icon={Truck} message="Sin proveedores" />;
+  if (loading) return <LoadingView message="Cargando proveedores..." />;
+  if (!data?.proveedores?.length) return <EmptyState icon={Truck} message="Sin proveedores registrados" />;
+
+  const totalOrdenes = data.proveedores.reduce((s: number, p: any) => s + (p._count?.ordenesCompra || 0), 0);
+
   return (
-    <DataTableCard title={`Proveedores (${data.proveedores.length})`}>
-      <table className="w-full text-sm">
-        <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-          <th className="px-4 py-2">Nombre</th><th className="px-4 py-2">RFC</th>
-          <th className="px-4 py-2">Servicio</th><th className="px-4 py-2">Órdenes</th>
-          <th className="px-4 py-2">Saldo</th>
-        </tr></thead>
-        <tbody>
-          {data.proveedores.map((p) => (
-            <tr key={p.id} className="border-b hover:bg-muted/30">
-              <td className="px-4 py-2 font-medium">{p.nombre}</td>
-              <td className="px-4 py-2 font-mono text-xs">{p.rfc}</td>
-              <td className="px-4 py-2 text-muted-foreground">{p.servicio || '—'}</td>
-              <td className="px-4 py-2"><Badge variant="secondary">{p._count.ordenesCompra}</Badge></td>
-              <td className="px-4 py-2 font-semibold">{fmt(p.saldo)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </DataTableCard>
+    <div className="space-y-4 animate-fade-in">
+      <div className="grid grid-cols-2 gap-3">
+        <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total proveedores</div>
+          <div className="text-xl font-bold text-orange-600">{data.proveedores.length}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-blue-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Órdenes de compra</div>
+          <div className="text-xl font-bold text-blue-600">{totalOrdenes}</div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {data.proveedores.map((p: any) => (
+          <Card key={p.id} className="p-4 card-hover border-l-4 border-l-orange-400">
+            <div className="flex items-start gap-2 mb-2">
+              <div className="w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 font-bold text-sm flex-shrink-0">
+                {p.nombre.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm truncate" title={p.nombre}>{p.nombre}</div>
+                <div className="font-mono text-[10px] text-muted-foreground">{p.rfc}</div>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Badge variant="secondary" className="text-[10px]">{p._count?.ordenesCompra || 0} órdenes</Badge>
+              {p.servicio && <span className="text-[10px] text-muted-foreground">{p.servicio}</span>}
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }
 
 function EmpleadosView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ empleados: any[] }>('/api/empleados', empresa?.id);
-  if (loading) return <LoadingView message="Cargando..." />;
-  if (!data?.empleados?.length) return <EmptyState icon={User} message="Sin empleados" />;
+  if (loading) return <LoadingView message="Cargando empleados..." />;
+  if (!data?.empleados?.length) return <EmptyState icon={User} message="Sin empleados registrados" />;
+
+  const totalNomina = data.empleados.reduce((s: number, e: any) => s + (e.salarioMensual || 0), 0);
+  const activos = data.empleados.filter((e: any) => e.status === 'activo').length;
+
   return (
-    <DataTableCard title={`Empleados (${data.empleados.length})`}>
-      <table className="w-full text-sm">
-        <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-          <th className="px-4 py-2">Nombre</th><th className="px-4 py-2">RFC</th>
-          <th className="px-4 py-2">Puesto</th><th className="px-4 py-2">Departamento</th>
-          <th className="px-4 py-2">Salario mensual</th><th className="px-4 py-2">Estado</th>
-        </tr></thead>
-        <tbody>
-          {data.empleados.map((e) => (
-            <tr key={e.id} className="border-b hover:bg-muted/30">
-              <td className="px-4 py-2 font-medium">{e.nombre}</td>
-              <td className="px-4 py-2 font-mono text-xs">{e.rfc}</td>
-              <td className="px-4 py-2">{e.puesto || '—'}</td>
-              <td className="px-4 py-2">{e.departamento || '—'}</td>
-              <td className="px-4 py-2 font-semibold">{fmt(e.salarioMensual)}</td>
-              <td className="px-4 py-2"><Badge variant={e.status === 'activo' ? 'default' : 'secondary'}>{e.status}</Badge></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </DataTableCard>
+    <div className="space-y-4 animate-fade-in">
+      <div className="grid grid-cols-3 gap-3">
+        <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total empleados</div>
+          <div className="text-xl font-bold text-violet-600">{data.empleados.length}</div>
+          <div className="text-[10px] text-muted-foreground">{activos} activos</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Nómina mensual</div>
+          <div className="text-xl font-bold text-emerald-600">{fmt(totalNomina)}</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-amber-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Nómina anual</div>
+          <div className="text-xl font-bold text-amber-600">{fmt(totalNomina * 12)}</div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {data.empleados.map((e: any) => (
+          <Card key={e.id} className="p-4 card-hover border-l-4 border-l-violet-400">
+            <div className="flex items-start gap-2 mb-2">
+              <div className="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold text-sm flex-shrink-0">
+                {e.nombre.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm truncate" title={e.nombre}>{e.nombre}</div>
+                <div className="font-mono text-[10px] text-muted-foreground">{e.rfc}</div>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              {e.puesto && <span className="text-[10px] text-muted-foreground truncate">{e.puesto}</span>}
+              <Badge variant={e.status === 'activo' ? 'default' : 'secondary'} className="text-[10px]">{e.status}</Badge>
+            </div>
+            <div className="text-sm font-bold text-emerald-600 mt-1">{fmt(e.salarioMensual)}/mes</div>
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1195,20 +1254,52 @@ function InventarioView({ empresaId }: { empresaId?: string }) {
 }
 
 function BancosView({ empresaId }: { empresaId?: string }) {
-  const { data, loading, refresh } = useApiData<{ cuentas: any[]; movimientos: any[] }>('/api/bancos', empresaId);
-  const [uploading, setUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState('');
-  const [showCuentaForm, setShowCuentaForm] = useState(false);
-  const [cuentaForm, setCuentaForm] = useState({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
   const hoy = new Date();
   const [periodoBanco, setPeriodoBanco] = useState({
     mes: hoy.getMonth() + 1,
     anio: hoy.getFullYear(),
     cuentaId: '',
   });
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState('');
+  const [showCuentaForm, setShowCuentaForm] = useState(false);
+  const [cuentaForm, setCuentaForm] = useState({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
   const [eliminandoBanco, setEliminandoBanco] = useState(false);
+  const [bancoData, setBancoData] = useState<any>(null);
+  const [loadingBancos, setLoadingBancos] = useState(true);
 
   const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const mesesLargo = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+  // Cargar datos de bancos con filtro de periodo
+  const cargarBancos = useCallback(async () => {
+    if (!empresaId) { setLoadingBancos(false); return; }
+    setLoadingBancos(true);
+    try {
+      const params = new URLSearchParams({
+        empresaId,
+        mes: String(periodoBanco.mes),
+        anio: String(periodoBanco.anio),
+        pageSize: '500',
+      });
+      if (periodoBanco.cuentaId) params.set('cuentaId', periodoBanco.cuentaId);
+      const r = await fetch(`/api/bancos?${params}`);
+      const d = await r.json();
+      setBancoData(d);
+    } catch (e) {
+      console.error('Error cargando bancos:', e);
+    } finally {
+      setLoadingBancos(false);
+    }
+  }, [empresaId, periodoBanco.mes, periodoBanco.anio, periodoBanco.cuentaId]);
+
+  useEffect(() => {
+    cargarBancos();
+  }, [cargarBancos]);
+
+  const cuentas = bancoData?.cuentas || [];
+  const movimientos = bancoData?.movimientos || [];
+  const resumen = bancoData?.resumen || { totalIngresos: 0, totalEgresos: 0, flujoNeto: 0, countMovimientos: 0 };
 
   const crearCuenta = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1218,16 +1309,22 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       body: JSON.stringify({ ...cuentaForm, empresaId }),
     });
     if (r.ok) {
+      toast.success('Cuenta creada', `${cuentaForm.banco} ${cuentaForm.cuenta}`);
       setShowCuentaForm(false);
       setCuentaForm({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
-      refresh();
+      cargarBancos();
+    } else {
+      toast.error('Error', 'No se pudo crear la cuenta');
     }
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !data?.cuentas?.length) return;
-    const cuentaIdSel = periodoBanco.cuentaId || data.cuentas[0].id;
+    if (!file || cuentas.length === 0) {
+      toast.warning('Sin cuenta', 'Primero crea una cuenta bancaria');
+      return;
+    }
+    const cuentaIdSel = periodoBanco.cuentaId || cuentas[0].id;
     setUploading(true);
     setUploadMsg('');
     try {
@@ -1241,12 +1338,15 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       const d = await r.json();
       if (d.success) {
         setUploadMsg(`✅ ${d.message}`);
-        refresh();
+        toast.success('Estado de cuenta importado', d.message);
+        cargarBancos();
       } else {
         setUploadMsg(`❌ ${d.error || 'Error al subir archivo'}`);
+        toast.error('Error', d.error || 'No se pudo procesar');
       }
     } catch (e: any) {
       setUploadMsg(`❌ ${e.message}`);
+      toast.error('Error', e.message);
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -1254,14 +1354,14 @@ function BancosView({ empresaId }: { empresaId?: string }) {
   };
 
   const eliminarMesBanco = async () => {
-    const cuentaIdSel = periodoBanco.cuentaId || data?.cuentas?.[0]?.id;
+    const cuentaIdSel = periodoBanco.cuentaId || cuentas[0]?.id;
     if (!cuentaIdSel) {
-      toast.warning('Primero crea una cuenta bancaria');
+      toast.warning('Sin cuenta', 'Primero crea una cuenta bancaria');
       return;
     }
-    const cuenta = data?.cuentas?.find(c => c.id === cuentaIdSel);
+    const cuenta = cuentas.find(c => c.id === cuentaIdSel);
     if (!confirm(
-      `¿Eliminar TODOS los movimientos de ${meses[periodoBanco.mes - 1]} ${periodoBanco.anio}?\n\n` +
+      `¿Eliminar TODOS los movimientos de ${mesesLargo[periodoBanco.mes - 1]} ${periodoBanco.anio}?\n\n` +
       `Cuenta: ${cuenta?.banco} ${cuenta?.cuenta}\n\n` +
       `Esto te permite volver a subir el estado de cuenta de ese mes.\n\n` +
       `Esta acción no se puede deshacer.`
@@ -1277,9 +1377,8 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       const r = await fetch(`/api/upload-estado-cuenta?${params}`, { method: 'DELETE' });
       const d = await r.json();
       if (d.success) {
-        setUploadMsg(`✅ ${d.message}`);
         toast.success('Movimientos eliminados', d.message);
-        refresh();
+        cargarBancos();
       } else {
         toast.error('Error', d.error || 'Error');
       }
@@ -1290,20 +1389,28 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     }
   };
 
-  if (loading) return <LoadingView message="Cargando..." />;
+  if (loadingBancos) return <LoadingView message="Cargando bancos y movimientos..." />;
 
   return (
-    <div className="space-y-4">
-      {/* Botón crear cuenta */}
-      <div className="flex justify-end">
+    <div className="space-y-4 animate-fade-in">
+      {/* Header con botón */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Banknote size={20} className="text-emerald-600" /> Bancos + Estados de Cuenta
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Sube estados de cuenta en Excel o PDF — los movimientos se importan automáticamente.
+          </p>
+        </div>
         <Button onClick={() => setShowCuentaForm(!showCuentaForm)}>
-          <Plus size={14} className="mr-2" /> {showCuentaForm ? 'Cancelar' : 'Nueva cuenta bancaria'}
+          <Plus size={14} className="mr-2" /> {showCuentaForm ? 'Cancelar' : 'Nueva cuenta'}
         </Button>
       </div>
 
       {/* Formulario nueva cuenta */}
       {showCuentaForm && (
-        <Card className="p-5">
+        <Card className="p-5 animate-fade-in">
           <form onSubmit={crearCuenta} className="grid md:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold uppercase text-muted-foreground">Banco *</label>
@@ -1330,29 +1437,71 @@ function BancosView({ empresaId }: { empresaId?: string }) {
         </Card>
       )}
 
-      {/* Cuentas */}
-      {(data?.cuentas?.length || 0) > 0 && (
-        <div className="grid md:grid-cols-2 gap-3">
-          {data.cuentas.map((c) => (
-            <Card key={c.id} className="p-5 border-l-4 border-l-emerald-500">
-              <div className="text-xs uppercase font-semibold text-muted-foreground">{c.banco} {c.cuenta}</div>
-              <div className="text-2xl font-bold text-emerald-600 mt-1">{fmt(c.saldo)}</div>
-              <div className="text-xs text-muted-foreground mt-1">{c._count?.movimientos || 0} movimientos · {c.tipo}</div>
-            </Card>
-          ))}
+      {/* Tarjetas de cuentas — estilo dashboard financiero */}
+      {cuentas.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {cuentas.map((c) => {
+            const isSelected = periodoBanco.cuentaId === c.id;
+            return (
+              <Card
+                key={c.id}
+                className={cn(
+                  'p-5 cursor-pointer transition-all card-hover border-2',
+                  isSelected ? 'border-violet-500 bg-violet-50/30 dark:bg-violet-900/10' : 'border-transparent'
+                )}
+                onClick={() => setPeriodoBanco({ ...periodoBanco, cuentaId: isSelected ? '' : c.id })}
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="text-xs uppercase font-semibold text-muted-foreground">{c.banco}</div>
+                    <div className="font-mono text-sm mt-0.5">{c.cuenta}</div>
+                  </div>
+                  <Badge variant={c.tipo === 'operaciones' ? 'default' : 'secondary'} className="text-[10px]">{c.tipo}</Badge>
+                </div>
+                <div className={cn('text-2xl font-bold mt-2', c.saldo >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                  {fmt(c.saldo)}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  {c._count?.movimientos || 0} movimientos totales
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
 
-      {/* Upload estado de cuenta */}
+      {/* KPIs del periodo */}
+      {movimientos.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Ingresos del mes</div>
+            <div className="text-xl font-bold text-emerald-600">{fmt(resumen.totalIngresos)}</div>
+            <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto > 0).length} depósitos</div>
+          </Card>
+          <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Egresos del mes</div>
+            <div className="text-xl font-bold text-orange-600">{fmt(resumen.totalEgresos)}</div>
+            <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto < 0).length} retiros</div>
+          </Card>
+          <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Flujo neto</div>
+            <div className={cn('text-xl font-bold', resumen.flujoNeto >= 0 ? 'text-violet-600' : 'text-red-600')}>
+              {fmt(resumen.flujoNeto)}
+            </div>
+          </Card>
+          <Card className="p-4 border-l-4 border-l-blue-500 card-hover">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Movimientos</div>
+            <div className="text-xl font-bold text-blue-600">{resumen.countMovimientos}</div>
+          </Card>
+        </div>
+      )}
+
+      {/* Selector de periodo + Upload */}
       <Card className="p-5">
-        <h3 className="font-semibold mb-2 flex items-center gap-2">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
           <Upload size={16} className="text-violet-600" /> Cargar estado de cuenta
         </h3>
-        <p className="text-xs text-muted-foreground mb-3">
-          Sube el estado de cuenta de tu banco. <strong>Excel (.xlsx)</strong> y <strong>CSV</strong> se importan automáticamente. PDF se guarda para referencia.
-        </p>
 
-        {/* Selector de cuenta + mes + año */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
           <div>
             <label className="text-[10px] uppercase font-semibold text-muted-foreground">Cuenta</label>
@@ -1361,8 +1510,8 @@ function BancosView({ empresaId }: { empresaId?: string }) {
               onChange={e => setPeriodoBanco({ ...periodoBanco, cuentaId: e.target.value })}
               className="w-full h-9 px-2 rounded-md border bg-background text-sm"
             >
-              <option value="">— Selecciona —</option>
-              {(data?.cuentas || []).map(c => (
+              <option value="">Todas las cuentas</option>
+              {cuentas.map(c => (
                 <option key={c.id} value={c.id}>{c.banco} {c.cuenta}</option>
               ))}
             </select>
@@ -1374,7 +1523,7 @@ function BancosView({ empresaId }: { empresaId?: string }) {
               onChange={e => setPeriodoBanco({ ...periodoBanco, mes: parseInt(e.target.value) })}
               className="w-full h-9 px-2 rounded-md border bg-background text-sm"
             >
-              {meses.map((m, i) => (
+              {mesesLargo.map((m, i) => (
                 <option key={m} value={i + 1}>{m}</option>
               ))}
             </select>
@@ -1396,16 +1545,11 @@ function BancosView({ empresaId }: { empresaId?: string }) {
               variant="destructive"
               size="sm"
               onClick={eliminarMesBanco}
-              disabled={eliminandoBanco || !data?.cuentas?.length}
+              disabled={eliminandoBanco || cuentas.length === 0}
               className="w-full"
-              title="Elimina los movimientos del mes seleccionado para que puedas volver a subir el estado de cuenta"
             >
-              {eliminandoBanco ? (
-                <Loader2 size={14} className="mr-2 animate-spin" />
-              ) : (
-                <Trash2 size={14} className="mr-2" />
-              )}
-              Eliminar mes
+              {eliminandoBanco ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
+              Eliminar {meses[periodoBanco.mes - 1]} {periodoBanco.anio}
             </Button>
           </div>
         </div>
@@ -1414,39 +1558,62 @@ function BancosView({ empresaId }: { empresaId?: string }) {
           <Upload size={28} className="text-muted-foreground mb-2" />
           <span className="text-sm font-medium">{uploading ? 'Procesando...' : 'Haz clic o arrastra tu archivo aquí'}</span>
           <span className="text-xs text-muted-foreground mt-1">
-            Formatos: <strong>Excel (.xlsx)</strong> — auto-importa · <strong>CSV</strong> — auto-importa · <strong>PDF</strong> — guarda referencia
+            Formatos: <strong>Excel (.xlsx)</strong> · <strong>CSV</strong> · <strong>PDF</strong>
           </span>
-          <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading || !data?.cuentas?.length} className="hidden" />
+          <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading || cuentas.length === 0} className="hidden" />
         </label>
-        {!data?.cuentas?.length && <p className="text-xs text-amber-600 mt-2">⚠️ Primero crea una cuenta bancaria para poder subir estados de cuenta</p>}
-        {uploadMsg && <div className={cn('mt-3 p-2 rounded text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>{uploadMsg}</div>}
+        {cuentas.length === 0 && <p className="text-xs text-amber-600 mt-2">⚠️ Primero crea una cuenta bancaria</p>}
+        {uploadMsg && <div className={cn('mt-3 p-3 rounded-lg text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300')}>{uploadMsg}</div>}
       </Card>
 
-      {/* Movimientos */}
-      {(data?.movimientos?.length || 0) > 0 && (
-        <DataTableCard title="Movimientos recientes">
+      {/* Tabla de movimientos del periodo */}
+      {movimientos.length > 0 ? (
+        <DataTableCard title={`Movimientos de ${mesesLargo[periodoBanco.mes - 1]} ${periodoBanco.anio} (${movimientos.length})`}>
           <table className="w-full text-sm">
             <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-              <th className="px-4 py-2">Fecha</th><th className="px-4 py-2">Cuenta</th>
-              <th className="px-4 py-2">Concepto</th><th className="px-4 py-2 text-right">Monto</th>
-              <th className="px-4 py-2">Tipo</th>
+              <th className="px-4 py-2">Fecha</th>
+              <th className="px-4 py-2">Cuenta</th>
+              <th className="px-4 py-2">Concepto</th>
+              <th className="px-4 py-2 text-right">Monto</th>
+              <th className="px-4 py-2 text-right">Saldo</th>
             </tr></thead>
             <tbody>
-              {(data?.movimientos || []).map((m) => (
+              {movimientos.map((m) => (
                 <tr key={m.id} className="border-b hover:bg-muted/30">
-                  <td className="px-4 py-2">{new Date(m.fecha).toLocaleDateString('es-MX')}</td>
-                  <td className="px-4 py-2">{m.cuenta?.banco}</td>
-                  <td className="px-4 py-2">{m.concepto}</td>
-                  <td className={cn('px-4 py-2 text-right font-semibold', m.monto >= 0 ? 'text-emerald-600' : 'text-red-600')}>{m.monto >= 0 ? '+' : ''}{fmt(m.monto)}</td>
-                  <td className="px-4 py-2"><Badge variant="secondary">{m.tipo}</Badge></td>
+                  <td className="px-4 py-2 whitespace-nowrap">{new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' })}</td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">{m.cuenta?.banco}</td>
+                  <td className="px-4 py-2 max-w-md truncate" title={m.concepto}>{m.concepto}</td>
+                  <td className={cn('px-4 py-2 text-right font-mono font-semibold whitespace-nowrap', m.monto >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                    {m.monto >= 0 ? '+' : ''}{fmt(m.monto)}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono text-muted-foreground">—</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="bg-muted/30 font-bold">
+                <td colSpan={3} className="px-4 py-2 text-right">TOTALES:</td>
+                <td className="px-4 py-2 text-right">
+                  <span className="text-emerald-600">+{fmt(resumen.totalIngresos)}</span>
+                  {' / '}
+                  <span className="text-orange-600">-{fmt(resumen.totalEgresos)}</span>
+                </td>
+                <td className="px-4 py-2 text-right text-violet-600">{fmt(resumen.flujoNeto)}</td>
+              </tr>
+            </tfoot>
           </table>
         </DataTableCard>
+      ) : (
+        cuentas.length > 0 && (
+          <EmptyState
+            icon={Banknote}
+            message={`Sin movimientos en ${mesesLargo[periodoBanco.mes - 1]} ${periodoBanco.anio}. Sube un estado de cuenta para verlos aquí.`}
+          />
+        )
       )}
-      {(data?.cuentas?.length || 0) === 0 && (data?.movimientos?.length || 0) === 0 && (
-        <EmptyState icon={Banknote} message="Sin cuentas bancarias — crea tu primera cuenta" />
+
+      {cuentas.length === 0 && (
+        <EmptyState icon={Banknote} message="Sin cuentas bancarias — crea tu primera cuenta para empezar" />
       )}
     </div>
   );
