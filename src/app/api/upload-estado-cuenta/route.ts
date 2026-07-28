@@ -566,26 +566,210 @@ function quitarMontos(texto: string): string {
     .trim();
 }
 
+/**
+ * Detecta automáticamente el banco y número de cuenta del texto del archivo.
+ * Busca patrones comunes en estados de cuenta mexicanos:
+ *   - Nombre del banco (BANORTE, BBVA, SANTANDER, etc.)
+ *   - Número de cuenta (10-16 dígitos)
+ *   - CLABE interbancaria (18 dígitos)
+ *   - Columna "CUENTA" en Excel
+ */
+function detectarBancoYcuenta(texto: string, fileName: string): { banco: string | null; cuenta: string | null } {
+  const upper = texto.toUpperCase();
+  let banco: string | null = null;
+  let cuenta: string | null = null;
+
+  // ===== Detectar banco por nombre =====
+  const bancos = [
+    { nombre: 'BANORTE', pattern: /BANORTE|BANORTE\-IEX|ENLACE\s+NEGOCIOS/i },
+    { nombre: 'BBVA', pattern: /BBVA|BANCOMER/i },
+    { nombre: 'SANTANDER', pattern: /SANTANDER/i },
+    { nombre: 'BANAMEX', pattern: /BANAMEX|CITIBANK/i },
+    { nombre: 'HSBC', pattern: /HSBC/i },
+    { nombre: 'SCOTIABANK', pattern: /SCOTIABANK|SCOTIA/i },
+    { nombre: 'AZTECA', pattern: /BANCO\s+AZTECA/i },
+    { nombre: 'INBURSA', pattern: /INBURSA/i },
+    { nombre: 'MIFEL', pattern: /MIFEL/i },
+    { nombre: 'VEPOR.MAS', pattern: /VE\s*POR\s*MAS|VEPORMAS/i },
+  ];
+
+  for (const b of bancos) {
+    if (b.pattern.test(texto)) {
+      banco = b.nombre;
+      break;
+    }
+  }
+
+  // Si no se encontró en el texto, intentar del nombre del archivo
+  if (!banco) {
+    for (const b of bancos) {
+      if (fileName.toUpperCase().includes(b.nombre)) {
+        banco = b.nombre;
+        break;
+      }
+    }
+  }
+
+  // ===== Detectar número de cuenta =====
+
+  // Buscar "No. de Cuenta" o "CUENTA:" seguido de números (formato PDF Banorte)
+  const patronCuenta = /(?:NO\.?\s*DE\s*CUENTA|CUENTA)[:\s]+(\d{8,18})/i;
+  const matchCuenta = texto.match(patronCuenta);
+  if (matchCuenta) {
+    cuenta = matchCuenta[1];
+  }
+
+  // Buscar CLABE interbancaria (18 dígitos, empieza con 072 para Banorte)
+  if (!cuenta) {
+    const patronCLABE = /CLABE[:\s]+(\d{18})/i;
+    const matchCLABE = texto.match(patronCLABE);
+    if (matchCLABE) {
+      cuenta = matchCLABE[1];
+    }
+  }
+
+  // Buscar número de cuenta en columna de Excel (formato Banorte: "1282396470")
+  if (!cuenta) {
+    // Buscar secuencias de 10-16 dígitos que parezcan número de cuenta
+    const patronNum = /\b(\d{10,16})\b/g;
+    let match;
+    while ((match = patronNum.exec(texto)) !== null) {
+      // Filtrar números que parezcan RFC (12-13 chars alfanuméricos) o fechas
+      const num = match[1];
+      if (num.length >= 10 && num.length <= 16 && !num.startsWith('2024') && !num.startsWith('2025') && !num.startsWith('2026')) {
+        cuenta = num;
+        break;
+      }
+    }
+  }
+
+  // Si no se encontró, usar el nombre del archivo
+  if (!cuenta) {
+    const nameWithoutExt = fileName.replace(/\.[^.]+$/, '').replace(/[^0-9]/g, '');
+    if (nameWithoutExt.length >= 4) {
+      cuenta = nameWithoutExt;
+    }
+  }
+
+  return { banco, cuenta };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File;
-    const cuentaId = formData.get('cuentaId') as string;
-    const mes = parseInt(formData.get('mes') as string);
-    const anio = parseInt(formData.get('anio') as string);
+    let cuentaId = formData.get('cuentaId') as string;
+    const cuentaId_original = cuentaId;
+    const mes = parseInt(formData.get('mes') as string) || new Date().getMonth() + 1;
+    const anio = parseInt(formData.get('anio') as string) || new Date().getFullYear();
+    const empresaId = formData.get('empresaId') as string;
+    // Banco y cuenta manuales (opcionales — si vienen, se usan para crear la cuenta)
+    const bancoManual = formData.get('banco') as string;
+    const cuentaManual = formData.get('cuenta') as string;
 
     if (!file) {
       return NextResponse.json({ error: 'No se recibió archivo' }, { status: 400 });
     }
-    if (!cuentaId) {
-      return NextResponse.json({ error: 'Falta cuentaId' }, { status: 400 });
+
+    // ===== Leer el archivo para detectar banco y cuenta =====
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'bin';
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    // Extraer texto crudo del archivo para detección
+    let textoDeteccion = '';
+    if (ext === 'xlsx' || ext === 'xls') {
+      try {
+        const ExcelJS = (await import('exceljs')).default;
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer);
+        for (const ws of wb.worksheets) {
+          for (let r = 1; r <= Math.min(10, ws.rowCount); r++) {
+            const fila = ws.getRow(r);
+            fila.eachCell((cell) => {
+              textoDeteccion += String(cell.value || '') + ' ';
+            });
+            textoDeteccion += '\n';
+          }
+        }
+      } catch {}
+    } else if (ext === 'csv') {
+      textoDeteccion = buffer.toString('utf-8').split('\n').slice(0, 15).join('\n');
+    } else if (ext === 'pdf') {
+      // Para PDF, extraer primeras 2 páginas
+      try {
+        if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+          (globalThis as any).DOMMatrix = class { constructor() {} get a() { return 1; } get b() { return 0; } get c() { return 0; } get d() { return 1; } get e() { return 0; } get f() { return 0; } multiply() { return this; } translate() { return this; } scale() { return this; } };
+        }
+        if (typeof (globalThis as any).Path2D === 'undefined') {
+          (globalThis as any).Path2D = class { constructor() {} moveTo() {} lineTo() {} closePath() {} arc() {} rect() {} ellipse() {} };
+        }
+        const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.js');
+        const data = new Uint8Array(buffer);
+        const loadingTask = pdfjsLib.getDocument({ data, useSystemFonts: true, disableFontFace: true, isEvalSupported: false });
+        const pdfDoc = await loadingTask.promise;
+        for (let i = 1; i <= Math.min(2, pdfDoc.numPages); i++) {
+          const page = await pdfDoc.getPage(i);
+          const content = await page.getTextContent();
+          let lineaActual = '';
+          let yAnterior: number | null = null;
+          for (const item of content.items) {
+            const y = item.transform ? item.transform[5] : 0;
+            if (yAnterior !== null && Math.abs(y - yAnterior) > 2) {
+              textoDeteccion += lineaActual.trim() + '\n';
+              lineaActual = '';
+            }
+            lineaActual += (item.str || '') + ' ';
+            yAnterior = y;
+          }
+          if (lineaActual.trim()) textoDeteccion += lineaActual.trim() + '\n';
+        }
+      } catch {}
     }
 
-    // Verificar que existe la cuenta
-    const cuenta = await db.cuentaBancaria.findUnique({ where: { id: cuentaId } });
-    if (!cuenta) {
-      return NextResponse.json({ error: 'Cuenta bancaria no encontrada' }, { status: 404 });
+    // ===== Auto-detectar banco y número de cuenta =====
+    const deteccion = detectarBancoYcuenta(textoDeteccion, file.name);
+
+    // Prioridad: manual > detectado
+    const bancoFinal = bancoManual || deteccion.banco || 'Banco';
+    const cuentaFinal = cuentaManual || deteccion.cuenta || file.name.replace(/\.[^.]+$/, '');
+
+    // ===== Buscar o crear la cuenta bancaria =====
+    let cuenta: any = null;
+
+    if (cuentaId) {
+      // Se especificó una cuenta existente
+      cuenta = await db.cuentaBancaria.findUnique({ where: { id: cuentaId } });
     }
+
+    if (!cuenta && empresaId) {
+      // Buscar por número de cuenta
+      cuenta = await db.cuentaBancaria.findFirst({
+        where: { cuenta: cuentaFinal, empresaId },
+      });
+    }
+
+    if (!cuenta && empresaId) {
+      // Auto-crear la cuenta bancaria
+      cuenta = await db.cuentaBancaria.create({
+        data: {
+          banco: bancoFinal,
+          cuenta: cuentaFinal,
+          saldo: 0,
+          tipo: 'operaciones',
+          empresaId,
+        },
+      });
+    }
+
+    if (!cuenta) {
+      return NextResponse.json({
+        error: 'No se pudo determinar la cuenta bancaria. Especifica banco y número de cuenta.',
+        deteccion,
+      }, { status: 400 });
+    }
+
+    cuentaId = cuenta.id;
 
     // Guardar el archivo
     const isVercel = !!process.env.VERCEL;
@@ -595,12 +779,8 @@ export async function POST(req: NextRequest) {
       await mkdir(uploadDir, { recursive: true });
     }
 
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'bin';
     const fileName = `estado_${cuentaId}_${anio}_${String(mes).padStart(2, '0')}.${ext}`;
     const filePath = path.join(uploadDir, fileName);
-
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
     await writeFile(filePath, buffer);
 
     // Parsear según formato
@@ -825,7 +1005,10 @@ export async function POST(req: NextRequest) {
       movimientosTotalesCuenta: totalCuenta,
       mesesAfectados: mesesArray,
       saldoDelMes: saldoCalculado,
-      message: `✅ ${formatoDetectado} procesado: ${movimientosCreados} nuevos, ${movimientosDuplicados} duplicados de ${movimientos.length} detectados.${messageMonths} Total en la cuenta: ${totalCuenta} movimientos.`,
+      bancoDetectado: cuenta.banco,
+      cuentaDetectada: cuenta.cuenta,
+      cuentaCreada: !cuentaId_original || cuentaId_original !== cuenta.id,
+      message: `✅ ${formatoDetectado} procesado: ${movimientosCreados} nuevos, ${movimientosDuplicados} duplicados de ${movimientos.length} detectados.${messageMonths} Banco: ${cuenta.banco} | Cuenta: ${cuenta.cuenta} | Total: ${totalCuenta} movimientos.`,
     });
   } catch (e: any) {
     console.error('Error en upload-estado-cuenta:', e);
