@@ -380,10 +380,12 @@ function parsePDFTexto(texto: string): MovimientoImportado[] {
     'JULIO': 6, 'AGOSTO': 7, 'SEPTIEMBRE': 8, 'OCTUBRE': 9, 'NOVIEMBRE': 10, 'DICIEMBRE': 11,
   };
 
-  // Patrón de fecha numérica: DD/MM/YYYY o DD-MM-YYYY
-  const patronFechaNum = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
-  // Patrón de fecha Banorte: DD-ENE-26 (día + mes abreviado + año 2 dígitos)
-  const patronFechaBanorte = /(\d{1,2})-([A-Z]{3,9})-(\d{2,4})/;
+  // Patrón de fecha numérica: DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
+  const patronFechaNum = /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/;
+  // Patrón de fecha Banorte: DD-ENE-26, DD/ENE/2026, DD ENE 2026
+  const patronFechaBanorte = /(\d{1,2})[-\/\s]([A-ZÁÉÍÓÚ]{3,9})[-\/\s](\d{2,4})/;
+  // Patrón de fecha literal: "05 DE ENERO DE 2026"
+  const patronFechaLiteral = /(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚ]{4,9})\s+DE\s+(\d{4})/i;
 
   // Patrones de palabras clave para identificar depósitos vs retiros
   const keywordsDeposito = ['RECIBIDO', 'DEPOSITO', 'DEPÓSITO', 'DISPOSICION', 'INTERESES', 'ABONO', 'DEVOLUCION', 'REEMBOLSO'];
@@ -529,15 +531,28 @@ function parsePDFTexto(texto: string): MovimientoImportado[] {
   return movimientos;
 }
 
-// Extrae montos numéricos de una línea (formato: 80,000.00 o $1,234.56)
+// Extrae montos numéricos de una línea
+// Formatos soportados: 80,000.00, $1,234.56, -500.00, 1,500 (sin decimales), $5,000
 function extraerMontos(linea: string): number[] {
   const montos: number[] = [];
-  const regex = /-?\$?\s?[\d,]+\.\d{2}/g;
+  // Primero intentar con decimales (formato estándar): 80,000.00 o $1,234.56
+  const regexDecimal = /-?\$?\s?[\d,]+\.\d{2}/g;
   let match;
-  while ((match = regex.exec(linea)) !== null) {
+  while ((match = regexDecimal.exec(linea)) !== null) {
     const valor = parseFloat(match[0].replace(/[$,\s]/g, ''));
     if (!isNaN(valor) && Math.abs(valor) > 0.5) {
       montos.push(valor);
+    }
+  }
+  // Si no encontró montos con decimales, buscar montos con separador de miles sin decimales
+  // Formato: 1,500 o $5,000 (mínimo 4 dígitos con coma para evitar falsos positivos)
+  if (montos.length === 0) {
+    const regexSinDecimal = /-?\$?\s?[\d]{1,3}(,\d{3})+/g;
+    while ((match = regexSinDecimal.exec(linea)) !== null) {
+      const valor = parseFloat(match[0].replace(/[$,\s]/g, ''));
+      if (!isNaN(valor) && Math.abs(valor) > 0.5) {
+        montos.push(valor);
+      }
     }
   }
   return montos;
@@ -545,7 +560,10 @@ function extraerMontos(linea: string): number[] {
 
 // Quita los montos de un texto para dejar solo la descripción
 function quitarMontos(texto: string): string {
-  return texto.replace(/-?\$?\s?[\d,]+\.\d{2}/g, '').trim();
+  return texto
+    .replace(/-?\$?\s?[\d,]+\.\d{2}/g, '')
+    .replace(/-?\$?\s?[\d]{1,3}(,\d{3})+/g, '')
+    .trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -685,15 +703,21 @@ export async function POST(req: NextRequest) {
         movimientos = parsePDFTexto(textoPDF);
 
         if (movimientos.length === 0) {
+          // Diagnóstico: mostrar líneas donde sí se encontró algún patrón de fecha
+          const lineasConFecha = textoPDF.split('\n')
+            .filter(l => /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/.test(l) || /(\d{1,2})[-\/\s]([A-ZÁÉÍÓÚ]{3,9})[-\/\s](\d{2,4})/.test(l))
+            .slice(0, 15);
+
           return NextResponse.json({
             success: true,
             fileName,
             fileSize: file.size,
             formato: formatoDetectado,
-            textoExtraido: textoPDF.slice(0, 500) + '...',
+            textoExtraido: textoPDF.slice(0, 1500),
+            lineasConFechaDetectada: lineasConFecha,
             movimientosCreados: 0,
             movimientosTotales: 0,
-            message: `📄 PDF procesado (${textoPDF.length} chars) pero no se detectaron movimientos. Intenta con Excel/CSV.`,
+            message: `📄 PDF procesado (${textoPDF.length} chars) pero no se detectaron movimientos con formato de fecha + monto. ${lineasConFecha.length} líneas tenían fechas reconocibles. Revisa el textoExtraido para diagnosticar.`,
           });
         }
       } catch (pdfError: any) {

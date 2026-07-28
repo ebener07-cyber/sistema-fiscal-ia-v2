@@ -539,9 +539,10 @@ function DashboardView({ stats, setView }: { stats: Stats | null; setView: (v: s
 }
 
 // ====================== COMPONENTES DE VISTAS ======================
-function useApiData<T>(url: string, empresaId?: string | null): { data: T | null; loading: boolean; refresh: () => void } {
+function useApiData<T>(url: string, empresaId?: string | null): { data: T | null; loading: boolean; refresh: () => void; error: string | null } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Construir URL con query param empresaId si está disponible
   const urlConEmpresa = (() => {
@@ -552,17 +553,37 @@ function useApiData<T>(url: string, empresaId?: string | null): { data: T | null
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const r = await fetch(urlConEmpresa, { credentials: 'include' });
+
+      // Si la respuesta no es OK, manejar el error
+      if (!r.ok) {
+        if (r.status === 401) {
+          // Sesión expirada — redirigir a login
+          window.location.href = '/login';
+          return;
+        }
+        const errorData = await r.json().catch(() => ({}));
+        const msg = errorData.error || `Error ${r.status}: ${r.statusText}`;
+        setError(msg);
+        setData(null);
+        return;
+      }
+
       const d = await r.json();
       setData(d);
+      setError(null);
+    } catch (e: any) {
+      setError(e.message || 'Error de conexión');
+      setData(null);
     } finally {
       setLoading(false);
     }
   }, [urlConEmpresa]);
 
   useEffect(() => { load(); }, [load]);
-  return { data, loading, refresh: load };
+  return { data, loading, refresh: load, error };
 }
 
 function DataTableCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
