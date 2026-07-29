@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
+function parsePositiveInt(value: string | null, fallback: number, max?: number) {
+  const parsed = Number.parseInt(value || '', 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return max ? Math.min(parsed, max) : parsed;
+}
+
+function parseOptionalInt(value: string | null) {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 /**
  * GET /api/bancos?empresaId=xxx&mes=7&anio=2026&cuentaId=xxx&page=1&pageSize=50
  *
@@ -15,9 +27,23 @@ export async function GET(req: NextRequest) {
     const empresaId = searchParams.get('empresaId') || undefined;
     const mes = searchParams.get('mes');
     const anio = searchParams.get('anio');
+    const mes = parseOptionalInt(searchParams.get('mes'));
+    const anio = parseOptionalInt(searchParams.get('anio'));
     const cuentaIdFiltro = searchParams.get('cuentaId');
     const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
     const pageSize = Math.min(Math.max(1, parseInt(searchParams.get('pageSize') ?? '100')), 500);
+    const page = parsePositiveInt(searchParams.get('page'), 1);
+    const pageSize = parsePositiveInt(searchParams.get('pageSize'), 100, 500);
+
+    if (mes !== null && (mes < 1 || mes > 12)) {
+      return NextResponse.json({ error: 'El mes debe estar entre 1 y 12' }, { status: 400 });
+    }
+    if (mes !== null && anio === null) {
+      return NextResponse.json({ error: 'Para filtrar por mes también debes enviar anio' }, { status: 400 });
+    }
+    if (anio !== null && (anio < 2020 || anio > new Date().getFullYear() + 1)) {
+      return NextResponse.json({ error: 'El anio está fuera del rango permitido' }, { status: 400 });
+    }
 
     // ===== Cuentas =====
     const cuentas = await db.cuentaBancaria.findMany({
@@ -34,14 +60,22 @@ export async function GET(req: NextRequest) {
     if (mes && anio) {
       const inicioMes = new Date(parseInt(anio), parseInt(mes) - 1, 1);
       const finMes = new Date(parseInt(anio), parseInt(mes), 0, 23, 59, 59);
+      const inicioMes = new Date(anio, mes - 1, 1);
+      const finMes = new Date(anio, mes, 0, 23, 59, 59);
       whereMov.fecha = { gte: inicioMes, lte: finMes };
     } else if (anio) {
       const inicioAnio = new Date(parseInt(anio), 0, 1);
       const finAnio = new Date(parseInt(anio), 11, 31, 23, 59, 59);
+      const inicioAnio = new Date(anio, 0, 1);
+      const finAnio = new Date(anio, 11, 31, 23, 59, 59);
       whereMov.fecha = { gte: inicioAnio, lte: finAnio };
     }
 
     const [movimientos, totalMovimientos] = await Promise.all([
+    const whereIngresos = { ...whereMov, monto: { gt: 0 } };
+    const whereEgresos = { ...whereMov, monto: { lt: 0 } };
+
+    const [movimientos, totalMovimientos, ingresosAgg, egresosAgg] = await Promise.all([
       db.movimientoBanco.findMany({
         where: whereMov,
         include: { cuenta: { select: { banco: true, cuenta: true } } },
@@ -50,6 +84,9 @@ export async function GET(req: NextRequest) {
         take: pageSize,
       }),
       db.movimientoBanco.count({ where: whereMov }),
+      // Resumen del periodo: usar todos los movimientos filtrados, no solo la página actual.
+      db.movimientoBanco.aggregate({ where: whereIngresos, _sum: { monto: true } }),
+      db.movimientoBanco.aggregate({ where: whereEgresos, _sum: { monto: true } }),
     ]);
 
     // ===== Resumen del periodo =====
@@ -59,6 +96,8 @@ export async function GET(req: NextRequest) {
     const totalEgresos = movimientos
       .filter(m => m.monto < 0)
       .reduce((s, m) => s + Math.abs(m.monto), 0);
+    const totalIngresos = ingresosAgg._sum.monto || 0;
+    const totalEgresos = Math.abs(egresosAgg._sum.monto || 0);
 
     return NextResponse.json({
       cuentas,
@@ -76,6 +115,7 @@ export async function GET(req: NextRequest) {
         totalEgresos,
         flujoNeto: totalIngresos - totalEgresos,
         countMovimientos: movimientos.length,
+        countMovimientos: totalMovimientos,
       },
     });
   } catch (error: any) {
@@ -101,16 +141,3 @@ export async function POST(req: NextRequest) {
 
     const cuentaBancaria = await db.cuentaBancaria.create({
       data: {
-        banco: String(banco),
-        cuenta: String(cuenta),
-        saldo: parseFloat(saldo) || 0,
-        tipo: tipo || 'operaciones',
-        empresaId: empresaId || '',
-      },
-    });
-
-    return NextResponse.json(cuentaBancaria, { status: 201 });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
-  }
-}
