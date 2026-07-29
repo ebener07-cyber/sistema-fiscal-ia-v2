@@ -44,7 +44,6 @@ EXCLUDE_FILES = {
     "nuevo-proyecto-corregido.zip",
     "tsconfig.tsbuildinfo",
     "AGENTS.md", "CLAUDE.md", "build-output.txt",
-    "middleware.ts",  # ← NUNCA incluir middleware.ts (usar proxy.ts)
 }
 
 EXCLUDE_PATTERNS = [
