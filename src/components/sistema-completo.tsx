@@ -1524,62 +1524,136 @@ function BancosView({ empresaId }: { empresaId?: string }) {
         </Card>
       )}
 
-      {/* Tarjetas de cuentas — estilo dashboard financiero */}
+      {/* Tarjetas de cuentas — estilo dashboard financiero elegante */}
       {cuentas.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {cuentas.map((c) => {
             const isSelected = periodoBanco.cuentaId === c.id;
+            const numMovs = c._count?.movimientos || 0;
             return (
-              <Card
+              <div
                 key={c.id}
-                className={cn(
-                  'p-5 cursor-pointer transition-all card-hover border-2',
-                  isSelected ? 'border-violet-500 bg-violet-50/30 dark:bg-violet-900/10' : 'border-transparent'
-                )}
                 onClick={() => setPeriodoBanco({ ...periodoBanco, cuentaId: isSelected ? '' : c.id })}
+                className={cn(
+                  'group relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-300 hover:shadow-xl',
+                  isSelected
+                    ? 'border-violet-500 bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/40 dark:to-fuchsia-950/40 shadow-lg'
+                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-violet-300 dark:hover:border-violet-700'
+                )}
               >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="text-xs uppercase font-semibold text-muted-foreground">{c.banco}</div>
-                    <div className="font-mono text-sm mt-0.5">{c.cuenta}</div>
+                {/* Barra superior de color */}
+                <div className={cn(
+                  'h-1.5 w-full',
+                  c.tipo === 'inversion' ? 'bg-gradient-to-r from-blue-500 to-cyan-500' : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'
+                )} />
+
+                <div className="p-5">
+                  {/* Header de la tarjeta */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        'w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-md',
+                        c.tipo === 'inversion'
+                          ? 'bg-gradient-to-br from-blue-500 to-cyan-500'
+                          : 'bg-gradient-to-br from-violet-600 to-fuchsia-600'
+                      )}>
+                        <Banknote size={20} />
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm tracking-tight">{c.banco}</div>
+                        <div className="font-mono text-[11px] text-muted-foreground">•••• {c.cuenta.slice(-4)}</div>
+                      </div>
+                    </div>
+                    <span className={cn(
+                      'text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full',
+                      c.tipo === 'inversion'
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                        : 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
+                    )}>
+                      {c.tipo}
+                    </span>
                   </div>
-                  <Badge variant={c.tipo === 'operaciones' ? 'default' : 'secondary'} className="text-[10px]">{c.tipo}</Badge>
+
+                  {/* Saldo principal */}
+                  <div className="mb-3">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Saldo total</div>
+                    <div className={cn(
+                      'text-2xl font-bold tracking-tight',
+                      c.saldo >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                    )}>
+                      {fmt(c.saldo)}
+                    </div>
+                  </div>
+
+                  {/* Stats inferiores */}
+                  <div className="flex items-center gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-1.5">
+                      <div className={cn('w-2 h-2 rounded-full', numMovs > 0 ? 'bg-emerald-500' : 'bg-slate-300')} />
+                      <span className="text-[11px] text-muted-foreground">{numMovs} movimientos</span>
+                    </div>
+                    {isSelected && (
+                      <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 ml-auto">
+                        ✓ SELECCIONADA
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className={cn('text-2xl font-bold mt-2', c.saldo >= 0 ? 'text-emerald-600' : 'text-red-600')}>
-                  {fmt(c.saldo)}
-                </div>
-                <div className="text-[10px] text-muted-foreground mt-1">
-                  {c._count?.movimientos || 0} movimientos totales
-                </div>
-              </Card>
+              </div>
             );
           })}
         </div>
       )}
 
-      {/* KPIs del periodo */}
+      {/* KPIs del periodo — diseño elegante */}
       {movimientos.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Ingresos del mes</div>
-            <div className="text-xl font-bold text-emerald-600">{fmt(resumen.totalIngresos)}</div>
-            <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto > 0).length} depósitos</div>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Egresos del mes</div>
-            <div className="text-xl font-bold text-orange-600">{fmt(resumen.totalEgresos)}</div>
-            <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto < 0).length} retiros</div>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Flujo neto</div>
-            <div className={cn('text-xl font-bold', resumen.flujoNeto >= 0 ? 'text-violet-600' : 'text-red-600')}>
-              {fmt(resumen.flujoNeto)}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950/40 dark:to-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-4 transition-all hover:shadow-lg">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500 flex items-center justify-center">
+                <TrendingUp size={14} className="text-white" />
+              </div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-700 dark:text-emerald-300">Ingresos</span>
             </div>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-blue-500 card-hover">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Movimientos</div>
-            <div className="text-xl font-bold text-blue-600">{resumen.countMovimientos}</div>
-          </Card>
+            <div className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{fmt(resumen.totalIngresos)}</div>
+            <div className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">{movimientos.filter((m: any) => m.monto > 0).length} depósitos</div>
+          </div>
+
+          <div className="rounded-xl bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/40 dark:to-red-900/20 border border-orange-200 dark:border-orange-800 p-4 transition-all hover:shadow-lg">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
+                <TrendingDown size={14} className="text-white" />
+              </div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-orange-700 dark:text-orange-300">Egresos</span>
+            </div>
+            <div className="text-xl font-bold text-orange-700 dark:text-orange-300">{fmt(resumen.totalEgresos)}</div>
+            <div className="text-[10px] text-orange-600/70 dark:text-orange-400/70">{movimientos.filter((m: any) => m.monto < 0).length} retiros</div>
+          </div>
+
+          <div className={cn(
+            'rounded-xl border p-4 transition-all hover:shadow-lg',
+            resumen.flujoNeto >= 0
+              ? 'bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/40 dark:to-fuchsia-900/20 border-violet-200 dark:border-violet-800'
+              : 'bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-950/40 dark:to-rose-900/20 border-red-200 dark:border-red-800'
+          )}>
+            <div className="flex items-center gap-2 mb-1">
+              <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center', resumen.flujoNeto >= 0 ? 'bg-violet-500' : 'bg-red-500')}>
+                <DollarSign size={14} className="text-white" />
+              </div>
+              <span className={cn('text-[10px] uppercase font-bold tracking-wider', resumen.flujoNeto >= 0 ? 'text-violet-700 dark:text-violet-300' : 'text-red-700 dark:text-red-300')}>Flujo Neto</span>
+            </div>
+            <div className={cn('text-xl font-bold', resumen.flujoNeto >= 0 ? 'text-violet-700 dark:text-violet-300' : 'text-red-700 dark:text-red-300')}>{fmt(resumen.flujoNeto)}</div>
+          </div>
+
+          <div className="rounded-xl bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/40 dark:to-cyan-900/20 border border-blue-200 dark:border-blue-800 p-4 transition-all hover:shadow-lg">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center">
+                <BarChart3 size={14} className="text-white" />
+              </div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-blue-700 dark:text-blue-300">Movimientos</span>
+            </div>
+            <div className="text-xl font-bold text-blue-700 dark:text-blue-300">{resumen.countMovimientos}</div>
+            <div className="text-[10px] text-blue-600/70 dark:text-blue-400/70">en el período</div>
+          </div>
         </div>
       )}
 
@@ -1653,43 +1727,105 @@ function BancosView({ empresaId }: { empresaId?: string }) {
         {uploadMsg && <div className={cn('mt-3 p-3 rounded-lg text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300')}>{uploadMsg}</div>}
       </Card>
 
-      {/* Tabla de movimientos del periodo */}
+      {/* Tabla de movimientos — diseño profesional tipo estado de cuenta */}
       {movimientos.length > 0 ? (
-        <DataTableCard title={`Movimientos de ${mesesLargo[periodoBanco.mes - 1]} ${periodoBanco.anio} (${movimientos.length})`}>
-          <table className="w-full text-sm">
-            <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
-              <th className="px-4 py-2">Fecha</th>
-              <th className="px-4 py-2">Cuenta</th>
-              <th className="px-4 py-2">Concepto</th>
-              <th className="px-4 py-2 text-right">Monto</th>
-              <th className="px-4 py-2 text-right">Saldo</th>
-            </tr></thead>
-            <tbody>
-              {movimientos.map((m) => (
-                <tr key={m.id} className="border-b hover:bg-muted/30">
-                  <td className="px-4 py-2 whitespace-nowrap">{new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' })}</td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">{m.cuenta?.banco}</td>
-                  <td className="px-4 py-2 max-w-md truncate" title={m.concepto}>{m.concepto}</td>
-                  <td className={cn('px-4 py-2 text-right font-mono font-semibold whitespace-nowrap', m.monto >= 0 ? 'text-emerald-600' : 'text-red-600')}>
-                    {m.monto >= 0 ? '+' : ''}{fmt(m.monto)}
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono text-muted-foreground">—</td>
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+          {/* Header de la tabla */}
+          <div className="bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black text-white px-5 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Banknote size={16} className="text-violet-400" />
+              <span className="font-semibold text-sm">Movimientos — {mesesLargo[periodoBanco.mes - 1]} {periodoBanco.anio}</span>
+            </div>
+            <span className="text-xs text-slate-400">{movimientos.length} transacciones</span>
+          </div>
+
+          {/* Tabla */}
+          <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10">
+                <tr className="text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                  <th className="px-4 py-3 text-left font-bold">Fecha</th>
+                  <th className="px-4 py-3 text-left font-bold">Descripción</th>
+                  <th className="px-4 py-3 text-right font-bold">Depósito</th>
+                  <th className="px-4 py-3 text-right font-bold">Retiro</th>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-muted/30 font-bold">
-                <td colSpan={3} className="px-4 py-2 text-right">TOTALES:</td>
-                <td className="px-4 py-2 text-right">
-                  <span className="text-emerald-600">+{fmt(resumen.totalIngresos)}</span>
-                  {' / '}
-                  <span className="text-orange-600">-{fmt(resumen.totalEgresos)}</span>
-                </td>
-                <td className="px-4 py-2 text-right text-violet-600">{fmt(resumen.flujoNeto)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </DataTableCard>
+              </thead>
+              <tbody>
+                {movimientos.map((m: any, idx: number) => {
+                  const esDeposito = m.monto > 0;
+                  return (
+                    <tr
+                      key={m.id}
+                      className={cn(
+                        'border-b border-slate-100 dark:border-slate-800/50 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/30',
+                        idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/50 dark:bg-slate-800/20'
+                      )}
+                    >
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                          {new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {new Date(m.fecha).getFullYear()}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className={cn(
+                            'w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0',
+                            esDeposito
+                              ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600'
+                              : 'bg-orange-100 dark:bg-orange-900/30 text-orange-600'
+                          )}>
+                            {esDeposito ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+                          </div>
+                          <span className="text-xs text-slate-700 dark:text-slate-300 truncate max-w-[400px]" title={m.concepto}>
+                            {m.concepto}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono text-xs">
+                        {esDeposito ? (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">+{fmt(m.monto)}</span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono text-xs">
+                        {!esDeposito ? (
+                          <span className="text-orange-600 dark:text-orange-400 font-semibold">{fmt(Math.abs(m.monto))}</span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-600">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="sticky bottom-0 bg-slate-100 dark:bg-slate-800">
+                <tr className="font-bold border-t-2 border-slate-300 dark:border-slate-700">
+                  <td colSpan={2} className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                    Totales del período:
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-sm text-emerald-600 dark:text-emerald-400">
+                    +{fmt(resumen.totalIngresos)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-sm text-orange-600 dark:text-orange-400">
+                    -{fmt(resumen.totalEgresos)}
+                  </td>
+                </tr>
+                <tr className="bg-violet-50 dark:bg-violet-900/20">
+                  <td colSpan={2} className="px-4 py-2 text-right text-xs font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">
+                    Flujo neto:
+                  </td>
+                  <td colSpan={2} className="px-4 py-2 text-right font-mono text-sm font-bold text-violet-700 dark:text-violet-300">
+                    {fmt(resumen.flujoNeto)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
       ) : (
         cuentas.length > 0 && (
           <EmptyState

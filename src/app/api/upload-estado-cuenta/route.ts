@@ -143,12 +143,9 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
     let colFecha = 1, colConcepto = 2, colDeposito = 0, colRetiro = 0, colMonto = 0;
     let colDescripcionDetallada = 0;
     let colReferencia = 0;
-    let colCuenta = 0;
 
     for (let c = 1; c <= Math.max(headers.length, 20); c++) {
       const h = headers[c] || '';
-      // Match exacto para evitar falsos positivos con "cta ordenante", "cuenta beneficiario", etc.
-      if (h === 'cuenta') colCuenta = c;
       if (h.includes('fecha') && !h.includes('opera')) colFecha = c;
       else if (h.includes('fecha')) colFecha = c; // "FECHA DE OPERACIÓN" también cuenta
       if (h === 'descripción' || h === 'descripcion' || h.includes('descrip') || h.includes('concepto') || h.includes('detalle')) {
@@ -249,14 +246,7 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
 
         if (monto === 0) continue;
 
-        // Número de cuenta de esta fila (para archivos con varias cuentas mezcladas, ej. SALDO_BANORTE/SALDO_SANTANDER)
-        let cuentaNumero: string | undefined = undefined;
-        if (colCuenta) {
-          const raw = String(fila.getCell(colCuenta).value || '').trim();
-          cuentaNumero = raw.replace(/^'/, '').trim() || undefined; // quita el apóstrofo de texto forzado de Excel
-        }
-
-        movimientos.push({ fecha, concepto, monto, cuentaNumero });
+        movimientos.push({ fecha, concepto, monto });
       } catch {
         continue;
       }
@@ -602,22 +592,17 @@ function quitarMontos(texto: string): string {
  *   - Columna "CUENTA" en Excel
  */
 function detectarBancoYcuenta(texto: string, fileName: string): { banco: string | null; cuenta: string | null } {
-  const upper = texto.toUpperCase();
   let banco: string | null = null;
   let cuenta: string | null = null;
 
   // ===== Detectar banco por nombre =====
   const bancos = [
-    { nombre: 'BANORTE', pattern: /BANORTE|BANORTE\-IEX|ENLACE\s+NEGOCIOS/i },
+    { nombre: 'BANORTE', pattern: /BANORTE|ENLACE\s+NEGOCIOS/i },
     { nombre: 'BBVA', pattern: /BBVA|BANCOMER/i },
     { nombre: 'SANTANDER', pattern: /SANTANDER/i },
     { nombre: 'BANAMEX', pattern: /BANAMEX|CITIBANK/i },
     { nombre: 'HSBC', pattern: /HSBC/i },
     { nombre: 'SCOTIABANK', pattern: /SCOTIABANK|SCOTIA/i },
-    { nombre: 'AZTECA', pattern: /BANCO\s+AZTECA/i },
-    { nombre: 'INBURSA', pattern: /INBURSA/i },
-    { nombre: 'MIFEL', pattern: /MIFEL/i },
-    { nombre: 'VEPOR.MAS', pattern: /VE\s*POR\s*MAS|VEPORMAS/i },
   ];
 
   for (const b of bancos) {
@@ -626,8 +611,6 @@ function detectarBancoYcuenta(texto: string, fileName: string): { banco: string 
       break;
     }
   }
-
-  // Si no se encontró en el texto, intentar del nombre del archivo
   if (!banco) {
     for (const b of bancos) {
       if (fileName.toUpperCase().includes(b.nombre)) {
@@ -638,43 +621,34 @@ function detectarBancoYcuenta(texto: string, fileName: string): { banco: string 
   }
 
   // ===== Detectar número de cuenta =====
-
-  // Buscar "No. de Cuenta" o "CUENTA:" seguido de números (formato PDF Banorte)
-  const patronCuenta = /(?:NO\.?\s*DE\s*CUENTA|CUENTA)[:\s]+(\d{8,18})/i;
-  const matchCuenta = texto.match(patronCuenta);
+  // PRIORIDAD 1: "No. de Cuenta:   1282396470" (formato Banorte PDF)
+  const patronCuentaExplicita = /NO\.?\s*DE\s*CUENTA[:\s]+(\d{7,12})/i;
+  const matchCuenta = texto.match(patronCuentaExplicita);
   if (matchCuenta) {
     cuenta = matchCuenta[1];
   }
 
-  // Buscar CLABE interbancaria (18 dígitos, empieza con 072 para Banorte)
+  // PRIORIDAD 2: Excel con columna "CUENTA" que tiene números de 7-12 dígitos
   if (!cuenta) {
-    const patronCLABE = /CLABE[:\s]+(\d{18})/i;
-    const matchCLABE = texto.match(patronCLABE);
-    if (matchCLABE) {
-      cuenta = matchCLABE[1];
-    }
-  }
-
-  // Buscar número de cuenta en columna de Excel (formato Banorte: "1282396470")
-  if (!cuenta) {
-    // Buscar secuencias de 10-16 dígitos que parezcan número de cuenta
-    const patronNum = /\b(\d{10,16})\b/g;
-    let match;
-    while ((match = patronNum.exec(texto)) !== null) {
-      // Filtrar números que parezcan RFC (12-13 chars alfanuméricos) o fechas
-      const num = match[1];
-      if (num.length >= 10 && num.length <= 16 && !num.startsWith('2024') && !num.startsWith('2025') && !num.startsWith('2026')) {
-        cuenta = num;
-        break;
+    const lineas = texto.split('\n');
+    for (const linea of lineas.slice(0, 15)) {
+      if (/^CUENTA/i.test(linea.trim())) {
+        const match = linea.match(/(\d{7,12})/);
+        if (match && !match[1].startsWith('2024') && !match[1].startsWith('2025') && !match[1].startsWith('2026')) {
+          cuenta = match[1];
+          break;
+        }
       }
     }
   }
 
-  // Si no se encontró, usar el nombre del archivo
+  // PRIORIDAD 3: Si no se encontró, NO adivinar — devolver null
+  // (el usuario podrá ingresar manualmente)
   if (!cuenta) {
-    const nameWithoutExt = fileName.replace(/\.[^.]+$/, '').replace(/[^0-9]/g, '');
-    if (nameWithoutExt.length >= 4) {
-      cuenta = nameWithoutExt;
+    const nameWithoutExt = fileName.replace(/\.[^.]+$/, '');
+    const numbersInName = nameWithoutExt.match(/(\d{7,12})/);
+    if (numbersInName) {
+      cuenta = numbersInName[1];
     }
   }
 
@@ -978,10 +952,6 @@ export async function POST(req: NextRequest) {
           if (mov.cuentaNumero === 'INVERSION_ENLACE_NEGOCIOS') {
             nombreCuentaSec = cuentaFinal + ' (Inversión)';
             bancoSec = bancoFinal + ' Inversión';
-          } else if (mov.cuentaNumero && mov.cuentaNumero !== cuentaFinal) {
-            // Excel con columna CUENTA (ej. SALDO_BANORTE/SALDO_SANTANDER): usar el número real de cuenta
-            // de la fila en vez de agrupar todo bajo la cuenta seleccionada en el formulario.
-            nombreCuentaSec = mov.cuentaNumero;
           }
 
           // Buscar cuenta existente por nombre
