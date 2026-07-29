@@ -539,10 +539,9 @@ function DashboardView({ stats, setView }: { stats: Stats | null; setView: (v: s
 }
 
 // ====================== COMPONENTES DE VISTAS ======================
-function useApiData<T>(url: string, empresaId?: string | null): { data: T | null; loading: boolean; refresh: () => void; error: string | null } {
+function useApiData<T>(url: string, empresaId?: string | null): { data: T | null; loading: boolean; refresh: () => void } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Construir URL con query param empresaId si está disponible
   const urlConEmpresa = (() => {
@@ -553,37 +552,17 @@ function useApiData<T>(url: string, empresaId?: string | null): { data: T | null
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const r = await fetch(urlConEmpresa, { credentials: 'include' });
-
-      // Si la respuesta no es OK, manejar el error
-      if (!r.ok) {
-        if (r.status === 401) {
-          // Sesión expirada — redirigir a login
-          window.location.href = '/login';
-          return;
-        }
-        const errorData = await r.json().catch(() => ({}));
-        const msg = errorData.error || `Error ${r.status}: ${r.statusText}`;
-        setError(msg);
-        setData(null);
-        return;
-      }
-
       const d = await r.json();
       setData(d);
-      setError(null);
-    } catch (e: any) {
-      setError(e.message || 'Error de conexión');
-      setData(null);
     } finally {
       setLoading(false);
     }
   }, [urlConEmpresa]);
 
   useEffect(() => { load(); }, [load]);
-  return { data, loading, refresh: load, error };
+  return { data, loading, refresh: load };
 }
 
 function DataTableCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
@@ -1341,48 +1320,29 @@ function BancosView({ empresaId }: { empresaId?: string }) {
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Si no hay empresa, no se puede procesar
-    if (!empresaId) {
-      toast.warning('Sin empresa', 'Selecciona una empresa en el topbar primero');
+    if (!file || cuentas.length === 0) {
+      toast.warning('Sin cuenta', 'Primero crea una cuenta bancaria');
       return;
     }
-
+    const cuentaIdSel = periodoBanco.cuentaId || cuentas[0].id;
     setUploading(true);
     setUploadMsg('');
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('cuentaId', cuentaIdSel);
       formData.append('mes', String(periodoBanco.mes));
       formData.append('anio', String(periodoBanco.anio));
-      formData.append('empresaId', empresaId);
-      // Si hay cuenta seleccionada, la enviamos; si no, el API detecta/crea automáticamente
-      if (periodoBanco.cuentaId) {
-        formData.append('cuentaId', periodoBanco.cuentaId);
-      }
-
+      if (empresaId) formData.append('empresaId', empresaId);
       const r = await fetch('/api/upload-estado-cuenta', { method: 'POST', body: formData });
       const d = await r.json();
-
       if (d.success) {
         setUploadMsg(`✅ ${d.message}`);
-        if (d.bancoDetectado && d.cuentaDetectada) {
-          toast.success('Estado de cuenta importado', `Banco: ${d.bancoDetectado} | Cuenta: ${d.cuentaDetectada} | ${d.movimientosCreados} movimientos`);
-        } else {
-          toast.success('Estado de cuenta importado', d.message);
-        }
+        toast.success('Estado de cuenta importado', d.message);
         cargarBancos();
       } else {
-        // Si el error es que no detectó banco/cuenta, mostrar el form manual
-        if (d.deteccion && !d.deteccion.banco) {
-          setShowCuentaForm(true);
-          toast.warning('Banco no detectado', 'No se pudo detectar el banco automáticamente. Ingresa los datos manualmente abajo.');
-        }
         setUploadMsg(`❌ ${d.error || 'Error al subir archivo'}`);
-        if (d.textoExtraido) {
-          console.log('Texto extraído del PDF:', d.textoExtraido);
-        }
+        toast.error('Error', d.error || 'No se pudo procesar');
       }
     } catch (e: any) {
       setUploadMsg(`❌ ${e.message}`);
@@ -1390,38 +1350,6 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     } finally {
       setUploading(false);
       e.target.value = '';
-    }
-  };
-
-  // Upload con datos manuales (banco y cuenta especificados por el usuario)
-  const handleUploadManual = async (file: File, banco: string, cuentaNum: string) => {
-    if (!file || !empresaId || !banco || !cuentaNum) return;
-    setUploading(true);
-    setUploadMsg('');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('mes', String(periodoBanco.mes));
-      formData.append('anio', String(periodoBanco.anio));
-      formData.append('empresaId', empresaId);
-      formData.append('banco', banco);
-      formData.append('cuenta', cuentaNum);
-
-      const r = await fetch('/api/upload-estado-cuenta', { method: 'POST', body: formData });
-      const d = await r.json();
-      if (d.success) {
-        setUploadMsg(`✅ ${d.message}`);
-        toast.success('Estado de cuenta importado', `${banco} ${cuentaNum} | ${d.movimientosCreados} movimientos`);
-        setShowCuentaForm(false);
-        setCuentaForm({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
-        cargarBancos();
-      } else {
-        setUploadMsg(`❌ ${d.error || 'Error al subir archivo'}`);
-      }
-    } catch (e: any) {
-      setUploadMsg(`❌ ${e.message}`);
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -1475,185 +1403,96 @@ function BancosView({ empresaId }: { empresaId?: string }) {
             Sube estados de cuenta en Excel o PDF — los movimientos se importan automáticamente.
           </p>
         </div>
-        <Button onClick={() => setShowCuentaForm(!showCuentaForm)} variant="outline">
-          <AlertTriangle size={14} className="mr-2" /> {showCuentaForm ? 'Cancelar' : '¿No detecta el banco? Ingresar manual'}
+        <Button onClick={() => setShowCuentaForm(!showCuentaForm)}>
+          <Plus size={14} className="mr-2" /> {showCuentaForm ? 'Cancelar' : 'Nueva cuenta'}
         </Button>
       </div>
 
-      {/* Formulario nueva cuenta / datos manuales */}
+      {/* Formulario nueva cuenta */}
       {showCuentaForm && (
-        <Card className="p-5 animate-fade-in border-l-4 border-l-amber-500 bg-amber-50/20">
-          <h3 className="font-semibold mb-3 text-sm flex items-center gap-2">
-            <AlertTriangle size={14} className="text-amber-500" /> Datos manuales del banco
-          </h3>
-          <p className="text-xs text-muted-foreground mb-3">
-            Si el sistema no detectó automáticamente el banco o número de cuenta,
-            ingresa los datos aquí y selecciona el archivo a subir.
-          </p>
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            const fileInput = document.getElementById('manualFileInput') as HTMLInputElement;
-            if (fileInput.files?.[0]) {
-              handleUploadManual(fileInput.files[0], cuentaForm.banco, cuentaForm.cuenta);
-            } else {
-              toast.warning('Sin archivo', 'Selecciona un archivo para subir');
-            }
-          }} className="grid md:grid-cols-2 gap-3">
+        <Card className="p-5 animate-fade-in">
+          <form onSubmit={crearCuenta} className="grid md:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold uppercase text-muted-foreground">Banco *</label>
               <Input value={cuentaForm.banco} onChange={e => setCuentaForm({ ...cuentaForm, banco: e.target.value })} placeholder="Banorte" className="mt-1" required />
             </div>
             <div>
-              <label className="text-xs font-semibold uppercase text-muted-foreground">Número de cuenta *</label>
-              <Input value={cuentaForm.cuenta} onChange={e => setCuentaForm({ ...cuentaForm, cuenta: e.target.value })} placeholder="1282396470" className="mt-1 font-mono" required />
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Cuenta *</label>
+              <Input value={cuentaForm.cuenta} onChange={e => setCuentaForm({ ...cuentaForm, cuenta: e.target.value })} placeholder="****4521" className="mt-1" required />
             </div>
-            <div className="md:col-span-2">
-              <label className="text-xs font-semibold uppercase text-muted-foreground">Archivo del estado de cuenta *</label>
-              <Input id="manualFileInput" type="file" accept=".xlsx,.xls,.csv,.pdf" className="mt-1" required />
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Saldo inicial</label>
+              <Input type="number" step="0.01" value={cuentaForm.saldo} onChange={e => setCuentaForm({ ...cuentaForm, saldo: e.target.value })} className="mt-1" />
             </div>
-            <div className="md:col-span-2 flex gap-2">
-              <Button type="submit" disabled={uploading}>
-                {uploading ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Upload size={14} className="mr-2" />}
-                Subir con datos manuales
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setShowCuentaForm(false)}>
-                Cancelar
-              </Button>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Tipo</label>
+              <select value={cuentaForm.tipo} onChange={e => setCuentaForm({ ...cuentaForm, tipo: e.target.value })} className="w-full mt-1 p-2 border rounded-md bg-background text-sm">
+                <option value="operaciones">Operaciones</option>
+                <option value="ahorro">Ahorro</option>
+                <option value="inversion">Inversión</option>
+              </select>
             </div>
+            <div className="md:col-span-2"><Button type="submit">Crear cuenta</Button></div>
           </form>
         </Card>
       )}
 
-      {/* Tarjetas de cuentas — estilo dashboard financiero elegante */}
+      {/* Tarjetas de cuentas — estilo dashboard financiero */}
       {cuentas.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {cuentas.map((c) => {
             const isSelected = periodoBanco.cuentaId === c.id;
-            const numMovs = c._count?.movimientos || 0;
             return (
-              <div
+              <Card
                 key={c.id}
-                onClick={() => setPeriodoBanco({ ...periodoBanco, cuentaId: isSelected ? '' : c.id })}
                 className={cn(
-                  'group relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-300 hover:shadow-xl',
-                  isSelected
-                    ? 'border-violet-500 bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/40 dark:to-fuchsia-950/40 shadow-lg'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-violet-300 dark:hover:border-violet-700'
+                  'p-5 cursor-pointer transition-all card-hover border-2',
+                  isSelected ? 'border-violet-500 bg-violet-50/30 dark:bg-violet-900/10' : 'border-transparent'
                 )}
+                onClick={() => setPeriodoBanco({ ...periodoBanco, cuentaId: isSelected ? '' : c.id })}
               >
-                {/* Barra superior de color */}
-                <div className={cn(
-                  'h-1.5 w-full',
-                  c.tipo === 'inversion' ? 'bg-gradient-to-r from-blue-500 to-cyan-500' : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'
-                )} />
-
-                <div className="p-5">
-                  {/* Header de la tarjeta */}
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        'w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-md',
-                        c.tipo === 'inversion'
-                          ? 'bg-gradient-to-br from-blue-500 to-cyan-500'
-                          : 'bg-gradient-to-br from-violet-600 to-fuchsia-600'
-                      )}>
-                        <Banknote size={20} />
-                      </div>
-                      <div>
-                        <div className="font-bold text-sm tracking-tight">{c.banco}</div>
-                        <div className="font-mono text-[11px] text-muted-foreground">•••• {c.cuenta.slice(-4)}</div>
-                      </div>
-                    </div>
-                    <span className={cn(
-                      'text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full',
-                      c.tipo === 'inversion'
-                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-                        : 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
-                    )}>
-                      {c.tipo}
-                    </span>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="text-xs uppercase font-semibold text-muted-foreground">{c.banco}</div>
+                    <div className="font-mono text-sm mt-0.5">{c.cuenta}</div>
                   </div>
-
-                  {/* Saldo principal */}
-                  <div className="mb-3">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Saldo total</div>
-                    <div className={cn(
-                      'text-2xl font-bold tracking-tight',
-                      c.saldo >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
-                    )}>
-                      {fmt(c.saldo)}
-                    </div>
-                  </div>
-
-                  {/* Stats inferiores */}
-                  <div className="flex items-center gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center gap-1.5">
-                      <div className={cn('w-2 h-2 rounded-full', numMovs > 0 ? 'bg-emerald-500' : 'bg-slate-300')} />
-                      <span className="text-[11px] text-muted-foreground">{numMovs} movimientos</span>
-                    </div>
-                    {isSelected && (
-                      <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 ml-auto">
-                        ✓ SELECCIONADA
-                      </span>
-                    )}
-                  </div>
+                  <Badge variant={c.tipo === 'operaciones' ? 'default' : 'secondary'} className="text-[10px]">{c.tipo}</Badge>
                 </div>
-              </div>
+                <div className={cn('text-2xl font-bold mt-2', c.saldo >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                  {fmt(c.saldo)}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  {c._count?.movimientos || 0} movimientos totales
+                </div>
+              </Card>
             );
           })}
         </div>
       )}
 
-      {/* KPIs del periodo — diseño elegante */}
+      {/* KPIs del periodo */}
       {movimientos.length > 0 && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950/40 dark:to-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-4 transition-all hover:shadow-lg">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-7 h-7 rounded-lg bg-emerald-500 flex items-center justify-center">
-                <TrendingUp size={14} className="text-white" />
-              </div>
-              <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-700 dark:text-emerald-300">Ingresos</span>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Ingresos del mes</div>
+            <div className="text-xl font-bold text-emerald-600">{fmt(resumen.totalIngresos)}</div>
+            <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto > 0).length} depósitos</div>
+          </Card>
+          <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Egresos del mes</div>
+            <div className="text-xl font-bold text-orange-600">{fmt(resumen.totalEgresos)}</div>
+            <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto < 0).length} retiros</div>
+          </Card>
+          <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Flujo neto</div>
+            <div className={cn('text-xl font-bold', resumen.flujoNeto >= 0 ? 'text-violet-600' : 'text-red-600')}>
+              {fmt(resumen.flujoNeto)}
             </div>
-            <div className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{fmt(resumen.totalIngresos)}</div>
-            <div className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">{movimientos.filter((m: any) => m.monto > 0).length} depósitos</div>
-          </div>
-
-          <div className="rounded-xl bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/40 dark:to-red-900/20 border border-orange-200 dark:border-orange-800 p-4 transition-all hover:shadow-lg">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
-                <TrendingDown size={14} className="text-white" />
-              </div>
-              <span className="text-[10px] uppercase font-bold tracking-wider text-orange-700 dark:text-orange-300">Egresos</span>
-            </div>
-            <div className="text-xl font-bold text-orange-700 dark:text-orange-300">{fmt(resumen.totalEgresos)}</div>
-            <div className="text-[10px] text-orange-600/70 dark:text-orange-400/70">{movimientos.filter((m: any) => m.monto < 0).length} retiros</div>
-          </div>
-
-          <div className={cn(
-            'rounded-xl border p-4 transition-all hover:shadow-lg',
-            resumen.flujoNeto >= 0
-              ? 'bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/40 dark:to-fuchsia-900/20 border-violet-200 dark:border-violet-800'
-              : 'bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-950/40 dark:to-rose-900/20 border-red-200 dark:border-red-800'
-          )}>
-            <div className="flex items-center gap-2 mb-1">
-              <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center', resumen.flujoNeto >= 0 ? 'bg-violet-500' : 'bg-red-500')}>
-                <DollarSign size={14} className="text-white" />
-              </div>
-              <span className={cn('text-[10px] uppercase font-bold tracking-wider', resumen.flujoNeto >= 0 ? 'text-violet-700 dark:text-violet-300' : 'text-red-700 dark:text-red-300')}>Flujo Neto</span>
-            </div>
-            <div className={cn('text-xl font-bold', resumen.flujoNeto >= 0 ? 'text-violet-700 dark:text-violet-300' : 'text-red-700 dark:text-red-300')}>{fmt(resumen.flujoNeto)}</div>
-          </div>
-
-          <div className="rounded-xl bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/40 dark:to-cyan-900/20 border border-blue-200 dark:border-blue-800 p-4 transition-all hover:shadow-lg">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center">
-                <BarChart3 size={14} className="text-white" />
-              </div>
-              <span className="text-[10px] uppercase font-bold tracking-wider text-blue-700 dark:text-blue-300">Movimientos</span>
-            </div>
-            <div className="text-xl font-bold text-blue-700 dark:text-blue-300">{resumen.countMovimientos}</div>
-            <div className="text-[10px] text-blue-600/70 dark:text-blue-400/70">en el período</div>
-          </div>
+          </Card>
+          <Card className="p-4 border-l-4 border-l-blue-500 card-hover">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Movimientos</div>
+            <div className="text-xl font-bold text-blue-600">{resumen.countMovimientos}</div>
+          </Card>
         </div>
       )}
 
@@ -1721,111 +1560,49 @@ function BancosView({ empresaId }: { empresaId?: string }) {
           <span className="text-xs text-muted-foreground mt-1">
             Formatos: <strong>Excel (.xlsx)</strong> · <strong>CSV</strong> · <strong>PDF</strong>
           </span>
-          <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading} className="hidden" />
+          <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading || cuentas.length === 0} className="hidden" />
         </label>
-        {cuentas.length === 0 && <p className="text-xs text-emerald-600 mt-2">💡 No tienes cuentas registradas todavía. Sube tu primer estado de cuenta y el sistema detectará automáticamente el banco y número de cuenta.</p>}
+        {cuentas.length === 0 && <p className="text-xs text-amber-600 mt-2">⚠️ Primero crea una cuenta bancaria</p>}
         {uploadMsg && <div className={cn('mt-3 p-3 rounded-lg text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300')}>{uploadMsg}</div>}
       </Card>
 
-      {/* Tabla de movimientos — diseño profesional tipo estado de cuenta */}
+      {/* Tabla de movimientos del periodo */}
       {movimientos.length > 0 ? (
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-          {/* Header de la tabla */}
-          <div className="bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black text-white px-5 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Banknote size={16} className="text-violet-400" />
-              <span className="font-semibold text-sm">Movimientos — {mesesLargo[periodoBanco.mes - 1]} {periodoBanco.anio}</span>
-            </div>
-            <span className="text-xs text-slate-400">{movimientos.length} transacciones</span>
-          </div>
-
-          {/* Tabla */}
-          <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10">
-                <tr className="text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                  <th className="px-4 py-3 text-left font-bold">Fecha</th>
-                  <th className="px-4 py-3 text-left font-bold">Descripción</th>
-                  <th className="px-4 py-3 text-right font-bold">Depósito</th>
-                  <th className="px-4 py-3 text-right font-bold">Retiro</th>
+        <DataTableCard title={`Movimientos de ${mesesLargo[periodoBanco.mes - 1]} ${periodoBanco.anio} (${movimientos.length})`}>
+          <table className="w-full text-sm">
+            <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
+              <th className="px-4 py-2">Fecha</th>
+              <th className="px-4 py-2">Cuenta</th>
+              <th className="px-4 py-2">Concepto</th>
+              <th className="px-4 py-2 text-right">Monto</th>
+              <th className="px-4 py-2 text-right">Saldo</th>
+            </tr></thead>
+            <tbody>
+              {movimientos.map((m) => (
+                <tr key={m.id} className="border-b hover:bg-muted/30">
+                  <td className="px-4 py-2 whitespace-nowrap">{new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' })}</td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">{m.cuenta?.banco}</td>
+                  <td className="px-4 py-2 max-w-md truncate" title={m.concepto}>{m.concepto}</td>
+                  <td className={cn('px-4 py-2 text-right font-mono font-semibold whitespace-nowrap', m.monto >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                    {m.monto >= 0 ? '+' : ''}{fmt(m.monto)}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono text-muted-foreground">—</td>
                 </tr>
-              </thead>
-              <tbody>
-                {movimientos.map((m: any, idx: number) => {
-                  const esDeposito = m.monto > 0;
-                  return (
-                    <tr
-                      key={m.id}
-                      className={cn(
-                        'border-b border-slate-100 dark:border-slate-800/50 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/30',
-                        idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/50 dark:bg-slate-800/20'
-                      )}
-                    >
-                      <td className="px-4 py-2.5 whitespace-nowrap">
-                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          {new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {new Date(m.fecha).getFullYear()}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className={cn(
-                            'w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0',
-                            esDeposito
-                              ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600'
-                              : 'bg-orange-100 dark:bg-orange-900/30 text-orange-600'
-                          )}>
-                            {esDeposito ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                          </div>
-                          <span className="text-xs text-slate-700 dark:text-slate-300 truncate max-w-[400px]" title={m.concepto}>
-                            {m.concepto}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-xs">
-                        {esDeposito ? (
-                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">+{fmt(m.monto)}</span>
-                        ) : (
-                          <span className="text-slate-300 dark:text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-xs">
-                        {!esDeposito ? (
-                          <span className="text-orange-600 dark:text-orange-400 font-semibold">{fmt(Math.abs(m.monto))}</span>
-                        ) : (
-                          <span className="text-slate-300 dark:text-slate-600">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot className="sticky bottom-0 bg-slate-100 dark:bg-slate-800">
-                <tr className="font-bold border-t-2 border-slate-300 dark:border-slate-700">
-                  <td colSpan={2} className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                    Totales del período:
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono text-sm text-emerald-600 dark:text-emerald-400">
-                    +{fmt(resumen.totalIngresos)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono text-sm text-orange-600 dark:text-orange-400">
-                    -{fmt(resumen.totalEgresos)}
-                  </td>
-                </tr>
-                <tr className="bg-violet-50 dark:bg-violet-900/20">
-                  <td colSpan={2} className="px-4 py-2 text-right text-xs font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">
-                    Flujo neto:
-                  </td>
-                  <td colSpan={2} className="px-4 py-2 text-right font-mono text-sm font-bold text-violet-700 dark:text-violet-300">
-                    {fmt(resumen.flujoNeto)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-muted/30 font-bold">
+                <td colSpan={3} className="px-4 py-2 text-right">TOTALES:</td>
+                <td className="px-4 py-2 text-right">
+                  <span className="text-emerald-600">+{fmt(resumen.totalIngresos)}</span>
+                  {' / '}
+                  <span className="text-orange-600">-{fmt(resumen.totalEgresos)}</span>
+                </td>
+                <td className="px-4 py-2 text-right text-violet-600">{fmt(resumen.flujoNeto)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </DataTableCard>
       ) : (
         cuentas.length > 0 && (
           <EmptyState
