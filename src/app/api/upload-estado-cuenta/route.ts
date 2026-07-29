@@ -143,9 +143,12 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
     let colFecha = 1, colConcepto = 2, colDeposito = 0, colRetiro = 0, colMonto = 0;
     let colDescripcionDetallada = 0;
     let colReferencia = 0;
+    let colCuenta = 0;
 
     for (let c = 1; c <= Math.max(headers.length, 20); c++) {
       const h = headers[c] || '';
+      // Match exacto para evitar falsos positivos con "cta ordenante", "cuenta beneficiario", etc.
+      if (h === 'cuenta') colCuenta = c;
       if (h.includes('fecha') && !h.includes('opera')) colFecha = c;
       else if (h.includes('fecha')) colFecha = c; // "FECHA DE OPERACIÓN" también cuenta
       if (h === 'descripción' || h === 'descripcion' || h.includes('descrip') || h.includes('concepto') || h.includes('detalle')) {
@@ -246,7 +249,14 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
 
         if (monto === 0) continue;
 
-        movimientos.push({ fecha, concepto, monto });
+        // Número de cuenta de esta fila (para archivos con varias cuentas mezcladas, ej. SALDO_BANORTE/SALDO_SANTANDER)
+        let cuentaNumero: string | undefined = undefined;
+        if (colCuenta) {
+          const raw = String(fila.getCell(colCuenta).value || '').trim();
+          cuentaNumero = raw.replace(/^'/, '').trim() || undefined; // quita el apóstrofo de texto forzado de Excel
+        }
+
+        movimientos.push({ fecha, concepto, monto, cuentaNumero });
       } catch {
         continue;
       }
@@ -968,6 +978,10 @@ export async function POST(req: NextRequest) {
           if (mov.cuentaNumero === 'INVERSION_ENLACE_NEGOCIOS') {
             nombreCuentaSec = cuentaFinal + ' (Inversión)';
             bancoSec = bancoFinal + ' Inversión';
+          } else if (mov.cuentaNumero && mov.cuentaNumero !== cuentaFinal) {
+            // Excel con columna CUENTA (ej. SALDO_BANORTE/SALDO_SANTANDER): usar el número real de cuenta
+            // de la fila en vez de agrupar todo bajo la cuenta seleccionada en el formulario.
+            nombreCuentaSec = mov.cuentaNumero;
           }
 
           // Buscar cuenta existente por nombre
