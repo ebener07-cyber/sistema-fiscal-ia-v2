@@ -36,12 +36,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'El anio está fuera del rango permitido' }, { status: 400 });
     }
 
+    // Cuentas
     const cuentas = await db.cuentaBancaria.findMany({
       where: empresaId ? { empresaId } : undefined,
       include: { _count: { select: { movimientos: true } } },
       orderBy: { createdAt: 'asc' },
     });
 
+    // Filtro movimientos
     const whereMov: any = {};
     if (empresaId) whereMov.cuenta = { empresaId };
     if (cuentaIdFiltro) whereMov.cuentaId = cuentaIdFiltro;

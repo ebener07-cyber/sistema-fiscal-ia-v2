@@ -1,0 +1,31 @@
+// ============================================================================
+// AGREGAR AL FINAL DE prisma/schema.prisma
+// ============================================================================
+
+model ConciliacionBancaria {
+  id              String   @id @default(cuid())
+  movimientoId    String   @unique
+  movimiento      MovimientoBanco @relation(fields: [movimientoId], references: [id], onDelete: Cascade)
+  facturaId       String?
+  factura         Factura? @relation(fields: [facturaId], references: [id], onDelete: SetNull)
+  tipoDocumento   String   @default("factura")
+  montoConciliado Float
+  diferencia      Float    @default(0)
+  observaciones   String?
+  estado          String   @default("conciliado") // conciliado, parcial, discrepancia
+  conciliadoPor   String?
+  conciliadoEn    DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([movimientoId])
+  @@index([facturaId])
+  @@index([estado])
+  @@index([conciliadoEn])
+}
+
+// Agregar dentro de model MovimientoBanco:
+//   conciliacion ConciliacionBancaria?
+
+// Agregar dentro de model Factura:
+//   conciliaciones ConciliacionBancaria[]
