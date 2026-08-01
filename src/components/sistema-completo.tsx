@@ -539,10 +539,9 @@ function DashboardView({ stats, setView }: { stats: Stats | null; setView: (v: s
 }
 
 // ====================== COMPONENTES DE VISTAS ======================
-function useApiData<T>(url: string, empresaId?: string | null): { data: T | null; loading: boolean; refresh: () => void; error: string | null } {
+function useApiData<T>(url: string, empresaId?: string | null): { data: T | null; loading: boolean; refresh: () => void } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Construir URL con query param empresaId si está disponible
   const urlConEmpresa = (() => {
@@ -553,37 +552,17 @@ function useApiData<T>(url: string, empresaId?: string | null): { data: T | null
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const r = await fetch(urlConEmpresa, { credentials: 'include' });
-
-      // Si la respuesta no es OK, manejar el error
-      if (!r.ok) {
-        if (r.status === 401) {
-          // Sesión expirada — redirigir a login
-          window.location.href = '/login';
-          return;
-        }
-        const errorData = await r.json().catch(() => ({}));
-        const msg = errorData.error || `Error ${r.status}: ${r.statusText}`;
-        setError(msg);
-        setData(null);
-        return;
-      }
-
       const d = await r.json();
       setData(d);
-      setError(null);
-    } catch (e: any) {
-      setError(e.message || 'Error de conexión');
-      setData(null);
     } finally {
       setLoading(false);
     }
   }, [urlConEmpresa]);
 
   useEffect(() => { load(); }, [load]);
-  return { data, loading, refresh: load, error };
+  return { data, loading, refresh: load };
 }
 
 function DataTableCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
@@ -1341,48 +1320,29 @@ function BancosView({ empresaId }: { empresaId?: string }) {
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Si no hay empresa, no se puede procesar
-    if (!empresaId) {
-      toast.warning('Sin empresa', 'Selecciona una empresa en el topbar primero');
+    if (!file || cuentas.length === 0) {
+      toast.warning('Sin cuenta', 'Primero crea una cuenta bancaria');
       return;
     }
-
+    const cuentaIdSel = periodoBanco.cuentaId || cuentas[0].id;
     setUploading(true);
     setUploadMsg('');
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('cuentaId', cuentaIdSel);
       formData.append('mes', String(periodoBanco.mes));
       formData.append('anio', String(periodoBanco.anio));
-      formData.append('empresaId', empresaId);
-      // Si hay cuenta seleccionada, la enviamos; si no, el API detecta/crea automáticamente
-      if (periodoBanco.cuentaId) {
-        formData.append('cuentaId', periodoBanco.cuentaId);
-      }
-
+      if (empresaId) formData.append('empresaId', empresaId);
       const r = await fetch('/api/upload-estado-cuenta', { method: 'POST', body: formData });
       const d = await r.json();
-
       if (d.success) {
         setUploadMsg(`✅ ${d.message}`);
-        if (d.bancoDetectado && d.cuentaDetectada) {
-          toast.success('Estado de cuenta importado', `Banco: ${d.bancoDetectado} | Cuenta: ${d.cuentaDetectada} | ${d.movimientosCreados} movimientos`);
-        } else {
-          toast.success('Estado de cuenta importado', d.message);
-        }
+        toast.success('Estado de cuenta importado', d.message);
         cargarBancos();
       } else {
-        // Si el error es que no detectó banco/cuenta, mostrar el form manual
-        if (d.deteccion && !d.deteccion.banco) {
-          setShowCuentaForm(true);
-          toast.warning('Banco no detectado', 'No se pudo detectar el banco automáticamente. Ingresa los datos manualmente abajo.');
-        }
         setUploadMsg(`❌ ${d.error || 'Error al subir archivo'}`);
-        if (d.textoExtraido) {
-          console.log('Texto extraído del PDF:', d.textoExtraido);
-        }
+        toast.error('Error', d.error || 'No se pudo procesar');
       }
     } catch (e: any) {
       setUploadMsg(`❌ ${e.message}`);
@@ -1390,38 +1350,6 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     } finally {
       setUploading(false);
       e.target.value = '';
-    }
-  };
-
-  // Upload con datos manuales (banco y cuenta especificados por el usuario)
-  const handleUploadManual = async (file: File, banco: string, cuentaNum: string) => {
-    if (!file || !empresaId || !banco || !cuentaNum) return;
-    setUploading(true);
-    setUploadMsg('');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('mes', String(periodoBanco.mes));
-      formData.append('anio', String(periodoBanco.anio));
-      formData.append('empresaId', empresaId);
-      formData.append('banco', banco);
-      formData.append('cuenta', cuentaNum);
-
-      const r = await fetch('/api/upload-estado-cuenta', { method: 'POST', body: formData });
-      const d = await r.json();
-      if (d.success) {
-        setUploadMsg(`✅ ${d.message}`);
-        toast.success('Estado de cuenta importado', `${banco} ${cuentaNum} | ${d.movimientosCreados} movimientos`);
-        setShowCuentaForm(false);
-        setCuentaForm({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
-        cargarBancos();
-      } else {
-        setUploadMsg(`❌ ${d.error || 'Error al subir archivo'}`);
-      }
-    } catch (e: any) {
-      setUploadMsg(`❌ ${e.message}`);
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -1475,51 +1403,36 @@ function BancosView({ empresaId }: { empresaId?: string }) {
             Sube estados de cuenta en Excel o PDF — los movimientos se importan automáticamente.
           </p>
         </div>
-        <Button onClick={() => setShowCuentaForm(!showCuentaForm)} variant="outline">
-          <AlertTriangle size={14} className="mr-2" /> {showCuentaForm ? 'Cancelar' : '¿No detecta el banco? Ingresar manual'}
+        <Button onClick={() => setShowCuentaForm(!showCuentaForm)}>
+          <Plus size={14} className="mr-2" /> {showCuentaForm ? 'Cancelar' : 'Nueva cuenta'}
         </Button>
       </div>
 
-      {/* Formulario nueva cuenta / datos manuales */}
+      {/* Formulario nueva cuenta */}
       {showCuentaForm && (
-        <Card className="p-5 animate-fade-in border-l-4 border-l-amber-500 bg-amber-50/20">
-          <h3 className="font-semibold mb-3 text-sm flex items-center gap-2">
-            <AlertTriangle size={14} className="text-amber-500" /> Datos manuales del banco
-          </h3>
-          <p className="text-xs text-muted-foreground mb-3">
-            Si el sistema no detectó automáticamente el banco o número de cuenta,
-            ingresa los datos aquí y selecciona el archivo a subir.
-          </p>
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            const fileInput = document.getElementById('manualFileInput') as HTMLInputElement;
-            if (fileInput.files?.[0]) {
-              handleUploadManual(fileInput.files[0], cuentaForm.banco, cuentaForm.cuenta);
-            } else {
-              toast.warning('Sin archivo', 'Selecciona un archivo para subir');
-            }
-          }} className="grid md:grid-cols-2 gap-3">
+        <Card className="p-5 animate-fade-in">
+          <form onSubmit={crearCuenta} className="grid md:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold uppercase text-muted-foreground">Banco *</label>
               <Input value={cuentaForm.banco} onChange={e => setCuentaForm({ ...cuentaForm, banco: e.target.value })} placeholder="Banorte" className="mt-1" required />
             </div>
             <div>
-              <label className="text-xs font-semibold uppercase text-muted-foreground">Número de cuenta *</label>
-              <Input value={cuentaForm.cuenta} onChange={e => setCuentaForm({ ...cuentaForm, cuenta: e.target.value })} placeholder="1282396470" className="mt-1 font-mono" required />
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Cuenta *</label>
+              <Input value={cuentaForm.cuenta} onChange={e => setCuentaForm({ ...cuentaForm, cuenta: e.target.value })} placeholder="****4521" className="mt-1" required />
             </div>
-            <div className="md:col-span-2">
-              <label className="text-xs font-semibold uppercase text-muted-foreground">Archivo del estado de cuenta *</label>
-              <Input id="manualFileInput" type="file" accept=".xlsx,.xls,.csv,.pdf" className="mt-1" required />
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Saldo inicial</label>
+              <Input type="number" step="0.01" value={cuentaForm.saldo} onChange={e => setCuentaForm({ ...cuentaForm, saldo: e.target.value })} className="mt-1" />
             </div>
-            <div className="md:col-span-2 flex gap-2">
-              <Button type="submit" disabled={uploading}>
-                {uploading ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Upload size={14} className="mr-2" />}
-                Subir con datos manuales
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setShowCuentaForm(false)}>
-                Cancelar
-              </Button>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Tipo</label>
+              <select value={cuentaForm.tipo} onChange={e => setCuentaForm({ ...cuentaForm, tipo: e.target.value })} className="w-full mt-1 p-2 border rounded-md bg-background text-sm">
+                <option value="operaciones">Operaciones</option>
+                <option value="ahorro">Ahorro</option>
+                <option value="inversion">Inversión</option>
+              </select>
             </div>
+            <div className="md:col-span-2"><Button type="submit">Crear cuenta</Button></div>
           </form>
         </Card>
       )}
@@ -1647,9 +1560,9 @@ function BancosView({ empresaId }: { empresaId?: string }) {
           <span className="text-xs text-muted-foreground mt-1">
             Formatos: <strong>Excel (.xlsx)</strong> · <strong>CSV</strong> · <strong>PDF</strong>
           </span>
-          <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading} className="hidden" />
+          <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading || cuentas.length === 0} className="hidden" />
         </label>
-        {cuentas.length === 0 && <p className="text-xs text-emerald-600 mt-2">💡 No tienes cuentas registradas todavía. Sube tu primer estado de cuenta y el sistema detectará automáticamente el banco y número de cuenta.</p>}
+        {cuentas.length === 0 && <p className="text-xs text-amber-600 mt-2">⚠️ Primero crea una cuenta bancaria</p>}
         {uploadMsg && <div className={cn('mt-3 p-3 rounded-lg text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300')}>{uploadMsg}</div>}
       </Card>
 
