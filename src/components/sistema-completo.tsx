@@ -344,13 +344,15 @@ export function SistemaCompleto() {
 }
 
 // ====================== DASHBOARD VIEW ======================
-function DashboardView({ stats, setView }: { stats: Stats | null; setView: (v: string) => void }) {
+function DashboardView({ stats, setView }: { stats: any; setView: (v: string) => void }) {
   const { theme } = useTheme();
   if (!stats) return <LoadingView message="Cargando dashboard..." />;
 
+  const periodoTexto = stats.periodo ? `${stats.periodo.mesNombre} ${stats.periodo.anio}` : 'Mes actual';
+
   const kpis = [
-    { label: 'Ingresos del mes', value: fmt(stats.fiscal.totalEmitido), sub: `${stats.fiscal.countEmitidas} facturas`, icon: TrendingUp, color: 'text-emerald-600', border: 'border-l-emerald-500' },
-    { label: 'Egresos del mes', value: fmt(stats.fiscal.totalRecibido), sub: `${stats.fiscal.countRecibidas} facturas`, icon: TrendingDown, color: 'text-orange-600', border: 'border-l-orange-500' },
+    { label: `Ingresos ${periodoTexto}`, value: fmt(stats.fiscal.totalEmitido), sub: `${stats.fiscal.countEmitidas} facturas`, icon: TrendingUp, color: 'text-emerald-600', border: 'border-l-emerald-500' },
+    { label: `Egresos ${periodoTexto}`, value: fmt(stats.fiscal.totalRecibido), sub: `${stats.fiscal.countRecibidas} facturas`, icon: TrendingDown, color: 'text-orange-600', border: 'border-l-orange-500' },
     { label: 'Utilidad bruta', value: fmt(stats.fiscal.utilidadBruta), sub: stats.fiscal.totalEmitido > 0 ? `Margen ${Math.round((stats.fiscal.utilidadBruta / stats.fiscal.totalEmitido) * 100)}%` : 'Margen 0%', icon: DollarSign, color: 'text-blue-600', border: 'border-l-blue-500' },
     { label: 'IVA por pagar', value: fmt(stats.fiscal.ivaPorPagar), sub: 'Vence próximo mes', icon: Calculator, color: 'text-red-600', border: 'border-l-red-500' },
     { label: 'Clientes activos', value: String(stats.catalogos.clientes), sub: 'En catálogo', icon: Users, color: 'text-violet-600', border: 'border-l-violet-500' },
@@ -630,50 +632,102 @@ function ErrorState({ message, onRetry }: { message: string; onRetry?: () => voi
 function ClientesView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ clientes: any[] }>('/api/clientes', empresa?.id);
+  const [busqueda, setBusqueda] = useState('');
   if (loading) return <LoadingView message="Cargando clientes..." />;
   if (!data?.clientes?.length) return <EmptyState icon={Users} message="Sin clientes registrados" />;
+
+  const clientesFiltrados = data.clientes.filter((c: any) => {
+    if (!busqueda) return true;
+    const q = busqueda.toLowerCase();
+    return c.nombre?.toLowerCase().includes(q) || c.rfc?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q);
+  });
 
   const totalFacturas = data.clientes.reduce((s: number, c: any) => s + (c._count?.facturas || 0), 0);
   const totalSaldo = data.clientes.reduce((s: number, c: any) => s + (c.saldo || 0), 0);
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* KPIs */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total clientes</div>
-          <div className="text-xl font-bold text-violet-600">{data.clientes.length}</div>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total facturas</div>
-          <div className="text-xl font-bold text-emerald-600">{totalFacturas}</div>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-amber-500 card-hover">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Saldo total</div>
-          <div className="text-xl font-bold text-amber-600">{fmt(totalSaldo)}</div>
-        </Card>
+      {/* Header con búsqueda */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center text-white shadow-md">
+            <Users size={20} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Clientes</h2>
+            <p className="text-xs text-muted-foreground">{data.clientes.length} registros · {clientesFiltrados.length} mostrados</p>
+          </div>
+        </div>
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            placeholder="Buscar por nombre, RFC o email..."
+            className="pl-9 w-64"
+          />
+        </div>
       </div>
 
-      {/* Cards de clientes en grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {data.clientes.map((c: any) => (
-          <Card key={c.id} className="p-4 card-hover border-l-4 border-l-violet-400">
-            <div className="flex items-start gap-2 mb-2">
-              <div className="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold text-sm flex-shrink-0">
-                {c.nombre.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm truncate" title={c.nombre}>{c.nombre}</div>
-                <div className="font-mono text-[10px] text-muted-foreground">{c.rfc}</div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <Badge variant="secondary" className="text-[10px]">{c._count?.facturas || 0} facturas</Badge>
-              <span className="font-semibold text-violet-600">{fmt(c.saldo)}</span>
-            </div>
-            {c.email && <div className="text-[10px] text-muted-foreground mt-1 truncate">✉️ {c.email}</div>}
-          </Card>
-        ))}
+      {/* KPIs */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/40 dark:to-fuchsia-950/20 border border-violet-200 dark:border-violet-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-violet-700 dark:text-violet-300">Total clientes</div>
+          <div className="text-xl font-bold text-violet-700 dark:text-violet-300">{data.clientes.length}</div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950/40 dark:to-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-emerald-700 dark:text-emerald-300">Total facturas</div>
+          <div className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{totalFacturas}</div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-amber-700 dark:text-amber-300">Saldo total</div>
+          <div className="text-xl font-bold text-amber-700 dark:text-amber-300">{fmt(totalSaldo)}</div>
+        </div>
+      </div>
+
+      {/* Agenda de clientes */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+        <div className="bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black text-white px-5 py-3 flex items-center justify-between">
+          <span className="font-semibold text-sm flex items-center gap-2"><Users size={16} className="text-violet-400" /> Agenda de Clientes</span>
+          <span className="text-xs text-slate-400">{clientesFiltrados.length} resultados</span>
+        </div>
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10">
+              <tr className="text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                <th className="px-4 py-3 text-left font-bold">Cliente</th>
+                <th className="px-4 py-3 text-left font-bold">RFC</th>
+                <th className="px-4 py-3 text-left font-bold">Contacto</th>
+                <th className="px-4 py-3 text-center font-bold">Facturas</th>
+                <th className="px-4 py-3 text-right font-bold">Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clientesFiltrados.map((c: any, idx: number) => (
+                <tr key={c.id} className={cn('border-b border-slate-100 dark:border-slate-800/50 transition-colors hover:bg-violet-50 dark:hover:bg-violet-900/10', idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/50 dark:bg-slate-800/20')}>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                        {c.nombre?.charAt(0).toUpperCase() || '?'}
+                      </div>
+                      <div className="font-semibold text-sm">{c.nombre}</div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.rfc}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
+                    {c.email && <div className="flex items-center gap-1"><span className="text-[10px]">✉️</span> {c.email}</div>}
+                    {c.telefono && <div className="flex items-center gap-1"><span className="text-[10px]">📞</span> {c.telefono}</div>}
+                    {!c.email && !c.telefono && <span className="text-slate-400">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Badge variant="secondary" className="text-[10px]">{c._count?.facturas || 0}</Badge>
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold text-violet-600">{fmt(c.saldo || 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

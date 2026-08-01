@@ -6,19 +6,44 @@ export async function GET(req: NextRequest) {
     const ahora = new Date();
     const inicioHoy = new Date(ahora);
     inicioHoy.setHours(0, 0, 0, 0);
-    const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
 
-    // Filtro por empresa (todas las consultas lo aplican si llega ?empresaId=)
+    // Si no hay facturas en el mes actual, usar el último mes con datos
     const url = new URL(req.url);
     const empresaId = url.searchParams.get('empresaId') || undefined;
-    const filtroEmpresa = empresaId ? { empresaId } : {};
-    const filtroEmpresaFactura = empresaId ? { empresaId, direccion: 'emitida' as const } : { direccion: 'emitida' as const };
-    const filtroEmpresaFacturaRec = empresaId ? { empresaId, direccion: 'recibida' as const } : { direccion: 'recibida' as const };
 
-    // Facturas del mes
+    // Buscar la factura más reciente para determinar el último mes con actividad
+    const ultimaFactura = await db.factura.findFirst({
+      where: { ...(empresaId ? { empresaId } : {}) },
+      orderBy: { fecha: 'desc' },
+      select: { fecha: true },
+    });
+
+    // Usar el mes de la última factura, o el mes actual si hay facturas este mes
+    let fechaReferencia = ahora;
+    if (ultimaFactura) {
+      const mesUltimaFactura = ultimaFactura.fecha.getMonth();
+      const anioUltimaFactura = ultimaFactura.fecha.getFullYear();
+      const mesActual = ahora.getMonth();
+      const anioActual = ahora.getFullYear();
+
+      // Si el último CFDI es de un mes anterior al actual, usar ese mes
+      if (anioUltimaFactura < anioActual || (anioUltimaFactura === anioActual && mesUltimaFactura < mesActual)) {
+        fechaReferencia = ultimaFactura.fecha;
+      }
+    }
+
+    const inicioMes = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth(), 1);
+    const finMes = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth() + 1, 0, 23, 59, 59);
+
+    // Filtro por empresa
+    const filtroEmpresa = empresaId ? { empresaId } : {};
+    const filtroEmpresaFactura = empresaId ? { empresaId, direccion: 'emitida' as const, fecha: { gte: inicioMes, lte: finMes } } : { direccion: 'emitida' as const, fecha: { gte: inicioMes, lte: finMes } };
+    const filtroEmpresaFacturaRec = empresaId ? { empresaId, direccion: 'recibida' as const, fecha: { gte: inicioMes, lte: finMes } } : { direccion: 'recibida' as const, fecha: { gte: inicioMes, lte: finMes } };
+
+    // Facturas del mes (usando el último mes con datos)
     const [emitidasMes, recibidasMes] = await Promise.all([
-      db.factura.findMany({ where: { ...filtroEmpresaFactura, fecha: { gte: inicioMes } } }),
-      db.factura.findMany({ where: { ...filtroEmpresaFacturaRec, fecha: { gte: inicioMes } } }),
+      db.factura.findMany({ where: filtroEmpresaFactura }),
+      db.factura.findMany({ where: filtroEmpresaFacturaRec }),
     ]);
 
     const totalEmitido = emitidasMes.reduce((s, f) => s + f.total, 0);
@@ -63,6 +88,11 @@ export async function GET(req: NextRequest) {
       fiscal: {
         totalEmitido, ivaEmitido, totalRecibido, ivaRecibido, ivaPorPagar, utilidadBruta,
         countEmitidas: emitidasMes.length, countRecibidas: recibidasMes.length,
+      },
+      periodo: {
+        mes: fechaReferencia.getMonth() + 1,
+        anio: fechaReferencia.getFullYear(),
+        mesNombre: ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][fechaReferencia.getMonth()],
       },
       catalogos: { clientes, proveedores, empleados, productos, stockBajo },
       abbax: { tareasPend, notas, recordatorios, conversacionesHoy },
