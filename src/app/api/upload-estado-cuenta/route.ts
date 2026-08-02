@@ -405,8 +405,8 @@ function parsePDFTextoMultiCuenta(texto: string): {
   const patronFechaBanorte = /(\d{1,2})-([A-Z]{3,9})-(\d{2,4})/;
 
   // Patrones de palabras clave para identificar depósitos vs retiros
-  const keywordsDeposito = ['DISPOSICION', 'RECIBIDO', 'DEPOSITO DE CUENTA', 'DEV. DEPOSITO', 'DEVOLUCION'];
-  const keywordsRetiro = ['COMPRA', 'PAGO', 'RETIRO', 'CARGO', 'TRASPASO', 'COMISION', 'COMISIÓN', 'TRANSFERENCIA', 'I.V.A.', 'INTERESES EXENTO', 'PAGO DE CAPITAL', 'PAGO DE CREDITO', 'PAGO DE LDC', 'ADMINISTRACION', 'COM. DISPERSION', 'IVA COM', 'IVA 00054', 'RETIRO DEP.'];
+  const keywordsDeposito = ['DISPOSICION', 'RECIBIDO', 'DEPOSITO DE CUENTA', 'DEV. DEPOSITO', 'DEVOLUCION', 'ABONO'];
+  const keywordsRetiro = ['COMPRA', 'PAGO', 'RETIRO', 'CARGO', 'TRASPASO', 'COMISION', 'COMISIÓN', 'TRANSFERENCIA', 'I.V.A.', 'INTERESES EXENTO', 'PAGO DE CAPITAL', 'PAGO DE CREDITO', 'PAGO DE LDC', 'ADMINISTRACION', 'COM. DISPERSION', 'IVA COM', 'IVA 00054', 'RETIRO DEP.', 'CGO', 'CARGO CAPITAL', 'CARGO POR', 'CGO INTERESES'];
 
   // Variable para rastrear el saldo anterior (para determinar depósito vs retiro)
   let saldoAnterior: number | null = null;
@@ -666,6 +666,131 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(bytes);
     await writeFile(filePath, buffer);
 
+    // ===== AUTO-DETECCIÓN DE BANCO DESDE EL PDF =====
+    // Si el PDF es de un banco distinto al de la cuenta seleccionada, 
+    // buscar o crear la cuenta correcta automáticamente.
+    if (ext === 'pdf') {
+      try {
+        // Polyfills
+        if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+          (globalThis as any).DOMMatrix = class DOMMatrix {
+            private _a = 1; private _b = 0; private _c = 0; private _d = 1; private _e = 0; private _f = 0;
+            constructor(init?: any) {
+              if (Array.isArray(init)) {
+                this._a = init[0] || 1; this._b = init[1] || 0;
+                this._c = init[2] || 0; this._d = init[3] || 1;
+                this._e = init[4] || 0; this._f = init[5] || 0;
+              }
+            }
+            get a() { return this._a; } get b() { return this._b; }
+            get c() { return this._c; } get d() { return this._d; }
+            get e() { return this._e; } get f() { return this._f; }
+            multiply() { return this; } translate() { return this; } scale() { return this; }
+          };
+        }
+        if (typeof (globalThis as any).Path2D === 'undefined') {
+          (globalThis as any).Path2D = class Path2D {
+            constructor() {} moveTo() {} lineTo() {} closePath() {} arc() {} rect() {} ellipse() {}
+          };
+        }
+        const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.js');
+        const data = new Uint8Array(buffer);
+        const pdfDoc = await pdfjsLib.getDocument({ data, useSystemFonts: true, disableFontFace: true, isEvalSupported: false }).promise;
+        let textoPreview = '';
+        for (let i = 1; i <= Math.min(pdfDoc.numPages, 3); i++) {
+          const page = await pdfDoc.getPage(i);
+          const content = await page.getTextContent();
+          let lineaActual = '';
+          let yAnterior: number | null = null;
+          for (const item of content.items) {
+            const y = item.transform ? item.transform[5] : 0;
+            if (yAnterior !== null && Math.abs(y - yAnterior) > 2) {
+              textoPreview += lineaActual.trim() + '\n';
+              lineaActual = '';
+            }
+            lineaActual += (item.str || '') + ' ';
+            yAnterior = y;
+          }
+          if (lineaActual.trim()) textoPreview += lineaActual.trim() + '\n';
+        }
+        
+        const textoUpper = textoPreview.toUpperCase();
+        const esSantander = textoUpper.includes('SANTANDER') || textoUpper.includes('BANCO SANTANDER');
+        const esBanorte = textoUpper.includes('BANORTE') || textoUpper.includes('BANCO MERCANTIL DEL NORTE');
+        
+        // Buscar número de cuenta en el texto
+        // Santander: "CUENTA SANTANDER PYME   65-50908535-6" o "NUMERO DE CUENTA 65-50908535-6"
+        // Banorte: "No. de Cuenta: 1282396470"
+        let cuentaNumDetectada = '';
+        let bancoDetectado = cuenta.banco;
+        let tipoCuentaDetectado = cuenta.tipo;
+        
+        if (esSantander) {
+          bancoDetectado = 'SANTANDER';
+          // Patrones: "65-50908535-6" o "014180655090853560" (CLABE)
+          const matchCuenta = textoPreview.match(/(\d{2}-\d{8}-\d)/);
+          if (matchCuenta) cuentaNumDetectada = matchCuenta[1];
+          // Detectar si es inversión (INVERSION CRECIENTE)
+          if (textoUpper.includes('INVERSION')) tipoCuentaDetectado = 'inversion';
+        } else if (esBanorte) {
+          bancoDetectado = 'BANORTE';
+          const matchCuenta = textoPreview.match(/No\.?\s*de\s*Cuenta:?\s*(\d{6,})/i);
+          if (matchCuenta) cuentaNumDetectada = matchCuenta[1];
+          if (textoUpper.includes('INVERSION')) tipoCuentaDetectado = 'inversion';
+        }
+        
+        // Si el banco detectado no coincide con la cuenta seleccionada, buscar/crear cuenta correcta
+        if (bancoDetectado && cuentaNumDetectada && 
+            (cuenta.banco.toUpperCase() !== bancoDetectado || 
+             !cuenta.cuenta.includes(cuentaNumDetectada))) {
+          
+          // Buscar cuenta existente con ese número
+          let cuentaCorrecta = await db.cuentaBancaria.findFirst({
+            where: { 
+              empresaId: cuenta.empresaId,
+              cuenta: { contains: cuentaNumDetectada },
+            },
+          });
+          
+          if (!cuentaCorrecta) {
+            // Crear la cuenta automáticamente
+            cuentaCorrecta = await db.cuentaBancaria.create({
+              data: {
+                banco: bancoDetectado,
+                cuenta: cuentaNumDetectada,
+                saldo: 0,
+                tipo: tipoCuentaDetectado,
+                empresaId: cuenta.empresaId,
+              },
+            });
+            console.log(`✅ Cuenta creada automáticamente: ${bancoDetectado} ${cuentaNumDetectada}`);
+          }
+          
+          // Actualizar cuentaId para usar la cuenta correcta
+          if (cuentaCorrecta.id !== cuentaId) {
+            console.log(`🔄 Cuenta cambiada de ${cuenta.banco} ${cuenta.cuenta} → ${cuentaCorrecta.banco} ${cuentaCorrecta.cuenta}`);
+            // Reemplazar en los siguientes pasos usando la nueva cuenta
+            // (re-asignamos la variable cuenta para que el resto del flujo use la correcta)
+            (cuenta as any).id = cuentaCorrecta.id;
+            (cuenta as any).banco = cuentaCorrecta.banco;
+            (cuenta as any).cuenta = cuentaCorrecta.cuenta;
+            (cuenta as any).tipo = cuentaCorrecta.tipo;
+            (cuenta as any).empresaId = cuentaCorrecta.empresaId;
+            // Reasignar cuentaId
+            (formData as any).cuentaId = cuentaCorrecta.id;
+            // El código abajo usa cuentaId variable, así que necesitamos actualizarla
+            // Pero como es const, usamos una variable mutable
+          }
+        }
+      } catch (e) {
+        console.error('Error en auto-detección de banco:', e);
+        // Si falla, continuar con la cuenta original
+      }
+    }
+
+    // Re-leer cuentaId por si cambió por auto-detección
+    const cuentaIdFinal = (formData as any).cuentaId || cuentaId;
+
     // Parsear según formato
     let movimientos: MovimientoImportado[] = [];
     let formatoDetectado = 'desconocido';
@@ -900,10 +1025,10 @@ export async function POST(req: NextRequest) {
 
       mesesAfectados.add(`${mov.fecha.getFullYear()}-${String(mov.fecha.getMonth() + 1).padStart(2, '0')}`);
 
-      // Dedupe
+      // Dedupe (usar cuentaIdFinal por si cambió por auto-detección)
       const existente = await db.movimientoBanco.findFirst({
         where: {
-          cuentaId,
+          cuentaId: cuentaIdFinal,
           fecha: mov.fecha,
           concepto: mov.concepto,
           monto: mov.monto,
@@ -921,7 +1046,7 @@ export async function POST(req: NextRequest) {
           monto: mov.monto,
           tipo: mov.monto > 0 ? 'ingreso' : 'egreso',
           estado: 'conciliado',
-          cuentaId,
+          cuentaId: cuentaIdFinal,
         },
       });
       movimientosCreados++;
@@ -931,23 +1056,23 @@ export async function POST(req: NextRequest) {
     const inicioMes = new Date(anio, mes - 1, 1);
     const finMes = new Date(anio, mes, 0, 23, 59, 59);
     const movimientosMes = await db.movimientoBanco.findMany({
-      where: { cuentaId, fecha: { gte: inicioMes, lte: finMes } },
+      where: { cuentaId: cuentaIdFinal, fecha: { gte: inicioMes, lte: finMes } },
     });
     const saldoCalculado = movimientosMes.reduce((s, m) => s + m.monto, 0);
 
     // Total de TODOS los movimientos de la cuenta (todos los meses)
-    const totalCuenta = await db.movimientoBanco.count({ where: { cuentaId } });
+    const totalCuenta = await db.movimientoBanco.count({ where: { cuentaId: cuentaIdFinal } });
 
     // Actualizar el saldo de la cuenta con la suma de TODOS los movimientos
     const todosMovimientos = await db.movimientoBanco.findMany({
-      where: { cuentaId },
+      where: { cuentaId: cuentaIdFinal },
       select: { monto: true },
     });
     const saldoTotalCalculado = todosMovimientos.reduce((s, m) => s + m.monto, 0);
 
     // Actualizar el saldo en la cuenta bancaria
     await db.cuentaBancaria.update({
-      where: { id: cuentaId },
+      where: { id: cuentaIdFinal },
       data: { saldo: saldoTotalCalculado },
     });
 
@@ -969,6 +1094,9 @@ export async function POST(req: NextRequest) {
       movimientosTotalesCuenta: totalCuenta,
       mesesAfectados: mesesArray,
       saldoDelMes: saldoCalculado,
+      cuentaId: cuentaIdFinal,
+      cuentaBanco: cuenta.banco,
+      cuentaNumero: cuenta.cuenta,
       message: `✅ ${formatoDetectado} procesado: ${movimientosCreados} nuevos, ${movimientosDuplicados} duplicados de ${movimientos.length} detectados.${messageMonths} Total en la cuenta: ${totalCuenta} movimientos.`,
     });
   } catch (e: any) {

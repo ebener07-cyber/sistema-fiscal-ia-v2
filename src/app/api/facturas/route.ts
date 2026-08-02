@@ -53,19 +53,12 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // FILTRO RFC: si direccion=emitida, el emisorRfc debe ser el de la empresa
-    // Si direccion=recibida, el receptorRfc debe ser el de la empresa
-    // Esto previene que CFDIs mal asignados se muestren
+    // FILTRO: empresaId obligatorio. 
+    // El filtro por RFC se usa solo al INSERTAR (upload-cfdi), no al consultar,
+    // para evitar ocultar facturas que el usuario subió pero que tienen datos de RFC antiguos.
     const where: any = { empresaId };
     if (direccion) {
       where.direccion = direccion;
-      // Validación adicional por RFC (defensa doble)
-      const rfcEmpresa = empresa.rfc.toUpperCase();
-      if (direccion === 'emitida') {
-        where.emisorRfc = { equals: rfcEmpresa, mode: 'insensitive' };
-      } else if (direccion === 'recibida') {
-        where.receptorRfc = { equals: rfcEmpresa, mode: 'insensitive' };
-      }
     }
     // Excluir nómina (tipo N) del módulo de facturas
     where.tipoComprobante = tipo ? tipo : { not: 'N' };
@@ -113,22 +106,10 @@ export async function GET(req: NextRequest) {
       fecha: { gte: inicioAnioActual, lte: finAnioActual },
     };
 
-    // Aplicar también filtro por RFC para el resumen anual (todas las direcciones)
-    // para que el resumen mensual refleje correctamente las facturas emitidas y recibidas
-    const rfcEmpresa = empresa.rfc.toUpperCase();
+    // Traer todas las facturas del año para el resumen mensual
     const todasDelAnio = await db.factura.findMany({
       where: whereAnio,
       select: { fecha: true, total: true, totalImpuestos: true, direccion: true, tipoComprobante: true, emisorRfc: true, receptorRfc: true },
-    });
-
-    // Filtrar en memoria por RFC correspondiente a la dirección
-    const facturasValidas = todasDelAnio.filter(f => {
-      if (f.direccion === 'emitida') {
-        return (f.emisorRfc || '').toUpperCase() === rfcEmpresa;
-      } else if (f.direccion === 'recibida') {
-        return (f.receptorRfc || '').toUpperCase() === rfcEmpresa;
-      }
-      return false;
     });
 
     const resumenMensual: Array<{
@@ -144,7 +125,7 @@ export async function GET(req: NextRequest) {
     }> = [];
 
     for (let m = 1; m <= 12; m++) {
-      const delMes = facturasValidas.filter(f => new Date(f.fecha).getMonth() + 1 === m);
+      const delMes = todasDelAnio.filter(f => new Date(f.fecha).getMonth() + 1 === m);
       resumenMensual.push({
         mes: m,
         emitidas: delMes.filter(f => f.direccion === 'emitida' && f.tipoComprobante === 'I').length,
