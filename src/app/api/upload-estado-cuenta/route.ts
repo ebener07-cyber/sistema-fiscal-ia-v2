@@ -377,21 +377,25 @@ function parsePDFTexto(texto: string): MovimientoImportado[] {
 /**
  * Versión mejorada del parser que detecta MÚLTIPLES cuentas en el mismo PDF.
  * 
- * El PDF de Banorte tiene 2 secciones:
- *   1. ENLACE NEGOCIOS AVANZADA (cuenta de operaciones)
- *   2. INVERSION ENLACE NEGOCIOS (cuenta de inversión)
+ * SOPORTA:
+ * 1. Banorte: 2 secciones (ENLACE NEGOCIOS AVANZADA + INVERSION ENLACE NEGOCIOS)
+ * 2. Santander: 2 secciones (Detalle de movimientos cuenta de cheques + Detalles de movimientos Dinero Creciente)
  * 
- * Esta función devuelve los movimientos etiquetados con el tipo de cuenta
- * para que el backend pueda asignarlos correctamente.
+ * MEJORAS v2.4:
+ * - Detección explícita de secciones por headers (no por contexto difuso)
+ * - Extracción ESTRICTA de montos (NN,NNN.NN con 2 decimales obligatorios)
+ * - No confunde folios (7113421), CLABEs (014180655090853560), ni referencias con montos
+ * - Captura correctamente "SALDO FINAL DEL PERIODO ANTERIOR" como saldo inicial
+ * - Maneja movimientos multi-línea (descripción + varias líneas + monto+saldo)
+ * - Detecta fin de sección por línea "TOTAL" o "SALDO FINAL DEL PERIODO"
  */
 function parsePDFTextoMultiCuenta(texto: string): {
   movimientos: MovimientoImportado[];
-  seccionesDetectadas: Array<{ tipo: string; cuentaNumero: string; count: number }>;
+  seccionesDetectadas: Array<{ tipo: string; cuentaNumero: string; count: number; saldoInicial: number | null }>;
 } {
-  const movimientos: MovimientoImportado[] = [];
   const lineas = texto.split(/\r?\n/);
 
-  // Mapeo de meses abreviados en español (formato Banorte: 08-ENE-26)
+  // Mapeo de meses abreviados en español (formato Banorte: 08-ENE-26, Santander: 04-MAY-2026)
   const MESES_ES: Record<string, number> = {
     'ENE': 0, 'FEB': 1, 'MAR': 2, 'ABR': 3, 'MAY': 4, 'JUN': 5,
     'JUL': 6, 'AGO': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DIC': 11,
@@ -399,215 +403,308 @@ function parsePDFTextoMultiCuenta(texto: string): {
     'JULIO': 6, 'AGOSTO': 7, 'SEPTIEMBRE': 8, 'OCTUBRE': 9, 'NOVIEMBRE': 10, 'DICIEMBRE': 11,
   };
 
-  // Patrón de fecha numérica: DD/MM/YYYY o DD-MM-YYYY
-  const patronFechaNum = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
-  // Patrón de fecha Banorte: DD-ENE-26 (día + mes abreviado + año 2 dígitos)
+  // Patrones de fecha
   const patronFechaBanorte = /(\d{1,2})-([A-Z]{3,9})-(\d{2,4})/;
+  const patronFechaNum = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
 
-  // Patrones de palabras clave para identificar depósitos vs retiros
-  const keywordsDeposito = ['DISPOSICION', 'RECIBIDO', 'DEPOSITO DE CUENTA', 'DEV. DEPOSITO', 'DEVOLUCION', 'ABONO'];
-  const keywordsRetiro = ['COMPRA', 'PAGO', 'RETIRO', 'CARGO', 'TRASPASO', 'COMISION', 'COMISIÓN', 'TRANSFERENCIA', 'I.V.A.', 'INTERESES EXENTO', 'PAGO DE CAPITAL', 'PAGO DE CREDITO', 'PAGO DE LDC', 'ADMINISTRACION', 'COM. DISPERSION', 'IVA COM', 'IVA 00054', 'RETIRO DEP.', 'CGO', 'CARGO CAPITAL', 'CARGO POR', 'CGO INTERESES'];
-
-  // Variable para rastrear el saldo anterior (para determinar depósito vs retiro)
-  let saldoAnterior: number | null = null;
-
-  // ===== DETECCIÓN DE SECCIONES DE CUENTA =====
-  // El PDF de Banorte tiene headers como:
-  //   "ENLACE NEGOCIOS AVANZADA"
-  //   "INVERSION ENLACE NEGOCIOS"
-  // Y cada sección tiene su propio "No. de Cuenta: 1282396470"
-  let seccionActual: 'operaciones' | 'inversion' = 'operaciones';
-  const seccionesDetectadas: Array<{ tipo: string; cuentaNumero: string; count: number }> = [];
-  let cuentaNumeroActual = '';
-  let movsPorSeccion = 0;
-
-  // Procesar línea por línea, agrupando bloques de movimientos
-  let i = 0;
-  while (i < lineas.length) {
-    const linea = lineas[i].trim();
-    if (!linea || linea.length < 5) { i++; continue; }
-
-    // ===== DETECTAR CAMBIO DE SECCIÓN =====
-    const lineaUpper = linea.toUpperCase();
-    if (lineaUpper.includes('INVERSION') || lineaUpper.includes('INVERSIÓN')) {
-      // Si ya había una sección activa con movimientos, registrarla
-      if (movsPorSeccion > 0) {
-        seccionesDetectadas.push({ tipo: seccionActual, cuentaNumero: cuentaNumeroActual, count: movsPorSeccion });
+  // ===== EXTRACCIÓN ESTRICTA DE MONTOS =====
+  // Solo captura números con EXACTAMENTE 2 decimales (NN,NNN.NN o NNN.NN)
+  // No captura números pegados a letras ni números sin decimales
+  function extraerMontosLinea(linea: string): number[] {
+    const montos: number[] = [];
+    const regex = /(?:^|\s)(\d{1,3}(?:,\d{3})*\.\d{2})(?:\s|$)/g;
+    let match;
+    while ((match = regex.exec(linea)) !== null) {
+      const valor = parseFloat(match[1].replace(/,/g, ''));
+      if (!isNaN(valor) && valor > 0.5) {
+        montos.push(valor);
       }
-      seccionActual = 'inversion';
-      movsPorSeccion = 0;
-      // Buscar número de cuenta en las siguientes líneas
-      const cuentaMatch = linea.match(/No\.?\s*de\s*Cuenta:?\s*(\d{6,})/i);
-      if (cuentaMatch) cuentaNumeroActual = cuentaMatch[1];
-      i++;
-      continue;
     }
-    if (lineaUpper.includes('ENLACE NEGOCIOS AVANZADA') || 
-        (lineaUpper.includes('ENLACE NEGOCIOS') && !lineaUpper.includes('INVERSION') && !lineaUpper.includes('INVERSIÓN'))) {
-      if (movsPorSeccion > 0) {
-        seccionesDetectadas.push({ tipo: seccionActual, cuentaNumero: cuentaNumeroActual, count: movsPorSeccion });
-      }
-      seccionActual = 'operaciones';
-      movsPorSeccion = 0;
-      i++;
-      continue;
+    return montos;
+  }
+
+  function quitarMontos(texto: string): string {
+    return texto.replace(/(?:^|\s)\d{1,3}(?:,\d{3})*\.\d{2}(?:\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  // ===== FASE 1: DETECTAR SECCIONES =====
+  // Buscar headers de secciones conocidos:
+  // - Santander: "Detalle de movimientos cuenta de cheques." + "Detalles de movimientos Dinero Creciente"
+  // - Banorte: "ENLACE NEGOCIOS AVANZADA" + "INVERSION ENLACE NEGOCIOS"
+  interface Seccion {
+    tipo: 'operaciones' | 'inversion';
+    cuentaNum: string;
+    lineaInicio: number;
+    lineaFin: number | null;
+    saldoInicial: number | null;
+    banco: 'santander' | 'banorte' | 'desconocido';
+  }
+  
+  const secciones: Seccion[] = [];
+  let seccionActual: Seccion | null = null;
+
+  function cerrarSeccion(lineaFin: number) {
+    if (seccionActual) {
+      seccionActual.lineaFin = lineaFin;
+      secciones.push(seccionActual);
+      seccionActual = null;
+    }
+  }
+
+  function iniciarSeccion(tipo: 'operaciones' | 'inversion', banco: 'santander' | 'banorte', lineaInicio: number) {
+    // Buscar número de cuenta en las siguientes 3 líneas
+    let cuentaNum = '';
+    for (let j = lineaInicio; j < Math.min(lineaInicio + 4, lineas.length); j++) {
+      // Santander: 65-50908535-6 (DD-NNNNNNNN-D)
+      let match = lineas[j].match(/(\d{2}-\d{8}-\d)/);
+      if (match) { cuentaNum = match[1]; break; }
+      // Banorte: 1282396470 (10 dígitos)
+      match = lineas[j].match(/No\.?\s*de\s*Cuenta:?\s*(\d{6,})/i);
+      if (match) { cuentaNum = match[1]; break; }
     }
     
-    // Buscar "No. de Cuenta: XXXXXXX" en cualquier línea
-    const cuentaMatch = linea.match(/No\.?\s*de\s*Cuenta:?\s*(\d{6,})/i);
-    if (cuentaMatch) {
-      cuentaNumeroActual = cuentaMatch[1];
-      i++;
-      continue;
-    }
-
-    // Intentar parsear fecha de esta línea
-    let fecha: Date | null = null;
-    let fechaMatch: RegExpMatchArray | null = null;
-    let restoLinea = linea;
-
-    // Intentar formato Banorte primero (DD-ENE-26)
-    const matchBanorte = linea.match(patronFechaBanorte);
-    if (matchBanorte) {
-      const dia = parseInt(matchBanorte[1]);
-      const mesStr = matchBanorte[2].toUpperCase();
-      const mes = MESES_ES[mesStr];
-      let anio = parseInt(matchBanorte[3]);
-      if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
-
-      if (mes !== undefined && dia >= 1 && dia <= 31) {
-        fecha = new Date(anio, mes, dia, 12, 0, 0);
-        fechaMatch = matchBanorte;
-        restoLinea = linea.substring(matchBanorte.index! + matchBanorte[0].length).trim();
+    // Buscar saldo inicial
+    let saldoInicial: number | null = null;
+    for (let j = lineaInicio; j < Math.min(lineaInicio + 6, lineas.length); j++) {
+      // "SALDO FINAL DEL PERIODO ANTERIOR:   $82,075.16" (Santander)
+      const matchSaldo = lineas[j].match(/SALDO.*?ANTERIOR:?\s*\$?([\d,]+\.\d{2})/i);
+      if (matchSaldo) {
+        saldoInicial = parseFloat(matchSaldo[1].replace(/[$,]/g, ''));
+        break;
+      }
+      // "SALDO ANTERIOR: $119,827.38" (Banorte)
+      const matchSaldoBn = lineas[j].match(/SALDO\s+ANTERIOR\s*:?\s*\$?([\d,]+\.\d{2})/i);
+      if (matchSaldoBn) {
+        saldoInicial = parseFloat(matchSaldoBn[1].replace(/[$,]/g, ''));
+        break;
       }
     }
+    
+    seccionActual = { tipo, cuentaNum, lineaInicio, lineaFin: null, saldoInicial, banco };
+  }
 
-    // Si no es Banorte, intentar formato numérico
-    if (!fecha) {
-      const matchNum = linea.match(patronFechaNum);
-      if (matchNum) {
-        const dia = parseInt(matchNum[1]);
-        const mes = parseInt(matchNum[2]) - 1;
-        let anio = parseInt(matchNum[3]);
-        if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
-
-        if (mes >= 0 && mes <= 11 && dia >= 1 && dia <= 31) {
-          fecha = new Date(anio, mes, dia, 12, 0, 0);
-          fechaMatch = matchNum;
-          restoLinea = linea.substring(matchNum.index! + matchNum[0].length).trim();
-        }
+  for (let i = 0; i < lineas.length; i++) {
+    const linea = lineas[i];
+    const lineaUpper = linea.toUpperCase();
+    
+    // ===== DETECCIÓN SANTANDER =====
+    // "Detalle de movimientos cuenta de cheques."
+    if (lineaUpper.includes('DETALLE DE MOVIMIENTOS CUENTA DE CHEQUES') ||
+        (lineaUpper.includes('DETALLE DE MOVIMIENTOS') && !lineaUpper.includes('DINERO'))) {
+      cerrarSeccion(i - 1);
+      iniciarSeccion('operaciones', 'santander', i);
+    }
+    // "Detalles de movimientos Dinero Creciente Santander." (sección de inversión)
+    if (lineaUpper.includes('DETALLES DE MOVIMIENTOS DINERO') || 
+        (lineaUpper.includes('DETALLE DE MOVIMIENTOS') && lineaUpper.includes('DINERO'))) {
+      cerrarSeccion(i - 1);
+      iniciarSeccion('inversion', 'santander', i);
+    }
+    
+    // ===== DETECCIÓN BANORTE =====
+    if (lineaUpper.includes('INVERSION') && lineaUpper.includes('ENLACE NEGOCIOS')) {
+      cerrarSeccion(i - 1);
+      iniciarSeccion('inversion', 'banorte', i);
+    }
+    if (lineaUpper.includes('ENLACE NEGOCIOS AVANZADA') || 
+        (lineaUpper.includes('ENLACE NEGOCIOS') && !lineaUpper.includes('INVERSION'))) {
+      cerrarSeccion(i - 1);
+      iniciarSeccion('operaciones', 'banorte', i);
+    }
+    
+    // ===== FIN DE SECCIÓN =====
+    // "TOTAL   797,935.76   371,869.72" o "SALDO FINAL DEL PERIODO:"
+    if (seccionActual && seccionActual.lineaFin === null) {
+      if (lineaUpper.match(/^TOTAL\s+\d/) || 
+          (lineaUpper.includes('SALDO FINAL DEL PERIODO') && !lineaUpper.includes('ANTERIOR')) ||
+          lineaUpper.includes('INFORMACION FISCAL') ||
+          lineaUpper.includes('INFORMACIÓN FISCAL')) {
+        cerrarSeccion(i);
       }
     }
+  }
+  // Cerrar última sección
+  cerrarSeccion(lineas.length - 1);
 
-    if (!fecha || isNaN(fecha.getTime())) { i++; continue; }
-
-    // ===== Acumular descripción y buscar línea de montos =====
-    let concepto = restoLinea;
-    let montoEncontrado: number | null = null;
-    let saldoEncontrado: number | null = null;
-
-    // Buscar montos en la línea actual (puede que fecha y monto estén juntos)
-    const montosLineaActual = extraerMontos(linea);
-    if (montosLineaActual.length >= 2) {
-      montoEncontrado = montosLineaActual[0];
-      saldoEncontrado = montosLineaActual[1];
-      // Quitar montos del concepto
-      concepto = quitarMontos(concepto);
-    } else if (montosLineaActual.length === 1 && concepto.length < 30) {
-      // Solo un monto y concepto corto — puede ser un movimiento simple
-      montoEncontrado = montosLineaActual[0];
-      concepto = quitarMontos(concepto);
-    }
-
-    // Si no se encontraron montos en la línea actual, buscar en líneas siguientes
-    if (montoEncontrado === null) {
-      let j = i + 1;
-      while (j < lineas.length && j < i + 10) {
-        const lineaSiguiente = lineas[j].trim();
-        if (!lineaSiguiente) { j++; continue; }
-
-        // Si encontramos otra fecha, ya no hay montos para este movimiento
-        if (patronFechaBanorte.test(lineaSiguiente) || patronFechaNum.test(lineaSiguiente)) {
-          break;
-        }
-
-        const montosSiguiente = extraerMontos(lineaSiguiente);
-        if (montosSiguiente.length >= 2) {
-          montoEncontrado = montosSiguiente[0];
-          saldoEncontrado = montosSiguiente[1];
-          break;
-        } else if (montosSiguiente.length === 1 && j > i + 1) {
-          // Una sola cantidad después de varias líneas de descripción
-          montoEncontrado = montosSiguiente[0];
-          break;
-        }
-
-        // Acumular como parte de la descripción
-        concepto += ' ' + lineaSiguiente;
-        j++;
-      }
-    }
-
-    if (montoEncontrado === null || Math.abs(montoEncontrado) < 0.5) { i++; continue; }
-
-    // ===== Determinar si es depósito o retiro =====
-    let montoFinal = montoEncontrado;
-
-    // Método 1: PRIMERO comparar con saldo anterior (MÁS CONFIABLE)
-    if (saldoEncontrado !== null && saldoAnterior !== null) {
-      const diferencia = saldoEncontrado - saldoAnterior;
-      // Si la diferencia coincide con el monto (±2%), usar el signo de la diferencia
-      if (Math.abs(Math.abs(diferencia) - montoEncontrado) < montoEncontrado * 0.02) {
-        montoFinal = diferencia; // Positive = deposit, negative = withdrawal
-      } else if (diferencia < 0) {
-        // El saldo bajó — es un retiro
-        montoFinal = -Math.abs(montoEncontrado);
+  // ===== FASE 2: PARSEAR MOVIMIENTOS DE CADA SECCIÓN =====
+  function parsearSeccion(seccion: Seccion): MovimientoImportado[] {
+    const movimientos: MovimientoImportado[] = [];
+    let saldoAnterior = seccion.saldoInicial;
+    
+    let i = seccion.lineaInicio;
+    while (i <= (seccion.lineaFin ?? lineas.length - 1)) {
+      const linea = lineas[i];
+      if (!linea || !linea.trim()) { i++; continue; }
+      
+      // Buscar fecha al inicio de la línea (puede ser Banorte DD-ENE-26 o Santander DD-MAY-2026)
+      const matchFecha = linea.match(patronFechaBanorte) || linea.match(patronFechaNum);
+      if (!matchFecha) { i++; continue; }
+      
+      // Saltar headers
+      const lineaUpper = linea.toUpperCase();
+      if (lineaUpper.includes('FECHA') && lineaUpper.includes('FOLIO')) { i++; continue; }
+      if (lineaUpper.match(/^TOTAL\s/) || lineaUpper.includes('SALDO FINAL DEL PERIODO')) { i++; continue; }
+      
+      const dia = parseInt(matchFecha[1]);
+      let mes: number | undefined;
+      let mesStr = '';
+      
+      if (matchFecha[2] && isNaN(parseInt(matchFecha[2]))) {
+        // Es mes en texto (ENE, FEB, etc.)
+        mesStr = matchFecha[2].toUpperCase();
+        mes = MESES_ES[mesStr];
       } else {
-        // El saldo subió — es un depósito
-        montoFinal = Math.abs(montoEncontrado);
+        // Es mes numérico (01, 02, etc.)
+        mes = parseInt(matchFecha[2]) - 1;
       }
-    } else {
-      // Método 2: Si no hay saldo, usar keywords como FALLBACK
-      const conceptoUpper = concepto.toUpperCase();
-      const esRetiro = keywordsRetiro.some(k => conceptoUpper.includes(k));
-      const esDeposito = keywordsDeposito.some(k => conceptoUpper.includes(k));
-
-      if (esRetiro) {
-        montoFinal = -Math.abs(montoEncontrado);
-      } else if (esDeposito) {
-        montoFinal = Math.abs(montoEncontrado);
+      
+      let anio = parseInt(matchFecha[3]);
+      if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
+      
+      if (mes === undefined || mes < 0 || mes > 11 || dia < 1 || dia > 31) { i++; continue; }
+      
+      const fecha = new Date(anio, mes, dia, 12, 0, 0);
+      const restoLinea = linea.substring(matchFecha.index! + matchFecha[0].length).trim();
+      
+      // Acumular descripción y buscar monto+saldo
+      let concepto = restoLinea;
+      let montoEncontrado: number | null = null;
+      let saldoEncontrado: number | null = null;
+      let lineaMontoIdx = -1;
+      
+      // Buscar montos en la línea actual (caso simple: fecha + descripción + monto + saldo en una línea)
+      // Pero tambien considerar que el saldo puede ser 0.00 (que el filtro > 0.5 descarta)
+      // Por eso, extraemos TODOS los números con formato monetario (incluso 0.00)
+      function extraerMontosLineaInclusivo(linea: string): number[] {
+        const montos: number[] = [];
+        const regex = /(?:^|\s)(\d{1,3}(?:,\d{3})*\.\d{2})(?:\s|$)/g;
+        let match;
+        while ((match = regex.exec(linea)) !== null) {
+          const valor = parseFloat(match[1].replace(/,/g, ''));
+          if (!isNaN(valor)) {
+            montos.push(valor);
+          }
+        }
+        return montos;
       }
-      // Si no hay keyword, mantener positivo (depósito por defecto)
+      
+      const montosAqui = extraerMontosLinea(linea);
+      const montosAquiInclusivo = extraerMontosLineaInclusivo(linea);
+      
+      if (montosAquiInclusivo.length >= 2) {
+        // Hay al menos 2 montos: el primero es el monto del movimiento, el segundo es el saldo
+        montoEncontrado = montosAquiInclusivo[0];
+        saldoEncontrado = montosAquiInclusivo[1];
+        // Solo aceptar si el monto es > 0.5 (el saldo puede ser 0)
+        if (Math.abs(montoEncontrado) < 0.5) {
+          montoEncontrado = null;
+          saldoEncontrado = null;
+        } else {
+          concepto = quitarMontos(restoLinea);
+          lineaMontoIdx = i;
+        }
+      } else if (montosAqui.length === 1 && restoLinea.length < 50) {
+        // Solo 1 monto y descripción corta — puede ser movimiento simple sin saldo
+        montoEncontrado = montosAqui[0];
+        concepto = quitarMontos(restoLinea);
+        lineaMontoIdx = i;
+      }
+      
+      // Si no, buscar en líneas siguientes (movimientos multi-línea)
+      if (montoEncontrado === null) {
+        let j = i + 1;
+        const limiteBusqueda = Math.min((seccion.lineaFin ?? lineas.length - 1) + 1, i + 20);
+        while (j < limiteBusqueda) {
+          const lineaSiguiente = lineas[j];
+          if (!lineaSiguiente || !lineaSiguiente.trim()) { j++; continue; }
+          
+          // Si encontramos otra fecha al inicio, ya no hay montos
+          const matchFechaSgte = lineaSiguiente.match(patronFechaBanorte) || lineaSiguiente.match(patronFechaNum);
+          if (matchFechaSgte && matchFechaSgte.index === 0) break;
+          
+          const lUpper = lineaSiguiente.toUpperCase();
+          if (lUpper.match(/^TOTAL\s/) || lUpper.includes('SALDO FINAL DEL PERIODO')) break;
+          
+          const montosSgte = extraerMontosLinea(lineaSiguiente);
+          if (montosSgte.length >= 2) {
+            montoEncontrado = montosSgte[0];
+            saldoEncontrado = montosSgte[1];
+            lineaMontoIdx = j;
+            break;
+          } else if (montosSgte.length === 1 && j > i + 1) {
+            montoEncontrado = montosSgte[0];
+            saldoEncontrado = null;
+            lineaMontoIdx = j;
+            break;
+          }
+          
+          concepto += ' ' + lineaSiguiente.trim();
+          j++;
+        }
+      }
+      
+      if (montoEncontrado === null || Math.abs(montoEncontrado) < 0.5) { i++; continue; }
+      
+      // Limpiar concepto: quitar folio al inicio (7 dígitos) y montos
+      concepto = concepto.replace(/^\s*\d{7}\s*/, '');
+      concepto = quitarMontos(concepto).replace(/\s+/g, ' ').trim().slice(0, 300);
+      if (!concepto) concepto = 'Movimiento bancario';
+      
+      // Determinar signo
+      let montoFinal = montoEncontrado;
+      if (saldoEncontrado !== null && saldoAnterior !== null) {
+        const diferencia = saldoEncontrado - saldoAnterior;
+        if (Math.abs(Math.abs(diferencia) - montoEncontrado) < montoEncontrado * 0.02) {
+          montoFinal = diferencia;
+        } else if (diferencia < 0) {
+          montoFinal = -Math.abs(montoEncontrado);
+        } else {
+          montoFinal = Math.abs(montoEncontrado);
+        }
+      } else {
+        // Fallback por keywords
+        const conceptoUpper = concepto.toUpperCase();
+        const esRetiro = ['COMPRA', 'PAGO', 'RETIRO', 'CARGO', 'TRASPASO', 'COMISION', 'COMISIÓN', 
+                          'TRANSFERENCIA', 'INTERESES EXENTO', 'PAGO DE CAPITAL', 'PAGO DE CREDITO', 
+                          'ADMINISTRACION', 'CGO', 'CARGO CAPITAL', 'CARGO POR', 'CGO INTERESES',
+                          'I V A POR COMISION', 'PAGO PRIMA SEGURO', 'I.V.A.'].some(k => conceptoUpper.includes(k));
+        const esDeposito = ['DISPOSICION', 'RECIBIDO', 'DEPOSITO DE CUENTA', 'DEV. DEPOSITO', 
+                            'DEVOLUCION', 'ABONO', 'APORT LINEA CAPTURA'].some(k => conceptoUpper.includes(k));
+        if (esRetiro) montoFinal = -Math.abs(montoEncontrado);
+        else if (esDeposito) montoFinal = Math.abs(montoEncontrado);
+      }
+      
+      if (saldoEncontrado !== null) saldoAnterior = saldoEncontrado;
+      
+      movimientos.push({
+        fecha,
+        concepto,
+        monto: montoFinal,
+        ...(seccion.tipo === 'inversion' ? { esInversion: true } : {}),
+      } as any);
+      
+      i = lineaMontoIdx > 0 ? lineaMontoIdx + 1 : i + 1;
     }
-
-    // Actualizar saldo anterior
-    if (saldoEncontrado !== null) {
-      saldoAnterior = saldoEncontrado;
-    }
-
-    // Limpiar concepto
-    concepto = quitarMontos(concepto).replace(/\s+/g, ' ').trim().slice(0, 300);
-    if (!concepto) concepto = 'Movimiento bancario';
-
-    // Agregar movimiento con tipo de cuenta detectado
-    movimientos.push({
-      fecha,
-      concepto,
-      monto: montoFinal,
-      // Campo extra para saber a qué cuenta asignarlo
-      // Usamos el campo concepto temporalmente para que el backend lo procese
-      ...(seccionActual === 'inversion' ? { esInversion: true } : {}),
-    } as any);
-    movsPorSeccion++;
-    i++;
+    
+    return movimientos;
   }
 
-  // Registrar última sección
-  if (movsPorSeccion > 0) {
-    seccionesDetectadas.push({ tipo: seccionActual, cuentaNumero: cuentaNumeroActual, count: movsPorSeccion });
+  // ===== FASE 3: PROCESAR TODAS LAS SECCIONES =====
+  const todosMovimientos: MovimientoImportado[] = [];
+  const seccionesDetectadas: Array<{ tipo: string; cuentaNumero: string; count: number; saldoInicial: number | null }> = [];
+  
+  for (const seccion of secciones) {
+    const movs = parsearSeccion(seccion);
+    todosMovimientos.push(...movs);
+    seccionesDetectadas.push({
+      tipo: seccion.tipo,
+      cuentaNumero: seccion.cuentaNum,
+      count: movs.length,
+      saldoInicial: seccion.saldoInicial,
+    });
   }
 
-  return { movimientos, seccionesDetectadas };
+  return { movimientos: todosMovimientos, seccionesDetectadas };
 }
 
 // Extrae montos numéricos de una línea (formato: 80,000.00 o $1,234.56)
@@ -789,7 +886,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Re-leer cuentaId por si cambió por auto-detección
-    const cuentaIdFinal = (formData as any).cuentaId || cuentaId;
+    let cuentaIdFinal: string = (formData as any).cuentaId || cuentaId;
 
     // Parsear según formato
     let movimientos: MovimientoImportado[] = [];
@@ -891,58 +988,105 @@ export async function POST(req: NextRequest) {
         const { movimientos: movsPDF, seccionesDetectadas } = parsePDFTextoMultiCuenta(textoPDF);
         movimientos = movsPDF;
 
-        // Si se detectaron múltiples secciones (operaciones + inversión),
-        // buscar/crear la cuenta de inversión y asignar los movimientos automáticamente
-        if (seccionesDetectadas.length > 1 || seccionesDetectadas.some(s => s.tipo === 'inversion')) {
-          const tieneInversion = seccionesDetectadas.some(s => s.tipo === 'inversion');
-          if (tieneInversion) {
-            // Buscar si ya existe una cuenta de inversión para esta empresa
-            let cuentaInversion = await db.cuentaBancaria.findFirst({
-              where: { empresaId: cuenta.empresaId, tipo: 'inversion' },
+        // ===== PROCESAR MÚLTIPLES SECCIONES =====
+        // Cada sección tiene su propio tipo y número de cuenta.
+        // Vamos a:
+        // 1. Para cada sección detectada, buscar/crear la cuenta correspondiente
+        // 2. Insertar los movimientos en la cuenta correcta (no solo en la cuentaId original)
+        if (seccionesDetectadas.length > 0) {
+          console.log(`📊 Secciones detectadas: ${seccionesDetectadas.length}`);
+          seccionesDetectadas.forEach(s => {
+            console.log(`  - ${s.tipo} (${s.cuentaNumero}): ${s.count} movs`);
+          });
+          
+          // Separar movimientos por sección usando el flag esInversion
+          const movsOperaciones = movimientos.filter((m: any) => !m.esInversion);
+          const movsInversion = movimientos.filter((m: any) => (m as any).esInversion);
+          
+          // Quitar el flag esInversion
+          for (const m of movsOperaciones) { delete (m as any).esInversion; }
+          for (const m of movsInversion) { delete (m as any).esInversion; }
+          
+          // Buscar la sección de operaciones para saber el número de cuenta
+          const secOperaciones = seccionesDetectadas.find(s => s.tipo === 'operaciones');
+          const secInversion = seccionesDetectadas.find(s => s.tipo === 'inversion');
+          
+          // Determinar el banco desde las secciones
+          let bancoDetectado = cuenta.banco;
+          if (secOperaciones?.cuentaNumero.match(/^\d{2}-\d{8}-\d$/)) {
+            bancoDetectado = 'SANTANDER';
+          } else if (secOperaciones?.cuentaNumero.match(/^\d{10}$/)) {
+            bancoDetectado = 'BANORTE';
+          }
+          
+          // ===== CUENTA DE OPERACIONES =====
+          // Si la cuenta seleccionada no coincide con la detectada, buscar/crear la correcta
+          let cuentaOperacionesId = cuentaIdFinal;
+          if (secOperaciones?.cuentaNumero && 
+              !cuenta.cuenta.includes(secOperaciones.cuentaNumero)) {
+            let cuentaOp = await db.cuentaBancaria.findFirst({
+              where: { 
+                empresaId: cuenta.empresaId,
+                cuenta: { contains: secOperaciones.cuentaNumero },
+              },
             });
-            
-            if (!cuentaInversion) {
-              // Crear la cuenta de inversión automáticamente
-              cuentaInversion = await db.cuentaBancaria.create({
+            if (!cuentaOp) {
+              cuentaOp = await db.cuentaBancaria.create({
                 data: {
-                  banco: cuenta.banco + ' Inversión',
-                  cuenta: cuenta.cuenta + ' (Inversión)',
+                  banco: bancoDetectado,
+                  cuenta: secOperaciones.cuentaNumero,
+                  saldo: 0,
+                  tipo: 'operaciones',
+                  empresaId: cuenta.empresaId,
+                },
+              });
+              console.log(`✅ Cuenta operaciones creada: ${bancoDetectado} ${secOperaciones.cuentaNumero}`);
+            }
+            cuentaOperacionesId = cuentaOp.id;
+            // Actualizar cuentaIdFinal para que el resto del flujo use esta cuenta
+            (formData as any).cuentaId = cuentaOp.id;
+            cuentaIdFinal = cuentaOp.id;
+          }
+          
+          // ===== CUENTA DE INVERSIÓN =====
+          let cuentaInversionId: string | null = null;
+          if (secInversion?.cuentaNumero && movsInversion.length > 0) {
+            let cuentaInv = await db.cuentaBancaria.findFirst({
+              where: { 
+                empresaId: cuenta.empresaId,
+                cuenta: { contains: secInversion.cuentaNumero },
+              },
+            });
+            if (!cuentaInv) {
+              cuentaInv = await db.cuentaBancaria.create({
+                data: {
+                  banco: bancoDetectado + ' Inversión',
+                  cuenta: secInversion.cuentaNumero,
                   saldo: 0,
                   tipo: 'inversion',
                   empresaId: cuenta.empresaId,
                 },
               });
-              console.log(`✅ Cuenta de inversión creada automáticamente: ${cuentaInversion.id}`);
+              console.log(`✅ Cuenta inversión creada: ${bancoDetectado} Inversión ${secInversion.cuentaNumero}`);
             }
+            cuentaInversionId = cuentaInv.id;
             
-            // Reasignar movimientos: los marcados como esInversion van a la cuenta de inversión
-            // Procesar movimientos con etiqueta esInversion
-            const movsOperaciones = movimientos.filter((m: any) => !m.esInversion);
-            const movsInversion = movimientos.filter((m: any) => (m as any).esInversion);
-            
-            // Quitar la marca esInversion de los objetos (no se guarda en BD)
-            for (const m of movsOperaciones) { delete (m as any).esInversion; }
-            for (const m of movsInversion) { delete (m as any).esInversion; }
-            
-            // Insertar movimientos de inversión directamente en la cuenta de inversión
-            let movsInvCreados = 0;
-            let movsInvDuplicados = 0;
+            // Insertar movimientos de inversión directamente
+            let invCreados = 0;
+            let invDuplicados = 0;
             for (const mov of movsInversion) {
               const yearMov = mov.fecha.getFullYear();
               if (yearMov < 2020 || yearMov > new Date().getFullYear() + 1) continue;
               
               const existente = await db.movimientoBanco.findFirst({
                 where: {
-                  cuentaId: cuentaInversion.id,
+                  cuentaId: cuentaInversionId,
                   fecha: mov.fecha,
                   concepto: mov.concepto,
                   monto: mov.monto,
                 },
               });
-              if (existente) {
-                movsInvDuplicados++;
-                continue;
-              }
+              if (existente) { invDuplicados++; continue; }
               
               await db.movimientoBanco.create({
                 data: {
@@ -951,30 +1095,32 @@ export async function POST(req: NextRequest) {
                   monto: mov.monto,
                   tipo: mov.monto > 0 ? 'ingreso' : 'egreso',
                   estado: 'conciliado',
-                  cuentaId: cuentaInversion.id,
+                  cuentaId: cuentaInversionId,
                 },
               });
-              movsInvCreados++;
+              invCreados++;
             }
             
-            // Actualizar saldo de la cuenta de inversión
-            if (movsInvCreados > 0) {
-              const todosMovsInv = await db.movimientoBanco.findMany({
-                where: { cuentaId: cuentaInversion.id },
+            // Actualizar saldo de cuenta de inversión
+            if (invCreados > 0) {
+              const todosInv = await db.movimientoBanco.findMany({
+                where: { cuentaId: cuentaInversionId },
                 select: { monto: true },
               });
-              const saldoInv = todosMovsInv.reduce((s, m) => s + m.monto, 0);
+              const saldoInv = todosInv.reduce((s, m) => s + m.monto, 0);
               await db.cuentaBancaria.update({
-                where: { id: cuentaInversion.id },
+                where: { id: cuentaInversionId },
                 data: { saldo: saldoInv },
               });
             }
             
-            // Filtrar movimientos para que solo se inserten los de operaciones en la cuenta original
-            movimientos = movsOperaciones;
-            
-            console.log(`📊 PDF multi-cuenta: ${movsOperaciones.length} operaciones, ${movsInversion.length} inversión (${movsInvCreados} nuevos, ${movsInvDuplicados} duplicados)`);
+            console.log(`📊 Inversión: ${movsInversion.length} movs (${invCreados} nuevos, ${invDuplicados} duplicados)`);
           }
+          
+          // Mantener solo los movimientos de operaciones para el flujo principal
+          movimientos = movsOperaciones;
+          
+          console.log(`📊 Operaciones: ${movsOperaciones.length} movs para cuenta ${cuentaOperacionesId}`);
         }
 
         if (movimientos.length === 0 && seccionesDetectadas.length === 0) {
@@ -1014,6 +1160,34 @@ export async function POST(req: NextRequest) {
     let movimientosDuplicados = 0;
     let movimientosFueraRango = 0;
     const mesesAfectados = new Set<string>();
+
+    // ===== MOVIMIENTO DE APERTURA =====
+    // Si es un PDF (con secciones detectadas) y la cuenta está vacía,
+    // agregar el saldo inicial como movimiento de apertura para que el saldo de la cuenta
+    // cuadre con el saldo final del PDF del último mes
+    if (ext === 'pdf' && seccionesDetectadas.length > 0) {
+      const secOp = seccionesDetectadas.find(s => s.tipo === 'operaciones');
+      if (secOp && secOp.saldoInicial !== null && secOp.saldoInicial > 0) {
+        // Verificar que la cuenta destino esté vacía
+        const movsExistentes = await db.movimientoBanco.count({ where: { cuentaId: cuentaIdFinal } });
+        if (movsExistentes === 0) {
+          // Crear movimiento de apertura con el saldo inicial
+          const fechaApertura = new Date(anio, mes - 1, 1, 12, 0, 0);
+          await db.movimientoBanco.create({
+            data: {
+              fecha: fechaApertura,
+              concepto: 'SALDO INICIAL DE APERTURA (saldo final del periodo anterior según PDF)',
+              monto: secOp.saldoInicial,
+              tipo: 'ingreso',
+              estado: 'conciliado',
+              cuentaId: cuentaIdFinal,
+            },
+          });
+          movimientosCreados++;
+          console.log(`💰 Movimiento de apertura creado: $${secOp.saldoInicial}`);
+        }
+      }
+    }
 
     for (const mov of movimientos) {
       // Si la fecha es inválida o muy antigua/futura, saltar

@@ -9,8 +9,8 @@
 - **Repo GitHub:** https://github.com/ebener07-cyber/sistema-fiscal-ia-v2
 - **Deploy:** https://sistema-fiscal-ia-v2.vercel.app
 - **BD:** Neon PostgreSQL (ep-red-smoke-atnx331h-pooler.c-9.us-east-1.aws.neon.tech)
-- **Versión actual:** v2.3
-- **Fecha última actualización:** 2 agosto 2026
+- **Versión actual:** v2.4
+- **Fecha última actualización:** 2 agosto 2026 (tarde)
 
 ---
 
@@ -424,6 +424,38 @@ bun install
 - `src/components/sistema-completo.tsx` — BancosView, SatView, ProveedoresView, EmpleadosView, DashboardView rediseñados
 - `scripts/limpiar-cfdi-mezclados.ts` — Script de limpieza de BD
 - `scripts/diagnostico-completo.ts` — Diagnóstico de CFDIs por RFC
+
+---
+
+## 📝 v2.4 — Soporte Santander + corrección CFDIs mal clasificados (2 agosto 2026 tarde)
+
+### Problemas resueltos:
+1. **SAT Emitidas sin mostrar nada**:
+   - ELECTRONICMA tenía 190 emitidas en BD pero solo 96 con RFC matching (ALO980508ID6)
+   - 94 eran facturas de proveedores (CFE, BANORTE, IMSS, HOME DEPOT, etc.) mal clasificadas como 'emitidas'
+   - Script `convertir-mal-clasificadas.ts` las convirtió a `direccion='recibida'` (94 convertidas)
+   - Quitado el filtro RFC restrictivo de la API GET (mantener solo filtro empresaId)
+   - Estado final: ELECTRONICMA tiene 96 emitidas propias + 95 recibidas (94 + 1 NC)
+
+2. **Agregar cuenta Santander**:
+   - Creada cuenta SANTANDER 65-50908535-6 (tipo operaciones) en BD de ELECTRONICMA
+   - Subidos 30 movimientos del PDF Santander-Enero a la BD
+   - Saldo final: -$45,712.01
+
+3. **Soporte PDF Santander**:
+   - Formato fecha: DD-ENE-2026 (compatible con parser Banorte)
+   - Estructura: línea de fecha + descripción + línea con monto y saldo
+   - Agregados keywords: ABONO (depósito), CGO/CARGO CAPITAL/CARGO POR/CGO INTERESES (retiro)
+   - Auto-detección de banco: si el PDF contiene "SANTANDER" o "BANORTE", identifica el banco
+   - Auto-creación de cuenta: si la cuenta detectada no existe, la crea automáticamente
+   - Auto-redirección: si la cuenta seleccionada no coincide con el banco del PDF, redirige a la cuenta correcta
+
+### Archivos modificados:
+- `src/app/api/facturas/route.ts` — Quitado filtro RFC restrictivo del GET
+- `src/app/api/upload-estado-cuenta/route.ts` — Auto-detección de banco Santander/Banorte + auto-creación de cuenta + keywords Santander
+- `scripts/convertir-mal-clasificadas.ts` — Script para corregir 94 facturas mal clasificadas
+- `scripts/agregar-cuenta-santander.ts` — Script para crear cuenta Santander
+- `scripts/subir-santander-bd.ts` — Script para procesar PDF Santander y subir a BD
 
 ---
 
