@@ -30,9 +30,43 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
     const pageSize = Math.min(Math.max(1, parseInt(searchParams.get('pageSize') ?? '50')), 500);
 
-    const where: any = {};
-    if (direccion) where.direccion = direccion;
-    if (empresaId) where.empresaId = empresaId;
+    // Si no viene empresaId, devolver vacío (defensa contra CFDIs mezclados)
+    if (!empresaId) {
+      return NextResponse.json({
+        facturas: [],
+        total: 0, iva: 0, subtotal: 0, count: 0, totalCount: 0,
+        pagination: { page, pageSize, totalPages: 0, hasNext: false, hasPrev: false },
+        resumenMensual: [],
+        error: 'Falta empresaId',
+      });
+    }
+
+    // Buscar la empresa para validar RFC
+    const empresa = await db.empresa.findUnique({ where: { id: empresaId }, select: { rfc: true, nombre: true } });
+    if (!empresa) {
+      return NextResponse.json({
+        facturas: [],
+        total: 0, iva: 0, subtotal: 0, count: 0, totalCount: 0,
+        pagination: { page, pageSize, totalPages: 0, hasNext: false, hasPrev: false },
+        resumenMensual: [],
+        error: 'Empresa no encontrada',
+      });
+    }
+
+    // FILTRO RFC: si direccion=emitida, el emisorRfc debe ser el de la empresa
+    // Si direccion=recibida, el receptorRfc debe ser el de la empresa
+    // Esto previene que CFDIs mal asignados se muestren
+    const where: any = { empresaId };
+    if (direccion) {
+      where.direccion = direccion;
+      // Validación adicional por RFC (defensa doble)
+      const rfcEmpresa = empresa.rfc.toUpperCase();
+      if (direccion === 'emitida') {
+        where.emisorRfc = { equals: rfcEmpresa, mode: 'insensitive' };
+      } else if (direccion === 'recibida') {
+        where.receptorRfc = { equals: rfcEmpresa, mode: 'insensitive' };
+      }
+    }
     // Excluir nómina (tipo N) del módulo de facturas
     where.tipoComprobante = tipo ? tipo : { not: 'N' };
 
@@ -74,15 +108,27 @@ export async function GET(req: NextRequest) {
     const finAnioActual = new Date(anioActual, 11, 31, 23, 59, 59);
 
     const whereAnio: any = {
-      ...(direccion ? { direccion } : {}),
-      ...(empresaId ? { empresaId } : {}),
+      empresaId,
       tipoComprobante: tipo ? tipo : { not: 'N' },
       fecha: { gte: inicioAnioActual, lte: finAnioActual },
     };
 
+    // Aplicar también filtro por RFC para el resumen anual (todas las direcciones)
+    // para que el resumen mensual refleje correctamente las facturas emitidas y recibidas
+    const rfcEmpresa = empresa.rfc.toUpperCase();
     const todasDelAnio = await db.factura.findMany({
       where: whereAnio,
-      select: { fecha: true, total: true, totalImpuestos: true, direccion: true, tipoComprobante: true },
+      select: { fecha: true, total: true, totalImpuestos: true, direccion: true, tipoComprobante: true, emisorRfc: true, receptorRfc: true },
+    });
+
+    // Filtrar en memoria por RFC correspondiente a la dirección
+    const facturasValidas = todasDelAnio.filter(f => {
+      if (f.direccion === 'emitida') {
+        return (f.emisorRfc || '').toUpperCase() === rfcEmpresa;
+      } else if (f.direccion === 'recibida') {
+        return (f.receptorRfc || '').toUpperCase() === rfcEmpresa;
+      }
+      return false;
     });
 
     const resumenMensual: Array<{
@@ -98,7 +144,7 @@ export async function GET(req: NextRequest) {
     }> = [];
 
     for (let m = 1; m <= 12; m++) {
-      const delMes = todasDelAnio.filter(f => new Date(f.fecha).getMonth() + 1 === m);
+      const delMes = facturasValidas.filter(f => new Date(f.fecha).getMonth() + 1 === m);
       resumenMensual.push({
         mes: m,
         emitidas: delMes.filter(f => f.direccion === 'emitida' && f.tipoComprobante === 'I').length,

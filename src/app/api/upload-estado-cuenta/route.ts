@@ -369,6 +369,25 @@ function decodePdfString(str: string): string {
 //   - DD/MM/YYYY, DD-MM-YYYY (fechas numéricas)
 //   - DD-ENE-26 (fechas con mes abreviado en español — formato Banorte)
 function parsePDFTexto(texto: string): MovimientoImportado[] {
+  // Llamar a la versión nueva que detecta múltiples cuentas
+  const resultado = parsePDFTextoMultiCuenta(texto);
+  return resultado.movimientos;
+}
+
+/**
+ * Versión mejorada del parser que detecta MÚLTIPLES cuentas en el mismo PDF.
+ * 
+ * El PDF de Banorte tiene 2 secciones:
+ *   1. ENLACE NEGOCIOS AVANZADA (cuenta de operaciones)
+ *   2. INVERSION ENLACE NEGOCIOS (cuenta de inversión)
+ * 
+ * Esta función devuelve los movimientos etiquetados con el tipo de cuenta
+ * para que el backend pueda asignarlos correctamente.
+ */
+function parsePDFTextoMultiCuenta(texto: string): {
+  movimientos: MovimientoImportado[];
+  seccionesDetectadas: Array<{ tipo: string; cuentaNumero: string; count: number }>;
+} {
   const movimientos: MovimientoImportado[] = [];
   const lineas = texto.split(/\r?\n/);
 
@@ -386,20 +405,61 @@ function parsePDFTexto(texto: string): MovimientoImportado[] {
   const patronFechaBanorte = /(\d{1,2})-([A-Z]{3,9})-(\d{2,4})/;
 
   // Patrones de palabras clave para identificar depósitos vs retiros
-  // Keywords basados en PDF REAL de Banorte
-  // IMPORTANTE: 'INTERESES EXENTO' es CARGO (retiro), NO depósito
-  // 'DEPOSITO' se quita de depósitos porque 'RETIRO DEP. ELECTRONICO' lo contiene
   const keywordsDeposito = ['DISPOSICION', 'RECIBIDO', 'DEPOSITO DE CUENTA', 'DEV. DEPOSITO', 'DEVOLUCION'];
   const keywordsRetiro = ['COMPRA', 'PAGO', 'RETIRO', 'CARGO', 'TRASPASO', 'COMISION', 'COMISIÓN', 'TRANSFERENCIA', 'I.V.A.', 'INTERESES EXENTO', 'PAGO DE CAPITAL', 'PAGO DE CREDITO', 'PAGO DE LDC', 'ADMINISTRACION', 'COM. DISPERSION', 'IVA COM', 'IVA 00054', 'RETIRO DEP.'];
 
   // Variable para rastrear el saldo anterior (para determinar depósito vs retiro)
   let saldoAnterior: number | null = null;
 
+  // ===== DETECCIÓN DE SECCIONES DE CUENTA =====
+  // El PDF de Banorte tiene headers como:
+  //   "ENLACE NEGOCIOS AVANZADA"
+  //   "INVERSION ENLACE NEGOCIOS"
+  // Y cada sección tiene su propio "No. de Cuenta: 1282396470"
+  let seccionActual: 'operaciones' | 'inversion' = 'operaciones';
+  const seccionesDetectadas: Array<{ tipo: string; cuentaNumero: string; count: number }> = [];
+  let cuentaNumeroActual = '';
+  let movsPorSeccion = 0;
+
   // Procesar línea por línea, agrupando bloques de movimientos
   let i = 0;
   while (i < lineas.length) {
     const linea = lineas[i].trim();
     if (!linea || linea.length < 5) { i++; continue; }
+
+    // ===== DETECTAR CAMBIO DE SECCIÓN =====
+    const lineaUpper = linea.toUpperCase();
+    if (lineaUpper.includes('INVERSION') || lineaUpper.includes('INVERSIÓN')) {
+      // Si ya había una sección activa con movimientos, registrarla
+      if (movsPorSeccion > 0) {
+        seccionesDetectadas.push({ tipo: seccionActual, cuentaNumero: cuentaNumeroActual, count: movsPorSeccion });
+      }
+      seccionActual = 'inversion';
+      movsPorSeccion = 0;
+      // Buscar número de cuenta en las siguientes líneas
+      const cuentaMatch = linea.match(/No\.?\s*de\s*Cuenta:?\s*(\d{6,})/i);
+      if (cuentaMatch) cuentaNumeroActual = cuentaMatch[1];
+      i++;
+      continue;
+    }
+    if (lineaUpper.includes('ENLACE NEGOCIOS AVANZADA') || 
+        (lineaUpper.includes('ENLACE NEGOCIOS') && !lineaUpper.includes('INVERSION') && !lineaUpper.includes('INVERSIÓN'))) {
+      if (movsPorSeccion > 0) {
+        seccionesDetectadas.push({ tipo: seccionActual, cuentaNumero: cuentaNumeroActual, count: movsPorSeccion });
+      }
+      seccionActual = 'operaciones';
+      movsPorSeccion = 0;
+      i++;
+      continue;
+    }
+    
+    // Buscar "No. de Cuenta: XXXXXXX" en cualquier línea
+    const cuentaMatch = linea.match(/No\.?\s*de\s*Cuenta:?\s*(\d{6,})/i);
+    if (cuentaMatch) {
+      cuentaNumeroActual = cuentaMatch[1];
+      i++;
+      continue;
+    }
 
     // Intentar parsear fecha de esta línea
     let fecha: Date | null = null;
@@ -416,7 +476,7 @@ function parsePDFTexto(texto: string): MovimientoImportado[] {
       if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
 
       if (mes !== undefined && dia >= 1 && dia <= 31) {
-        fecha = new Date(anio, mes, dia);
+        fecha = new Date(anio, mes, dia, 12, 0, 0);
         fechaMatch = matchBanorte;
         restoLinea = linea.substring(matchBanorte.index! + matchBanorte[0].length).trim();
       }
@@ -432,7 +492,7 @@ function parsePDFTexto(texto: string): MovimientoImportado[] {
         if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
 
         if (mes >= 0 && mes <= 11 && dia >= 1 && dia <= 31) {
-          fecha = new Date(anio, mes, dia);
+          fecha = new Date(anio, mes, dia, 12, 0, 0);
           fechaMatch = matchNum;
           restoLinea = linea.substring(matchNum.index! + matchNum[0].length).trim();
         }
@@ -529,11 +589,25 @@ function parsePDFTexto(texto: string): MovimientoImportado[] {
     concepto = quitarMontos(concepto).replace(/\s+/g, ' ').trim().slice(0, 300);
     if (!concepto) concepto = 'Movimiento bancario';
 
-    movimientos.push({ fecha, concepto, monto: montoFinal });
+    // Agregar movimiento con tipo de cuenta detectado
+    movimientos.push({
+      fecha,
+      concepto,
+      monto: montoFinal,
+      // Campo extra para saber a qué cuenta asignarlo
+      // Usamos el campo concepto temporalmente para que el backend lo procese
+      ...(seccionActual === 'inversion' ? { esInversion: true } : {}),
+    } as any);
+    movsPorSeccion++;
     i++;
   }
 
-  return movimientos;
+  // Registrar última sección
+  if (movsPorSeccion > 0) {
+    seccionesDetectadas.push({ tipo: seccionActual, cuentaNumero: cuentaNumeroActual, count: movsPorSeccion });
+  }
+
+  return { movimientos, seccionesDetectadas };
 }
 
 // Extrae montos numéricos de una línea (formato: 80,000.00 o $1,234.56)
@@ -688,10 +762,97 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        // Parsear movimientos desde el texto extraído
-        movimientos = parsePDFTexto(textoPDF);
+        // Parsear movimientos desde el texto extraído (con detección multi-cuenta)
+        const { movimientos: movsPDF, seccionesDetectadas } = parsePDFTextoMultiCuenta(textoPDF);
+        movimientos = movsPDF;
 
-        if (movimientos.length === 0) {
+        // Si se detectaron múltiples secciones (operaciones + inversión),
+        // buscar/crear la cuenta de inversión y asignar los movimientos automáticamente
+        if (seccionesDetectadas.length > 1 || seccionesDetectadas.some(s => s.tipo === 'inversion')) {
+          const tieneInversion = seccionesDetectadas.some(s => s.tipo === 'inversion');
+          if (tieneInversion) {
+            // Buscar si ya existe una cuenta de inversión para esta empresa
+            let cuentaInversion = await db.cuentaBancaria.findFirst({
+              where: { empresaId: cuenta.empresaId, tipo: 'inversion' },
+            });
+            
+            if (!cuentaInversion) {
+              // Crear la cuenta de inversión automáticamente
+              cuentaInversion = await db.cuentaBancaria.create({
+                data: {
+                  banco: cuenta.banco + ' Inversión',
+                  cuenta: cuenta.cuenta + ' (Inversión)',
+                  saldo: 0,
+                  tipo: 'inversion',
+                  empresaId: cuenta.empresaId,
+                },
+              });
+              console.log(`✅ Cuenta de inversión creada automáticamente: ${cuentaInversion.id}`);
+            }
+            
+            // Reasignar movimientos: los marcados como esInversion van a la cuenta de inversión
+            // Procesar movimientos con etiqueta esInversion
+            const movsOperaciones = movimientos.filter((m: any) => !m.esInversion);
+            const movsInversion = movimientos.filter((m: any) => (m as any).esInversion);
+            
+            // Quitar la marca esInversion de los objetos (no se guarda en BD)
+            for (const m of movsOperaciones) { delete (m as any).esInversion; }
+            for (const m of movsInversion) { delete (m as any).esInversion; }
+            
+            // Insertar movimientos de inversión directamente en la cuenta de inversión
+            let movsInvCreados = 0;
+            let movsInvDuplicados = 0;
+            for (const mov of movsInversion) {
+              const yearMov = mov.fecha.getFullYear();
+              if (yearMov < 2020 || yearMov > new Date().getFullYear() + 1) continue;
+              
+              const existente = await db.movimientoBanco.findFirst({
+                where: {
+                  cuentaId: cuentaInversion.id,
+                  fecha: mov.fecha,
+                  concepto: mov.concepto,
+                  monto: mov.monto,
+                },
+              });
+              if (existente) {
+                movsInvDuplicados++;
+                continue;
+              }
+              
+              await db.movimientoBanco.create({
+                data: {
+                  fecha: mov.fecha,
+                  concepto: mov.concepto,
+                  monto: mov.monto,
+                  tipo: mov.monto > 0 ? 'ingreso' : 'egreso',
+                  estado: 'conciliado',
+                  cuentaId: cuentaInversion.id,
+                },
+              });
+              movsInvCreados++;
+            }
+            
+            // Actualizar saldo de la cuenta de inversión
+            if (movsInvCreados > 0) {
+              const todosMovsInv = await db.movimientoBanco.findMany({
+                where: { cuentaId: cuentaInversion.id },
+                select: { monto: true },
+              });
+              const saldoInv = todosMovsInv.reduce((s, m) => s + m.monto, 0);
+              await db.cuentaBancaria.update({
+                where: { id: cuentaInversion.id },
+                data: { saldo: saldoInv },
+              });
+            }
+            
+            // Filtrar movimientos para que solo se inserten los de operaciones en la cuenta original
+            movimientos = movsOperaciones;
+            
+            console.log(`📊 PDF multi-cuenta: ${movsOperaciones.length} operaciones, ${movsInversion.length} inversión (${movsInvCreados} nuevos, ${movsInvDuplicados} duplicados)`);
+          }
+        }
+
+        if (movimientos.length === 0 && seccionesDetectadas.length === 0) {
           return NextResponse.json({
             success: true,
             fileName,

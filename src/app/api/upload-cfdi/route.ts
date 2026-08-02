@@ -284,6 +284,7 @@ export async function POST(req: NextRequest) {
     let duplicados = 0;
     let errores = 0;
     let pdfsGuardados = 0;
+    const forzar = formData.get('force') === 'true';
     const detalles: Array<{ archivo: string; estado: string; mensaje: string }> = [];
 
     for (const file of files) {
@@ -315,7 +316,6 @@ export async function POST(req: NextRequest) {
           // Verificar duplicado por UUID
           // Si se envió force=true en el formData, en lugar de saltar, ACTUALIZA la factura existente
           // con los nuevos datos (descuento, impuestoRetenido, concepto, etc.)
-          const forzar = formData.get('force') === 'true';
           if (cfdi.uuid) {
             const existente = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
             if (existente) {

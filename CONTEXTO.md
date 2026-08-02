@@ -9,8 +9,8 @@
 - **Repo GitHub:** https://github.com/ebener07-cyber/sistema-fiscal-ia-v2
 - **Deploy:** https://sistema-fiscal-ia-v2.vercel.app
 - **BD:** Neon PostgreSQL (ep-red-smoke-atnx331h-pooler.c-9.us-east-1.aws.neon.tech)
-- **Versión actual:** v2.2
-- **Fecha última actualización:** 30 julio 2026
+- **Versión actual:** v2.3
+- **Fecha última actualización:** 2 agosto 2026
 
 ---
 
@@ -371,13 +371,59 @@ bun install
 5. ✅ ~~Concentrado Excel con NC negativas~~ — Funcionando
 6. ✅ ~~Módulo Proyectos con conciliación~~ — Funcionando
 7. ✅ ~~Reestructura Financiera con KPIs~~ — Funcionando
-8. ⏳ Security audit del ERP (OWASP, JWT, rate limiting)
-9. ⏳ Skeleton loaders en tablas
-10. ⏳ Botón eliminar cuenta bancaria desde UI
-11. ⏳ Tests E2E con Playwright
-12. ⏳ Soporte PDF para BBVA y Santander
-13. ⏳ Generar CFDI mock para pruebas sin timbrar
-14. ⏳ Reportes PDF profesionales con logo
+8. ✅ ~~CFDIs mezclados entre empresas~~ — Resuelto (v2.3): script de limpieza + defensa doble en API (empresaId + RFC)
+9. ✅ ~~Pestañas mensuales en Bancos y SAT~~ — Resuelto (v2.3): estilo Nómina con contador por mes
+10. ✅ ~~Cuenta Banorte Inversión~~ — Resuelto (v2.3): parser detecta 2 secciones en PDF y asigna automáticamente
+11. ✅ ~~Dashboard con tarjetas vacías~~ — Resuelto (v2.3): manejo robusto de stats null + banner informativo
+12. ✅ ~~Rediseño Clientes/Proveedores/Empleados~~ — Resuelto (v2.3): agendas profesionales con búsqueda y filtros
+13. ⏳ Security audit del ERP (OWASP, JWT, rate limiting)
+14. ⏳ Skeleton loaders en tablas
+15. ⏳ Botón eliminar cuenta bancaria desde UI
+16. ⏳ Tests E2E con Playwright
+17. ⏳ Soporte PDF para BBVA y Santander
+18. ⏳ Generar CFDI mock para pruebas sin timbrar
+19. ⏳ Reportes PDF profesionales con logo
+
+---
+
+## 📝 v2.3 — Correcciones de aislamiento entre empresas y rediseños UX (2 agosto 2026)
+
+### Problemas resueltos:
+1. **CFDIs mezclados entre empresas**: 
+   - ELECTRONICMA tenía 58 emisores distintos en "emitidas" (solo ALO980508ID6 era correcto)
+   - Causa: cuando el usuario subía CFDIs sin empresa seleccionada, se asignaban a la primera empresa
+   - Fix: script `limpiar-cfdi-mezclados.ts` reasigna por RFC del emisor/receptor
+   - Defensa doble en API: valida empresaId + que el RFC coincida con la dirección (emitida→emisorRfc, recibida→receptorRfc)
+
+2. **Bancos sin pestañas mensuales**:
+   - BancosView solo tenía selector `<select>` de mes
+   - Rediseñado con pestañas tipo Nómina: "Todo {año}" + 12 botones por mes con contador
+   - Resumen anual carga en paralelo sin afectar render principal
+
+3. **Cuenta Banorte Inversión sin datos**:
+   - El PDF de Banorte tiene 2 secciones (operaciones + inversión) en el mismo archivo
+   - Parser viejo procesaba todo junto en una sola cuenta
+   - Fix: nueva función `parsePDFTextoMultiCuenta` detecta headers "ENLACE NEGOCIOS AVANZADA" / "INVERSION ENLACE NEGOCIOS"
+   - Backend busca/crea cuenta de inversión automáticamente y enruta movimientos por flag `esInversion`
+
+4. **Dashboard con tarjetas vacías**:
+   - Causa: empresa activa no tenía facturas en periodo actual
+   - Fix: manejo seguro con `stats.fiscal?.totalEmitido || 0` en todos los KPIs
+   - Banner informativo cuando no hay datos + botón directo al módulo SAT
+
+5. **Rediseño Proveedores y Empleados**:
+   - ProveedoresView: agenda con búsqueda + filtro por servicio + tabla con avatares
+   - EmpleadosView: toggle Cards/Tabla + filtro activos/inactivos + búsqueda por puesto/departamento
+   - KPIs mejorados (promedio salario, nómina anual, saldo pendiente)
+
+### Archivos modificados:
+- `src/app/api/facturas/route.ts` — Defensa doble empresaId + RFC
+- `src/app/api/bancos/route.ts` — Soporte `all=true` para resumen anual
+- `src/app/api/upload-cfdi/route.ts` — Fix variable `forzar` para ZIPs
+- `src/app/api/upload-estado-cuenta/route.ts` — Parser multi-cuenta
+- `src/components/sistema-completo.tsx` — BancosView, SatView, ProveedoresView, EmpleadosView, DashboardView rediseñados
+- `scripts/limpiar-cfdi-mezclados.ts` — Script de limpieza de BD
+- `scripts/diagnostico-completo.ts` — Diagnóstico de CFDIs por RFC
 
 ---
 

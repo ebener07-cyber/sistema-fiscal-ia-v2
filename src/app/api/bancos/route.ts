@@ -16,8 +16,9 @@ export async function GET(req: NextRequest) {
     const mes = searchParams.get('mes');
     const anio = searchParams.get('anio');
     const cuentaIdFiltro = searchParams.get('cuentaId');
+    const all = searchParams.get('all') === 'true';
     const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
-    const pageSize = Math.min(Math.max(1, parseInt(searchParams.get('pageSize') ?? '100')), 500);
+    const pageSize = Math.min(Math.max(1, parseInt(searchParams.get('pageSize') ?? '100')), 1000);
 
     // ===== Cuentas =====
     const cuentas = await db.cuentaBancaria.findMany({
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
     if (empresaId) whereMov.cuenta = { empresaId };
     if (cuentaIdFiltro) whereMov.cuentaId = cuentaIdFiltro;
 
-    if (mes && anio) {
+    if (mes && anio && parseInt(mes) > 0) {
       const inicioMes = new Date(parseInt(anio), parseInt(mes) - 1, 1);
       const finMes = new Date(parseInt(anio), parseInt(mes), 0, 23, 59, 59);
       whereMov.fecha = { gte: inicioMes, lte: finMes };
@@ -41,14 +42,18 @@ export async function GET(req: NextRequest) {
       whereMov.fecha = { gte: inicioAnio, lte: finAnio };
     }
 
+    const findOptions: any = {
+      where: whereMov,
+      include: { cuenta: { select: { banco: true, cuenta: true, tipo: true } } },
+      orderBy: { fecha: 'desc' as const },
+    };
+    if (!all) {
+      findOptions.skip = (page - 1) * pageSize;
+      findOptions.take = pageSize;
+    }
+
     const [movimientos, totalMovimientos] = await Promise.all([
-      db.movimientoBanco.findMany({
-        where: whereMov,
-        include: { cuenta: { select: { banco: true, cuenta: true } } },
-        orderBy: { fecha: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
+      db.movimientoBanco.findMany(findOptions),
       db.movimientoBanco.count({ where: whereMov }),
     ]);
 

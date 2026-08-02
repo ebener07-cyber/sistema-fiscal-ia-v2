@@ -1,0 +1,731 @@
+     1→import { NextRequest, NextResponse } from 'next/server';
+     2→import { db } from '@/lib/db';
+     3→import { XMLParser } from 'fast-xml-parser';
+     4→import { writeFile, mkdir } from 'fs/promises';
+     5→import { existsSync } from 'fs';
+     6→import path from 'path';
+     7→
+     8→/**
+     9→ * POST /api/upload-cfdi
+    10→ * Carga uno o más archivos XML (CFDI) y opcionalmente sus PDFs asociados.
+    11→ * Parsea automáticamente los XML y guarda las facturas en la base de datos.
+    12→ *
+    13→ * Body (multipart/form-data):
+    14→ *   - files: archivos XML o ZIP con XMLs (pueden ser múltiples)
+    15→ *   - direccion: 'emitida' | 'recibida' (default: 'recibida')
+    16→ *   - empresaId: ID de la empresa (default: primera empresa)
+    17→ *
+    18→ * Si se sube un PDF con el mismo nombre que un XML, se guarda como archivo adjunto.
+    19→ */
+    20→
+    21→export const runtime = 'nodejs';
+    22→export const dynamic = 'force-dynamic';
+    23→
+    24→const parser = new XMLParser({
+    25→  ignoreAttributes: false,
+    26→  attributeNamePrefix: '@_',
+    27→  allowBooleanAttributes: true,
+    28→  parseAttributeValue: false,
+    29→  parseTagValue: false,
+    30→  trimValues: true,
+    31→  isArray: (name) => {
+    32→    const arrayElements = [
+    33→      'cfdi:Concepto', 'Concepto',
+    34→      'cfdi:Traslado', 'Traslado',
+    35→      'cfdi:Retencion', 'Retencion',
+    36→    ];
+    37→    return arrayElements.some(el => name === el || name.endsWith(':' + el));
+    38→  },
+    39→});
+    40→
+    41→function parseCFDIXML(xmlContent: string) {
+    42→  try {
+    43→    if (!xmlContent || !xmlContent.includes('Comprobante')) return null;
+    44→    const result = parser.parse(xmlContent);
+    45→    const comprobante = result['cfdi:Comprobante'] || result['Comprobante'];
+    46→    if (!comprobante) return null;
+    47→
+    48→    const getAttr = (obj: any, name: string): string => (obj ? obj[`@_${name}`] || '' : '');
+    49→
+    50→    const folio = getAttr(comprobante, 'Folio') || 'S/F';
+    51→    const serie = getAttr(comprobante, 'Serie') || null;
+    52→    const fecha = getAttr(comprobante, 'Fecha') || new Date().toISOString();
+    53→    const subtotal = parseFloat(getAttr(comprobante, 'SubTotal')) || 0;
+    54→    const total = parseFloat(getAttr(comprobante, 'Total')) || 0;
+    55→    const descuento = parseFloat(getAttr(comprobante, 'Descuento')) || 0;
+    56→    const moneda = getAttr(comprobante, 'Moneda') || 'MXN';
+    57→    const tipoComprobante = getAttr(comprobante, 'TipoDeComprobante') || 'I';
+    58→    const metodoPago = getAttr(comprobante, 'MetodoPago') || 'PUE';
+    59→    const formaPago = getAttr(comprobante, 'FormaPago') || '01';
+    60→    const lugarExpedicion = getAttr(comprobante, 'LugarExpedicion') || '';
+    61→
+    62→    const emisor = comprobante['cfdi:Emisor'] || comprobante['Emisor'] || {};
+    63→    const emisorRfc = getAttr(emisor, 'Rfc');
+    64→    const emisorNombre = getAttr(emisor, 'Nombre');
+    65→    const emisorRegimen = getAttr(emisor, 'RegimenFiscal');
+    66→
+    67→    const receptor = comprobante['cfdi:Receptor'] || comprobante['Receptor'] || {};
+    68→    const receptorRfc = getAttr(receptor, 'Rfc');
+    69→    const receptorNombre = getAttr(receptor, 'Nombre');
+    70→    const receptorUsoCfdi = getAttr(receptor, 'UsoCFDI');
+    71→
+    72→    // UUID del Timbre Fiscal
+    73→    let uuid = '';
+    74→    const complemento = comprobante['cfdi:Complemento'] || comprobante['Complemento'];
+    75→    if (complemento) {
+    76→      const timbre = complemento['tfd:TimbreFiscalDigital'] || complemento['TimbreFiscalDigital'];
+    77→      if (timbre) {
+    78→        uuid = getAttr(timbre, 'UUID') || getAttr(timbre, 'uuid') || '';
+    79→      }
+    80→      // Detectar si es nómina
+    81→      if (complemento['nomina12:Nomina'] || complemento['Nomina']) {
+    82→        // Es un CFDI de nómina
+    83→      }
+    84→    }
+    85→
+    86→    // Impuestos
+    87→    const impuestosNode = comprobante['cfdi:Impuestos'] || comprobante['Impuestos'] || {};
+    88→    const totalTrasladados = parseFloat(getAttr(impuestosNode, 'TotalImpuestosTrasladados')) || 0;
+    89→    const totalRetenidos = parseFloat(getAttr(impuestosNode, 'TotalImpuestosRetenidos')) || 0;
+    90→
+    91→    // ===== EXTRAER CONCEPTOS (descripción de productos/servicios) =====
+    92→    // Esto nos sirve para detectar el proyecto al que pertenece la factura
+    93→    const conceptosNode = comprobante['cfdi:Conceptos'] || comprobante['Conceptos'] || {};
+    94→    const conceptosArray: any[] = conceptosNode['cfdi:Concepto'] || conceptosNode['Concepto'] || [];
+    95→    const conceptosLista = Array.isArray(conceptosArray) ? conceptosArray : [conceptosArray];
+    96→    const descripcionesConceptos: string[] = conceptosLista
+    97→      .map((c: any) => getAttr(c, 'Descripcion'))
+    98→      .filter((d: string) => d);
+    99→    const conceptoTexto = descripcionesConceptos.join(' | ').slice(0, 500); // Texto completo para buscar proyecto
+   100→
+   101→    // Detectar si el CFDI está cancelado
+   102→    let estado = 'timbrada';
+   103→    if (!uuid) {
+   104→      estado = 'sin_timbrar';
+   105→    }
+   106→    if (complemento && (complemento['tfd:CancelaCfdi'] || complemento['CancelaCfdi'])) {
+   107→      estado = 'cancelada';
+   108→    }
+   109→    const estadoAttr = getAttr(comprobante, 'Estado') || getAttr(comprobante, 'SituacionFiscal');
+   110→    if (estadoAttr && (estadoAttr === 'Cancelado' || estadoAttr === '0' || estadoAttr === '03')) {
+   111→      estado = 'cancelada';
+   112→    }
+   113→
+   114→    return {
+   115→      folio,
+   116→      serie,
+   117→      fecha: new Date(fecha),
+   118→      subtotal,
+   119→      descuento,
+   120→      totalImpuestos: totalTrasladados,
+   121→      impuestoRetenido: totalRetenidos,
+   122→      total,
+   123→      moneda,
+   124→      tipoComprobante,
+   125→      metodoPago,
+   126→      formaPago,
+   127→      uuid: uuid.toUpperCase(),
+   128→      emisorRfc,
+   129→      emisorNombre,
+   130→      emisorRegimen,
+   131→      receptorRfc,
+   132→      receptorNombre,
+   133→      receptorUsoCfdi,
+   134→      lugarExpedicion,
+   135→      estado,
+   136→      conceptoTexto, // ← NUEVO: descripciones concatenadas
+   137→      descripcionesConceptos, // ← NUEVO: array de descripciones individuales
+   138→    };
+   139→  } catch (e) {
+   140→    console.error('Error parseando CFDI:', e);
+   141→    return null;
+   142→  }
+   143→}
+   144→
+   145→// ============================================================================
+   146→// DETECCIÓN AUTOMÁTICA DE PROYECTO
+   147→// ============================================================================
+   148→// Heurística simple basada en keywords en las descripciones de los conceptos.
+   149→// Si el concepto menciona "OBRA", "PROYECTO", "CONSTRUCCIÓN", o un código
+   150→// como "PROY-001", "OB-2024-01", intenta matchear con un proyecto existente.
+   151→const KEYWORDS_PROYECTO = [
+   152→  'obra', 'proyecto', 'construccion', 'construcción', 'edificio',
+   153→  'casa', 'local', 'oficina', 'remodelacion', 'remodelación',
+   154→  'instalacion', 'instalación', 'pavimentacion', 'pavimentación',
+   155→];
+   156→
+   157→// Patrones para extraer código de proyecto del concepto: PROY-001, OB-2024-01, PRJ-001
+   158→const PATRON_CODIGO_PROYECTO = /\b(PROY|OB|PRJ|PRO|OBRA)[-_\s]?(\d{2,4}[-_]?\d{0,2})\b/i;
+   159→
+   160→async function detectarProyecto(
+   161→  conceptoTexto: string,
+   162→  empId: string
+   163→): Promise<string | null> {
+   164→  if (!conceptoTexto) return null;
+   165→
+   166→  // 1. Buscar código explícito en el concepto (PROY-001, OB-2024-01, etc.)
+   167→  const matchCodigo = conceptoTexto.match(PATRON_CODIGO_PROYECTO);
+   168→  if (matchCodigo) {
+   169→    const codigoPosible = matchCodigo[0].toUpperCase().replace(/\s+/g, '-');
+   170→    // Buscar proyecto por código
+   171→    const proyecto = await db.proyecto.findFirst({
+   172→      where: {
+   173→        empresaId: empId,
+   174→        OR: [
+   175→          { codigo: { equals: codigoPosible, mode: 'insensitive' } },
+   176→          { codigo: { contains: matchCodigo[2], mode: 'insensitive' } },
+   177→        ],
+   178→      },
+   179→    });
+   180→    if (proyecto) return proyecto.id;
+   181→  }
+   182→
+   183→  // 2. Buscar en proyectos existentes cuyo nombre aparezca en el concepto
+   184→  const proyectos = await db.proyecto.findMany({
+   185→    where: { empresaId: empId, estado: { in: ['activo', 'pausado'] } },
+   186→  });
+   187→  for (const p of proyectos) {
+   188→    if (!p.nombre) continue;
+   189→    // Si el nombre del proyecto aparece en el concepto, asociarlo
+   190→    if (conceptoTexto.toLowerCase().includes(p.nombre.toLowerCase())) {
+   191→      return p.id;
+   192→    }
+   193→    // Si el código del proyecto aparece en el concepto
+   194→    if (p.codigo && conceptoTexto.toLowerCase().includes(p.codigo.toLowerCase())) {
+   195→      return p.id;
+   196→    }
+   197→  }
+   198→
+   199→  // 3. Si hay keywords de proyecto pero no encontramos match, NO creamos automáticamente
+   200→  // porque requiere confirmación del usuario. Se queda sin proyecto.
+   201→  return null;
+   202→}
+   203→
+   204→// ============================================================================
+   205→// CREACIÓN AUTOMÁTICA DE CLIENTES/PROVEEDORES DESDE CFDI
+   206→// ============================================================================
+   207→async function obtenerOcrearCliente(
+   208→  rfc: string,
+   209→  nombre: string,
+   210→  empId: string
+   211→): Promise<string | null> {
+   212→  if (!rfc || rfc === 'XAXX000000XXX' || rfc === 'XEXX010101000') return null;
+   213→
+   214→  // Buscar por RFC (case-insensitive, sin unique constraint porque puede haber duplicados accidentales)
+   215→  const existente = await db.cliente.findFirst({
+   216→    where: { rfc: { equals: rfc, mode: 'insensitive' }, empresaId: empId },
+   217→  });
+   218→  if (existente) return existente.id;
+   219→
+   220→  // Crear nuevo cliente
+   221→  const nuevo = await db.cliente.create({
+   222→    data: {
+   223→      nombre: nombre || `Cliente ${rfc}`,
+   224→      rfc: rfc.toUpperCase(),
+   225→      empresaId: empId,
+   226→    },
+   227→  });
+   228→  return nuevo.id;
+   229→}
+   230→
+   231→async function obtenerOcrearProveedor(
+   232→  rfc: string,
+   233→  nombre: string,
+   234→  empId: string
+   235→): Promise<string | null> {
+   236→  if (!rfc || rfc === 'XAXX000000XXX' || rfc === 'XEXX010101000') return null;
+   237→
+   238→  const existente = await db.proveedor.findFirst({
+   239→    where: { rfc: { equals: rfc, mode: 'insensitive' }, empresaId: empId },
+   240→  });
+   241→  if (existente) return existente.id;
+   242→
+   243→  const nuevo = await db.proveedor.create({
+   244→    data: {
+   245→      nombre: nombre || `Proveedor ${rfc}`,
+   246→      rfc: rfc.toUpperCase(),
+   247→      servicio: 'Por clasificar',
+   248→      empresaId: empId,
+   249→    },
+   250→  });
+   251→  return nuevo.id;
+   252→}
+   253→
+   254→export async function POST(req: NextRequest) {
+   255→  try {
+   256→    const formData = await req.formData();
+   257→    const files = formData.getAll('files') as File[];
+   258→    const direccion = (formData.get('direccion') as string) || 'recibida';
+   259→    const empresaId = (formData.get('empresaId') as string) || '';
+   260→
+   261→    if (!files || files.length === 0) {
+   262→      return NextResponse.json({ error: 'No se recibieron archivos' }, { status: 400 });
+   263→    }
+   264→
+   265→    // Obtener empresa
+   266→    let empId = empresaId;
+   267→    if (!empId) {
+   268→      const primera = await db.empresa.findFirst();
+   269→      if (!primera) {
+   270→        return NextResponse.json({ error: 'No hay empresas registradas. Crea una primero.' }, { status: 400 });
+   271→      }
+   272→      empId = primera.id;
+   273→    }
+   274→
+   275→    // Carpeta de uploads — usar /tmp en Vercel (sistema de archivos de solo lectura excepto /tmp)
+   276→    const isVercel = !!process.env.VERCEL;
+   277→    const uploadBase = isVercel ? '/tmp' : process.cwd();
+   278→    const uploadDir = path.join(uploadBase, 'uploads', 'cfdi', direccion);
+   279→    if (!existsSync(uploadDir)) {
+   280→      await mkdir(uploadDir, { recursive: true });
+   281→    }
+   282→
+   283→    let procesados = 0;
+   284→    let duplicados = 0;
+   285→    let errores = 0;
+   286→    let pdfsGuardados = 0;
+   287→    const detalles: Array<{ archivo: string; estado: string; mensaje: string }> = [];
+   288→
+   289→    for (const file of files) {
+   290→      const nombreArchivo = file.name.toLowerCase();
+   291→      const ext = nombreArchivo.split('.').pop() || '';
+   292→
+   293→      // Si es PDF, guardarlo
+   294→      if (ext === 'pdf') {
+   295→        const filePath = path.join(uploadDir, file.name);
+   296→        const bytes = await file.arrayBuffer();
+   297→        await writeFile(filePath, Buffer.from(bytes));
+   298→        pdfsGuardados++;
+   299→        detalles.push({ archivo: file.name, estado: 'pdf', mensaje: 'PDF guardado' });
+   300→        continue;
+   301→      }
+   302→
+   303→      // Si es XML, parsearlo
+   304→      if (ext === 'xml') {
+   305→        try {
+   306→          const xmlContent = await file.text();
+   307→          const cfdi = parseCFDIXML(xmlContent);
+   308→
+   309→          if (!cfdi) {
+   310→            errores++;
+   311→            detalles.push({ archivo: file.name, estado: 'error', mensaje: 'No se pudo parsear el XML' });
+   312→            continue;
+   313→          }
+   314→
+   315→          // Verificar duplicado por UUID
+   316→          // Si se envió force=true en el formData, en lugar de saltar, ACTUALIZA la factura existente
+   317→          // con los nuevos datos (descuento, impuestoRetenido, concepto, etc.)
+   318→          const forzar = formData.get('force') === 'true';
+   319→          if (cfdi.uuid) {
+   320→            const existente = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
+   321→            if (existente) {
+   322→              if (forzar) {
+   323→                try {
+   324→                  await db.factura.update({
+   325→                    where: { id: existente.id },
+   326→                    data: {
+   327→                      subtotal: Number(cfdi.subtotal) || 0,
+   328→                      descuento: Number(cfdi.descuento) || 0,
+   329→                      totalImpuestos: Number(cfdi.totalImpuestos) || 0,
+   330→                      impuestoRetenido: Number(cfdi.impuestoRetenido) || 0,
+   331→                      total: Number(cfdi.total) || 0,
+   332→                      concepto: cfdi.conceptoTexto || existente.concepto || null,
+   333→                      metodoPago: cfdi.metodoPago || existente.metodoPago,
+   334→                      formaPago: cfdi.formaPago || existente.formaPago,
+   335→                      moneda: cfdi.moneda || existente.moneda,
+   336→                    },
+   337→                  });
+   338→                  procesados++;
+   339→                  detalles.push({
+   340→                    archivo: file.name,
+   341→                    estado: 'actualizado',
+   342→                    mensaje: `🔄 Actualizada: ${cfdi.receptorNombre || cfdi.emisorNombre || ''} - $${cfdi.total.toFixed(2)}`,
+   343→                  });
+   344→                } catch (e: any) {
+   345→                  errores++;
+   346→                  detalles.push({
+   347→                    archivo: file.name,
+   348→                    estado: 'error',
+   349→                    mensaje: `Error al actualizar: ${e.message}`,
+   350→                  });
+   351→                }
+   352→                continue;
+   353→              } else {
+   354→                duplicados++;
+   355→                detalles.push({ archivo: file.name, estado: 'duplicado', mensaje: `UUID ${cfdi.uuid} ya existe (activa "Forzar actualización" para actualizar)` });
+   356→                continue;
+   357→              }
+   358→            }
+   359→          }
+   360→
+   361→          // Guardar XML original
+   362→          try {
+   363→            const xmlPath = path.join(uploadDir, file.name);
+   364→            await writeFile(xmlPath, await file.text());
+   365→          } catch {}
+   366→
+   367→          // ===== DETECTAR TIPO DE CFDI =====
+   368→          // tipoComprobante: I=Ingreso, E=Egreso(Nota de crédito), T=Traslado, N=Nómina, P=Pago
+   369→          const esNomina = cfdi.tipoComprobante === 'N';
+   370→          const esNotaCredito = cfdi.tipoComprobante === 'E';
+   371→          const esCancelada = cfdi.estado === 'cancelada';
+   372→          const esPago = cfdi.tipoComprobante === 'P';
+   373→          const esTraslado = cfdi.tipoComprobante === 'T';
+   374→
+   375→          // Saltar CFDIs cancelados — solo procesamos activos
+   376→          if (esCancelada) {
+   377→            detalles.push({ archivo: file.name, estado: 'cancelada', mensaje: '🚫 CFDI cancelado — omitido' });
+   378→            continue;
+   379→          }
+   380→
+   381→          // Saltar CFDIs tipo Pago (P) — van en su propio reporte, no en facturación
+   382→          if (esPago) {
+   383→            detalles.push({ archivo: file.name, estado: 'pago', mensaje: '💳 CFDI tipo Pago (P) — omitido del concentrado' });
+   384→            continue;
+   385→          }
+   386→
+   387→          // Saltar CFDIs tipo Traslado (T) — no son facturables
+   388→          if (esTraslado) {
+   389→            detalles.push({ archivo: file.name, estado: 'traslado', mensaje: '🚚 CFDI tipo Traslado (T) — omitido' });
+   390→            continue;
+   391→          }
+   392→
+   393→          if (esNomina) {
+   394→            // ===== NÓMINA → Guardar en ReciboNomina =====
+   395→            // Buscar empleado por RFC del receptor
+   396→            let empleado = await db.empleado.findFirst({
+   397→              where: { rfc: cfdi.receptorRfc },
+   398→            });
+   399→
+   400→            // Si no existe el empleado, crearlo automáticamente
+   401→            if (!empleado) {
+   402→              empleado = await db.empleado.create({
+   403→                data: {
+   404→                  nombre: cfdi.receptorNombre || 'Empleado sin nombre',
+   405→                  rfc: cfdi.receptorRfc || 'XAXX000000XXX',
+   406→                  puesto: 'Por clasificar',
+   407→                  departamento: 'Por clasificar',
+   408→                  salarioMensual: cfdi.total, // Aproximación
+   409→                  empresaId: empId,
+   410→                },
+   411→              });
+   412→            }
+   413→
+   414→            // Verificar si ya existe un recibo con este UUID (dedupe)
+   415→            // Si se eliminó el mes pero el UUID fue liberado (ON DELETE SET NULL en otro caso),
+   416→            // no debería existir → se crea. Si existe → se marca como duplicado.
+   417→            if (cfdi.uuid) {
+   418→              const reciboExistente = await db.reciboNomina.findUnique({
+   419→                where: { uuid: cfdi.uuid },
+   420→              });
+   421→              if (reciboExistente) {
+   422→                duplicados++;
+   423→                detalles.push({
+   424→                  archivo: file.name,
+   425→                  estado: 'duplicado',
+   426→                  mensaje: `📋 Nómina ${cfdi.uuid} ya existe (empleado: ${cfdi.receptorNombre})`,
+   427→                });
+   428→                continue;
+   429→              }
+   430→            }
+   431→
+   432→            // Calcular deducciones aproximadas (15% del total)
+   433→            const deducciones = cfdi.total * 0.15;
+   434→            const neto = cfdi.total - deducciones;
+   435→            const isr = deducciones * 0.5;
+   436→            const imss = deducciones * 0.3;
+   437→
+   438→            const fechaRecibo = new Date(cfdi.fecha);
+   439→            await db.reciboNomina.create({
+   440→              data: {
+   441→                folio: cfdi.folio,
+   442→                fecha: fechaRecibo,
+   443→                periodo: `${fechaRecibo.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}`,
+   444→                totalPercepciones: cfdi.total,
+   445→                totalDeducciones: deducciones,
+   446→                neto,
+   447→                isr,
+   448→                imss,
+   449→                uuid: cfdi.uuid || `${file.name}-${Date.now()}`,
+   450→                estado: 'timbrado',
+   451→                empleadoId: empleado.id,
+   452→                empresaId: empId,
+   453→              },
+   454→            });
+   455→
+   456→            procesados++;
+   457→            detalles.push({
+   458→              archivo: file.name,
+   459→              estado: 'nomina',
+   460→              mensaje: `📋 Nómina → ${cfdi.receptorNombre}: $${cfdi.total.toFixed(2)} (guardada en módulo Nómina)`,
+   461→            });
+   462→            continue;
+   463→          }
+   464→
+   465→          // ===== FACTURA NORMAL O NOTA DE CRÉDITO → Guardar en Factura =====
+   466→          // Auto-crear o reutilizar cliente/proveedor desde el RFC del CFDI
+   467→          let clienteId: string | null = null;
+   468→          let proveedorId: string | null = null;
+   469→
+   470→          if (direccion === 'emitida') {
+   471→            // Factura emitida → el receptor es el cliente
+   472→            clienteId = await obtenerOcrearCliente(cfdi.receptorRfc, cfdi.receptorNombre, empId);
+   473→          } else {
+   474→            // Factura recibida → el emisor es el proveedor
+   475→            proveedorId = await obtenerOcrearProveedor(cfdi.emisorRfc, cfdi.emisorNombre, empId);
+   476→          }
+   477→
+   478→          // Detectar proyecto desde las descripciones de los conceptos
+   479→          const proyectoId = await detectarProyecto(cfdi.conceptoTexto || '', empId);
+   480→
+   481→          await db.factura.create({
+   482→            data: {
+   483→              folio: cfdi.folio,
+   484→              serie: cfdi.serie,
+   485→              fecha: cfdi.fecha,
+   486→              subtotal: cfdi.subtotal,
+   487→              descuento: cfdi.descuento || 0,
+   488→              totalImpuestos: cfdi.totalImpuestos,
+   489→              impuestoRetenido: cfdi.impuestoRetenido || 0,
+   490→              total: cfdi.total,
+   491→              moneda: cfdi.moneda,
+   492→              tipoComprobante: cfdi.tipoComprobante, // I, E, T, P
+   493→              metodoPago: cfdi.metodoPago,
+   494→              formaPago: cfdi.formaPago,
+   495→              uuid: cfdi.uuid || `${file.name}-${Date.now()}`,
+   496→              direccion,
+   497→              estado: 'timbrada',
+   498→              empresaId: empId,
+   499→              clienteId,
+   500→              proveedorId,
+   501→              proyectoId, // ← NUEVO: proyecto detectado (puede ser null)
+   502→              receptorRfc: cfdi.receptorRfc,
+   503→              receptorNombre: cfdi.receptorNombre,
+   504→              emisorRfc: cfdi.emisorRfc,
+   505→              emisorNombre: cfdi.emisorNombre,
+   506→              concepto: cfdi.conceptoTexto
+   507→                ? (esNotaCredito ? `⚠️ Nota de crédito: ${cfdi.conceptoTexto}` : cfdi.conceptoTexto)
+   508→                : (esNotaCredito ? `Nota de crédito: ${file.name}` : `Importado: ${file.name}`),
+   509→            },
+   510→          });
+   511→
+   512→          procesados++;
+   513→          const msgProyecto = proyectoId ? ` 📁 [proyecto vinculado]` : '';
+   514→          detalles.push({
+   515→            archivo: file.name,
+   516→            estado: esNotaCredito ? 'nota_credito' : 'procesado',
+   517→            mensaje: `${esNotaCredito ? '⚠️ Nota de crédito' : '🧾 Factura'} → ${cfdi.emisorNombre || 'N/A'} → ${cfdi.receptorNombre || 'N/A'}: $${cfdi.total.toFixed(2)}${msgProyecto}`,
+   518→          });
+   519→        } catch (e: any) {
+   520→          errores++;
+   521→          detalles.push({ archivo: file.name, estado: 'error', mensaje: e.message });
+   522→        }
+   523→        continue;
+   524→      }
+   525→
+   526→      // Si es ZIP, descomprimir (requiere adm-zip)
+   527→      if (ext === 'zip') {
+   528→        try {
+   529→          const AdmZip = (await import('adm-zip')).default;
+   530→          const zipBuffer = Buffer.from(await file.arrayBuffer());
+   531→          const zip = new AdmZip(zipBuffer);
+   532→          const entries = zip.getEntries();
+   533→
+   534→          for (const entry of entries) {
+   535→            if (entry.isDirectory) continue;
+   536→            const entryName = entry.entryName.toLowerCase();
+   537→            if (!entryName.endsWith('.xml')) continue;
+   538→
+   539→            try {
+   540→              const xmlContent = entry.getData().toString('utf8');
+   541→              const cfdi = parseCFDIXML(xmlContent);
+   542→              if (!cfdi) {
+   543→                errores++;
+   544→                continue;
+   545→              }
+   546→
+   547→              if (cfdi.uuid) {
+   548→                const existenteFactura = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
+   549→                const existenteNomina = await db.reciboNomina.findUnique({ where: { uuid: cfdi.uuid } });
+   550→                if (existenteFactura || existenteNomina) {
+   551→                  // Si force=true y es factura, actualizar con datos completos
+   552→                  if (forzar && existenteFactura) {
+   553→                    try {
+   554→                      await db.factura.update({
+   555→                        where: { id: existenteFactura.id },
+   556→                        data: {
+   557→                          subtotal: Number(cfdi.subtotal) || 0,
+   558→                          descuento: Number(cfdi.descuento) || 0,
+   559→                          totalImpuestos: Number(cfdi.totalImpuestos) || 0,
+   560→                          impuestoRetenido: Number(cfdi.impuestoRetenido) || 0,
+   561→                          total: Number(cfdi.total) || 0,
+   562→                          concepto: cfdi.conceptoTexto || existenteFactura.concepto || null,
+   563→                          metodoPago: cfdi.metodoPago || existenteFactura.metodoPago,
+   564→                          formaPago: cfdi.formaPago || existenteFactura.formaPago,
+   565→                          moneda: cfdi.moneda || existenteFactura.moneda,
+   566→                        },
+   567→                      });
+   568→                      procesados++;
+   569→                      detalles.push({
+   570→                        archivo: entry.entryName,
+   571→                        estado: 'actualizado',
+   572→                        mensaje: `🔄 Actualizada: ${cfdi.receptorNombre || cfdi.emisorNombre || ''} - $${cfdi.total.toFixed(2)}`,
+   573→                      });
+   574→                    } catch (e: any) {
+   575→                      errores++;
+   576→                      detalles.push({
+   577→                        archivo: entry.entryName,
+   578→                        estado: 'error',
+   579→                        mensaje: `Error al actualizar: ${e.message}`,
+   580→                      });
+   581→                    }
+   582→                    continue;
+   583→                  }
+   584→                  duplicados++;
+   585→                  continue;
+   586→                }
+   587→              }
+   588→
+   589→              // Guardar XML
+   590→              try {
+   591→                const xmlPath = path.join(uploadDir, entry.entryName);
+   592→                const entryDir = path.dirname(xmlPath);
+   593→                if (!existsSync(entryDir)) {
+   594→                  await mkdir(entryDir, { recursive: true });
+   595→                }
+   596→                await writeFile(xmlPath, xmlContent);
+   597→              } catch {}
+   598→
+   599→              // Detectar tipo
+   600→              const esNominaZip = cfdi.tipoComprobante === 'N';
+   601→              const esNotaCreditoZip = cfdi.tipoComprobante === 'E';
+   602→              const esCanceladaZip = cfdi.estado === 'cancelada';
+   603→              const esPagoZip = cfdi.tipoComprobante === 'P';
+   604→              const esTrasladoZip = cfdi.tipoComprobante === 'T';
+   605→
+   606→              // Saltar canceladas
+   607→              if (esCanceladaZip) {
+   608→                continue;
+   609→              }
+   610→
+   611→              // Saltar Pagos y Traslados
+   612→              if (esPagoZip || esTrasladoZip) {
+   613→                continue;
+   614→              }
+   615→
+   616→              if (esNominaZip) {
+   617→                // Nómina → ReciboNomina
+   618→                let empleado = await db.empleado.findFirst({
+   619→                  where: { rfc: cfdi.receptorRfc },
+   620→                });
+   621→                if (!empleado) {
+   622→                  empleado = await db.empleado.create({
+   623→                    data: {
+   624→                      nombre: cfdi.receptorNombre || 'Empleado sin nombre',
+   625→                      rfc: cfdi.receptorRfc || 'XAXX000000XXX',
+   626→                      puesto: 'Por clasificar',
+   627→                      departamento: 'Por clasificar',
+   628→                      salarioMensual: cfdi.total,
+   629→                      empresaId: empId,
+   630→                    },
+   631→                  });
+   632→                }
+   633→                const deducciones = cfdi.total * 0.15;
+   634→                const neto = cfdi.total - deducciones;
+   635→                const fechaRecibo = new Date(cfdi.fecha);
+   636→                await db.reciboNomina.create({
+   637→                  data: {
+   638→                    folio: cfdi.folio,
+   639→                    fecha: fechaRecibo,
+   640→                    periodo: `${fechaRecibo.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}`,
+   641→                    totalPercepciones: cfdi.total,
+   642→                    totalDeducciones: deducciones,
+   643→                    neto,
+   644→                    isr: deducciones * 0.5,
+   645→                    imss: deducciones * 0.3,
+   646→                    uuid: cfdi.uuid || `${entry.entryName}-${Date.now()}`,
+   647→                    estado: 'timbrado',
+   648→                    empleadoId: empleado.id,
+   649→                    empresaId: empId,
+   650→                  },
+   651→                });
+   652→                procesados++;
+   653→              } else {
+   654→                // Factura o nota de crédito → Factura
+   655→                // Auto-crear cliente/proveedor desde RFC
+   656→                let clienteId: string | null = null;
+   657→                let proveedorId: string | null = null;
+   658→                if (direccion === 'emitida') {
+   659→                  clienteId = await obtenerOcrearCliente(cfdi.receptorRfc, cfdi.receptorNombre, empId);
+   660→                } else {
+   661→                  proveedorId = await obtenerOcrearProveedor(cfdi.emisorRfc, cfdi.emisorNombre, empId);
+   662→                }
+   663→
+   664→                // Detectar proyecto desde concepto
+   665→                const proyectoIdZip = await detectarProyecto(cfdi.conceptoTexto || '', empId);
+   666→
+   667→                await db.factura.create({
+   668→                  data: {
+   669→                    folio: cfdi.folio,
+   670→                    serie: cfdi.serie,
+   671→                    fecha: cfdi.fecha,
+   672→                    subtotal: cfdi.subtotal,
+   673→                    descuento: cfdi.descuento || 0,
+   674→                    totalImpuestos: cfdi.totalImpuestos,
+   675→                    impuestoRetenido: cfdi.impuestoRetenido || 0,
+   676→                    total: cfdi.total,
+   677→                    moneda: cfdi.moneda,
+   678→                    tipoComprobante: cfdi.tipoComprobante,
+   679→                    metodoPago: cfdi.metodoPago,
+   680→                    formaPago: cfdi.formaPago,
+   681→                    uuid: cfdi.uuid || `${entry.entryName}-${Date.now()}`,
+   682→                    direccion,
+   683→                    estado: 'timbrada',
+   684→                    empresaId: empId,
+   685→                    clienteId,
+   686→                    proveedorId,
+   687→                    proyectoId: proyectoIdZip,
+   688→                    receptorRfc: cfdi.receptorRfc,
+   689→                    receptorNombre: cfdi.receptorNombre,
+   690→                    emisorRfc: cfdi.emisorRfc,
+   691→                    emisorNombre: cfdi.emisorNombre,
+   692→                    concepto: cfdi.conceptoTexto
+   693→                      ? (esNotaCreditoZip ? `⚠️ Nota de crédito: ${cfdi.conceptoTexto}` : cfdi.conceptoTexto)
+   694→                      : (esNotaCreditoZip ? `Nota de crédito (ZIP): ${file.name}` : `Importado ZIP: ${file.name}`),
+   695→                  },
+   696→                });
+   697→                procesados++;
+   698→              }
+   699→            } catch (e: any) {
+   700→              errores++;
+   701→              detalles.push({ archivo: entry.entryName, estado: 'error', mensaje: `ZIP error: ${e.message}` });
+   702→            }
+   703→          }
+   704→          detalles.push({
+   705→            archivo: file.name,
+   706→            estado: 'zip',
+   707→            mensaje: `ZIP con ${entries.filter(e => !e.isDirectory && e.entryName.toLowerCase().endsWith('.xml')).length} XMLs procesados`,
+   708→          });
+   709→        } catch (e: any) {
+   710→          errores++;
+   711→          detalles.push({ archivo: file.name, estado: 'error', mensaje: `ZIP error: ${e.message}` });
+   712→        }
+   713→      }
+   714→    }
+   715→
+   716→    return NextResponse.json({
+   717→      success: true,
+   718→      total: files.length,
+   719→      procesados,
+   720→      duplicados,
+   721→      errores,
+   722→      pdfsGuardados,
+   723→      detalles: detalles.slice(0, 50),
+   724→      message: `✅ ${procesados} CFDI(s) procesado(s), ${duplicados} duplicado(s), ${errores} error(es), ${pdfsGuardados} PDF(s) guardado(s)`,
+   725→    });
+   726→  } catch (e: any) {
+   727→    console.error('Error en upload-cfdi:', e);
+   728→    return NextResponse.json({ error: e.message }, { status: 500 });
+   729→  }
+   730→}
+   731→

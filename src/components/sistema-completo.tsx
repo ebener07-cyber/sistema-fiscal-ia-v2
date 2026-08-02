@@ -346,31 +346,35 @@ export function SistemaCompleto() {
 // ====================== DASHBOARD VIEW ======================
 function DashboardView({ stats, setView }: { stats: any; setView: (v: string) => void }) {
   const { theme } = useTheme();
+  const { empresa } = useEmpresa();
   if (!stats) return <LoadingView message="Cargando dashboard..." />;
+
+  // Verificar si la empresa activa no tiene datos
+  const sinDatosFiscales = !stats.fiscal || (stats.fiscal.countEmitidas === 0 && stats.fiscal.countRecibidas === 0);
 
   const periodoTexto = stats.periodo ? `${stats.periodo.mesNombre} ${stats.periodo.anio}` : 'Mes actual';
 
   const kpis = [
-    { label: `Ingresos ${periodoTexto}`, value: fmt(stats.fiscal.totalEmitido), sub: `${stats.fiscal.countEmitidas} facturas`, icon: TrendingUp, color: 'text-emerald-600', border: 'border-l-emerald-500' },
-    { label: `Egresos ${periodoTexto}`, value: fmt(stats.fiscal.totalRecibido), sub: `${stats.fiscal.countRecibidas} facturas`, icon: TrendingDown, color: 'text-orange-600', border: 'border-l-orange-500' },
-    { label: 'Utilidad bruta', value: fmt(stats.fiscal.utilidadBruta), sub: stats.fiscal.totalEmitido > 0 ? `Margen ${Math.round((stats.fiscal.utilidadBruta / stats.fiscal.totalEmitido) * 100)}%` : 'Margen 0%', icon: DollarSign, color: 'text-blue-600', border: 'border-l-blue-500' },
-    { label: 'IVA por pagar', value: fmt(stats.fiscal.ivaPorPagar), sub: 'Vence próximo mes', icon: Calculator, color: 'text-red-600', border: 'border-l-red-500' },
-    { label: 'Clientes activos', value: String(stats.catalogos.clientes), sub: 'En catálogo', icon: Users, color: 'text-violet-600', border: 'border-l-violet-500' },
-    { label: 'Empleados', value: String(stats.catalogos.empleados), sub: 'Nómina al corriente', icon: User, color: 'text-fuchsia-600', border: 'border-l-fuchsia-500' },
-    { label: 'Productos', value: String(stats.catalogos.productos), sub: `${stats.catalogos.stockBajo} stock bajo`, icon: Package, color: 'text-amber-600', border: 'border-l-amber-500' },
-    { label: 'Chats con Abbax hoy', value: String(stats.abbax.conversacionesHoy), sub: `${stats.abbax.tareasPend} tareas pend`, icon: Zap, color: 'text-cyan-600', border: 'border-l-cyan-500' },
+    { label: `Ingresos ${periodoTexto}`, value: fmt(stats.fiscal?.totalEmitido || 0), sub: `${stats.fiscal?.countEmitidas || 0} facturas`, icon: TrendingUp, color: 'text-emerald-600', border: 'border-l-emerald-500' },
+    { label: `Egresos ${periodoTexto}`, value: fmt(stats.fiscal?.totalRecibido || 0), sub: `${stats.fiscal?.countRecibidas || 0} facturas`, icon: TrendingDown, color: 'text-orange-600', border: 'border-l-orange-500' },
+    { label: 'Utilidad bruta', value: fmt(stats.fiscal?.utilidadBruta || 0), sub: (stats.fiscal?.totalEmitido || 0) > 0 ? `Margen ${Math.round(((stats.fiscal?.utilidadBruta || 0) / stats.fiscal.totalEmitido) * 100)}%` : 'Margen 0%', icon: DollarSign, color: 'text-blue-600', border: 'border-l-blue-500' },
+    { label: 'IVA por pagar', value: fmt(stats.fiscal?.ivaPorPagar || 0), sub: 'Vence próximo mes', icon: Calculator, color: 'text-red-600', border: 'border-l-red-500' },
+    { label: 'Clientes activos', value: String(stats.catalogos?.clientes || 0), sub: 'En catálogo', icon: Users, color: 'text-violet-600', border: 'border-l-violet-500' },
+    { label: 'Empleados', value: String(stats.catalogos?.empleados || 0), sub: 'Activos', icon: User, color: 'text-fuchsia-600', border: 'border-l-fuchsia-500' },
+    { label: 'Productos', value: String(stats.catalogos?.productos || 0), sub: `${stats.catalogos?.stockBajo || 0} stock bajo`, icon: Package, color: 'text-amber-600', border: 'border-l-amber-500' },
+    { label: 'Chats con Abbax hoy', value: String(stats.abbax?.conversacionesHoy || 0), sub: `${stats.abbax?.tareasPend || 0} tareas pend`, icon: Zap, color: 'text-cyan-600', border: 'border-l-cyan-500' },
   ];
 
   // Datos para gráficos
   const chartData = [
-    { name: 'Ingresos', value: stats.fiscal.totalEmitido, fill: '#10b981' },
-    { name: 'Egresos', value: stats.fiscal.totalRecibido, fill: '#f97316' },
-    { name: 'Utilidad', value: stats.fiscal.utilidadBruta, fill: '#7c3aed' },
+    { name: 'Ingresos', value: stats.fiscal?.totalEmitido || 0, fill: '#10b981' },
+    { name: 'Egresos', value: stats.fiscal?.totalRecibido || 0, fill: '#f97316' },
+    { name: 'Utilidad', value: stats.fiscal?.utilidadBruta || 0, fill: '#7c3aed' },
   ];
 
   const distribucionData = [
-    { name: 'Facturas emitidas', value: stats.fiscal.countEmitidas, fill: '#7c3aed' },
-    { name: 'Facturas recibidas', value: stats.fiscal.countRecibidas, fill: '#3b82f6' },
+    { name: 'Facturas emitidas', value: stats.fiscal?.countEmitidas || 0, fill: '#7c3aed' },
+    { name: 'Facturas recibidas', value: stats.fiscal?.countRecibidas || 0, fill: '#3b82f6' },
   ];
 
   const textColor = theme === 'dark' ? '#94a3b8' : '#475569';
@@ -378,6 +382,32 @@ function DashboardView({ stats, setView }: { stats: any; setView: (v: string) =>
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {/* Banner informativo si no hay datos en el periodo actual */}
+      {sinDatosFiscales && empresa && (
+        <Card className="p-4 border-l-4 border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+                Sin actividad fiscal en {periodoTexto}
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                La empresa <strong>{empresa.nombre}</strong> no tiene facturas emitidas ni recibidas en este periodo.
+                Sube tus CFDIs desde el módulo SAT para ver tus KPIs aquí.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={() => setView('sat')}
+              >
+                <Upload size={14} className="mr-2" /> Ir a cargar CFDIs
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {kpis.map((k) => {
@@ -402,8 +432,8 @@ function DashboardView({ stats, setView }: { stats: any; setView: (v: string) =>
           <h3 className="font-semibold mb-3 flex items-center gap-2">
             <BarChart3 size={16} className="text-violet-600" /> Resumen financiero del mes
           </h3>
-          {stats.fiscal.totalEmitido === 0 && stats.fiscal.totalRecibido === 0 ? (
-            <EmptyState icon={BarChart3} message="Sin datos financieros este mes" />
+          {sinDatosFiscales ? (
+            <EmptyState icon={BarChart3} message={`Sin datos financieros en ${periodoTexto}`} />
           ) : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -432,8 +462,8 @@ function DashboardView({ stats, setView }: { stats: any; setView: (v: string) =>
           <h3 className="font-semibold mb-3 flex items-center gap-2">
             <FileText size={16} className="text-violet-600" /> Distribución de facturas
           </h3>
-          {stats.fiscal.countEmitidas === 0 && stats.fiscal.countRecibidas === 0 ? (
-            <EmptyState icon={FileText} message="Sin facturas este mes" />
+          {sinDatosFiscales ? (
+            <EmptyState icon={FileText} message={`Sin facturas en ${periodoTexto}`} />
           ) : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -476,8 +506,8 @@ function DashboardView({ stats, setView }: { stats: any; setView: (v: string) =>
           <h3 className="font-semibold mb-3 flex items-center gap-2">
             <TrendingUp size={16} className="text-violet-600" /> Top clientes del mes
           </h3>
-          {stats.topClientes.length === 0 ? (
-            <EmptyState icon={Users} message="Sin facturas emitidas este mes" />
+          {(stats.topClientes?.length || 0) === 0 ? (
+            <EmptyState icon={Users} message={`Sin facturas emitidas en ${periodoTexto}`} />
           ) : (
             <ul className="space-y-2">
               {stats.topClientes.map((c, i) => (
@@ -498,17 +528,21 @@ function DashboardView({ stats, setView }: { stats: any; setView: (v: string) =>
             <AlertTriangle size={16} className="text-amber-500" /> Alertas activas
           </h3>
           <div className="space-y-2">
-            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-200">
-              <strong>IVA vence en 7 días</strong>
-              <br />{fmt(stats.fiscal.ivaPorPagar)} · 17/agosto
-            </div>
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-xs text-red-800 dark:text-red-200">
-              <strong>{stats.abbax.tareasPend} tareas urgentes pendientes</strong>
-              <br />Revisa con Abbax
-            </div>
+            {(stats.fiscal?.ivaPorPagar || 0) > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-200">
+                <strong>IVA vence en 7 días</strong>
+                <br />{fmt(stats.fiscal.ivaPorPagar)} · 17/agosto
+              </div>
+            )}
+            {(stats.abbax?.tareasPend || 0) > 0 && (
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-xs text-red-800 dark:text-red-200">
+                <strong>{stats.abbax.tareasPend} tareas urgentes pendientes</strong>
+                <br />Revisa con Abbax
+              </div>
+            )}
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-xs text-blue-800 dark:text-blue-200">
               <strong>Nómina pagada</strong>
-              <br />5 empleados · {fmt(92000)}
+              <br />{stats.catalogos?.empleados || 0} empleados · {fmt((stats.catalogos?.empleados || 0) * 18000)}
             </div>
           </div>
         </Card>
@@ -736,42 +770,125 @@ function ClientesView() {
 function ProveedoresView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ proveedores: any[] }>('/api/proveedores', empresa?.id);
+  const [busqueda, setBusqueda] = useState('');
+  const [filtroServicio, setFiltroServicio] = useState('todos');
   if (loading) return <LoadingView message="Cargando proveedores..." />;
   if (!data?.proveedores?.length) return <EmptyState icon={Truck} message="Sin proveedores registrados" />;
 
+  // Lista única de servicios
+  const servicios = Array.from(new Set(data.proveedores.map((p: any) => p.servicio).filter(Boolean))) as string[];
+
+  const proveedoresFiltrados = data.proveedores.filter((p: any) => {
+    if (filtroServicio !== 'todos' && p.servicio !== filtroServicio) return false;
+    if (!busqueda) return true;
+    const q = busqueda.toLowerCase();
+    return p.nombre?.toLowerCase().includes(q) || p.rfc?.toLowerCase().includes(q) || p.email?.toLowerCase().includes(q);
+  });
+
   const totalOrdenes = data.proveedores.reduce((s: number, p: any) => s + (p._count?.ordenesCompra || 0), 0);
+  const totalSaldo = data.proveedores.reduce((s: number, p: any) => s + (p.saldo || 0), 0);
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="grid grid-cols-2 gap-3">
-        <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total proveedores</div>
-          <div className="text-xl font-bold text-orange-600">{data.proveedores.length}</div>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-blue-500 card-hover">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Órdenes de compra</div>
-          <div className="text-xl font-bold text-blue-600">{totalOrdenes}</div>
-        </Card>
+      {/* Header con búsqueda */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center text-white shadow-md">
+            <Truck size={20} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Proveedores</h2>
+            <p className="text-xs text-muted-foreground">{data.proveedores.length} registros · {proveedoresFiltrados.length} mostrados</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={filtroServicio}
+            onChange={e => setFiltroServicio(e.target.value)}
+            className="h-9 px-3 rounded-md border bg-background text-sm"
+          >
+            <option value="todos">Todos los servicios</option>
+            {servicios.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar por nombre, RFC o email..."
+              className="pl-9 w-64"
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {data.proveedores.map((p: any) => (
-          <Card key={p.id} className="p-4 card-hover border-l-4 border-l-orange-400">
-            <div className="flex items-start gap-2 mb-2">
-              <div className="w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 font-bold text-sm flex-shrink-0">
-                {p.nombre.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm truncate" title={p.nombre}>{p.nombre}</div>
-                <div className="font-mono text-[10px] text-muted-foreground">{p.rfc}</div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <Badge variant="secondary" className="text-[10px]">{p._count?.ordenesCompra || 0} órdenes</Badge>
-              {p.servicio && <span className="text-[10px] text-muted-foreground">{p.servicio}</span>}
-            </div>
-          </Card>
-        ))}
+      {/* KPIs */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-950/40 dark:to-amber-900/20 border border-orange-200 dark:border-orange-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-orange-700 dark:text-orange-300">Total proveedores</div>
+          <div className="text-xl font-bold text-orange-700 dark:text-orange-300">{data.proveedores.length}</div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/40 dark:to-cyan-900/20 border border-blue-200 dark:border-blue-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-blue-700 dark:text-blue-300">Órdenes de compra</div>
+          <div className="text-xl font-bold text-blue-700 dark:text-blue-300">{totalOrdenes}</div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-950/40 dark:to-rose-900/20 border border-red-200 dark:border-red-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-red-700 dark:text-red-300">Saldo pendiente</div>
+          <div className="text-xl font-bold text-red-700 dark:text-red-300">{fmt(totalSaldo)}</div>
+        </div>
+      </div>
+
+      {/* Agenda de proveedores */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+        <div className="bg-gradient-to-r from-orange-700 to-amber-700 dark:from-orange-900 dark:to-amber-900 text-white px-5 py-3 flex items-center justify-between">
+          <span className="font-semibold text-sm flex items-center gap-2"><Truck size={16} className="text-amber-200" /> Agenda de Proveedores</span>
+          <span className="text-xs text-orange-100">{proveedoresFiltrados.length} resultados</span>
+        </div>
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10">
+              <tr className="text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                <th className="px-4 py-3 text-left font-bold">Proveedor</th>
+                <th className="px-4 py-3 text-left font-bold">RFC</th>
+                <th className="px-4 py-3 text-left font-bold">Servicio</th>
+                <th className="px-4 py-3 text-left font-bold">Contacto</th>
+                <th className="px-4 py-3 text-center font-bold">Órdenes</th>
+                <th className="px-4 py-3 text-right font-bold">Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {proveedoresFiltrados.map((p: any, idx: number) => (
+                <tr key={p.id} className={cn('border-b border-slate-100 dark:border-slate-800/50 transition-colors hover:bg-orange-50 dark:hover:bg-orange-900/10', idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/50 dark:bg-slate-800/20')}>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                        {p.nombre?.charAt(0).toUpperCase() || '?'}
+                      </div>
+                      <div className="font-semibold text-sm">{p.nombre}</div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.rfc}</td>
+                  <td className="px-4 py-3">
+                    {p.servicio ? (
+                      <Badge variant="outline" className="text-[10px]">{p.servicio}</Badge>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
+                    {p.email && <div className="flex items-center gap-1"><span className="text-[10px]">✉️</span> {p.email}</div>}
+                    {p.telefono && <div className="flex items-center gap-1"><span className="text-[10px]">📞</span> {p.telefono}</div>}
+                    {!p.email && !p.telefono && <span className="text-slate-400">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Badge variant="secondary" className="text-[10px]">{p._count?.ordenesCompra || 0}</Badge>
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold text-orange-600">{fmt(p.saldo || 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -780,50 +897,204 @@ function ProveedoresView() {
 function EmpleadosView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ empleados: any[] }>('/api/empleados', empresa?.id);
+  const [busqueda, setBusqueda] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'activo' | 'inactivo'>('todos');
+  const [vista, setVista] = useState<'grid' | 'tabla'>('grid');
+
   if (loading) return <LoadingView message="Cargando empleados..." />;
   if (!data?.empleados?.length) return <EmptyState icon={User} message="Sin empleados registrados" />;
 
-  const totalNomina = data.empleados.reduce((s: number, e: any) => s + (e.salarioMensual || 0), 0);
+  const empleadosFiltrados = data.empleados.filter((e: any) => {
+    if (filtroEstado !== 'todos') {
+      const esActivo = e.status === 'activo';
+      if (filtroEstado === 'activo' && !esActivo) return false;
+      if (filtroEstado === 'inactivo' && esActivo) return false;
+    }
+    if (!busqueda) return true;
+    const q = busqueda.toLowerCase();
+    return e.nombre?.toLowerCase().includes(q) ||
+           e.rfc?.toLowerCase().includes(q) ||
+           e.puesto?.toLowerCase().includes(q) ||
+           e.departamento?.toLowerCase().includes(q);
+  });
+
+  const totalNomina = data.empleados
+    .filter((e: any) => e.status === 'activo')
+    .reduce((s: number, e: any) => s + (e.salarioMensual || 0), 0);
   const activos = data.empleados.filter((e: any) => e.status === 'activo').length;
+  const inactivos = data.empleados.length - activos;
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="grid grid-cols-3 gap-3">
-        <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Total empleados</div>
-          <div className="text-xl font-bold text-violet-600">{data.empleados.length}</div>
-          <div className="text-[10px] text-muted-foreground">{activos} activos</div>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Nómina mensual</div>
-          <div className="text-xl font-bold text-emerald-600">{fmt(totalNomina)}</div>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-amber-500 card-hover">
-          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Nómina anual</div>
-          <div className="text-xl font-bold text-amber-600">{fmt(totalNomina * 12)}</div>
-        </Card>
+      {/* Header con búsqueda */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center text-white shadow-md">
+            <User size={20} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Empleados</h2>
+            <p className="text-xs text-muted-foreground">{data.empleados.length} registros · {empleadosFiltrados.length} mostrados</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={filtroEstado}
+            onChange={e => setFiltroEstado(e.target.value as any)}
+            className="h-9 px-3 rounded-md border bg-background text-sm"
+          >
+            <option value="todos">Todos</option>
+            <option value="activo">🟢 Activos ({activos})</option>
+            <option value="inactivo">🔴 Inactivos ({inactivos})</option>
+          </select>
+          <div className="flex rounded-md border overflow-hidden">
+            <button
+              onClick={() => setVista('grid')}
+              className={cn('px-3 h-9 text-xs font-medium', vista === 'grid' ? 'bg-violet-600 text-white' : 'bg-background hover:bg-muted')}
+            >
+              ▦ Cards
+            </button>
+            <button
+              onClick={() => setVista('tabla')}
+              className={cn('px-3 h-9 text-xs font-medium', vista === 'tabla' ? 'bg-violet-600 text-white' : 'bg-background hover:bg-muted')}
+            >
+              ☰ Tabla
+            </button>
+          </div>
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar nombre, RFC, puesto..."
+              className="pl-9 w-64"
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {data.empleados.map((e: any) => (
-          <Card key={e.id} className="p-4 card-hover border-l-4 border-l-violet-400">
-            <div className="flex items-start gap-2 mb-2">
-              <div className="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold text-sm flex-shrink-0">
-                {e.nombre.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm truncate" title={e.nombre}>{e.nombre}</div>
-                <div className="font-mono text-[10px] text-muted-foreground">{e.rfc}</div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              {e.puesto && <span className="text-[10px] text-muted-foreground truncate">{e.puesto}</span>}
-              <Badge variant={e.status === 'activo' ? 'default' : 'secondary'} className="text-[10px]">{e.status}</Badge>
-            </div>
-            <div className="text-sm font-bold text-emerald-600 mt-1">{fmt(e.salarioMensual)}/mes</div>
-          </Card>
-        ))}
+      {/* KPIs */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="rounded-xl bg-gradient-to-br from-violet-50 to-indigo-50 dark:from-violet-950/40 dark:to-indigo-900/20 border border-violet-200 dark:border-violet-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-violet-700 dark:text-violet-300">Total empleados</div>
+          <div className="text-xl font-bold text-violet-700 dark:text-violet-300">{data.empleados.length}</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{activos} activos · {inactivos} inactivos</div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-emerald-700 dark:text-emerald-300">Nómina mensual</div>
+          <div className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{fmt(totalNomina)}</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{activos} empleados activos</div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-amber-700 dark:text-amber-300">Nómina anual</div>
+          <div className="text-xl font-bold text-amber-700 dark:text-amber-300">{fmt(totalNomina * 12)}</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">Proyección 12 meses</div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-br from-rose-50 to-pink-50 dark:from-rose-950/40 dark:to-pink-900/20 border border-rose-200 dark:border-rose-800 p-4">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-rose-700 dark:text-rose-300">Promedio salario</div>
+          <div className="text-xl font-bold text-rose-700 dark:text-rose-300">{fmt(activos > 0 ? totalNomina / activos : 0)}</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">Por empleado activo</div>
+        </div>
       </div>
+
+      {/* Vista: Cards (agenda interactiva) */}
+      {vista === 'grid' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {empleadosFiltrados.map((e: any) => {
+            const esActivo = e.status === 'activo';
+            const iniciales = (e.nombre || '').split(' ').slice(0, 2).map((n: string) => n.charAt(0).toUpperCase()).join('');
+            return (
+              <Card
+                key={e.id}
+                className={cn('p-4 card-hover border-l-4 transition-all',
+                  esActivo ? 'border-l-emerald-500' : 'border-l-rose-400 opacity-75')}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={cn('w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0 shadow-sm',
+                    esActivo ? 'bg-gradient-to-br from-violet-600 to-indigo-600' : 'bg-gradient-to-br from-slate-400 to-slate-500')}>
+                    {iniciales || '?'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="font-semibold text-sm truncate" title={e.nombre}>{e.nombre}</div>
+                      <span className={cn('w-2 h-2 rounded-full flex-shrink-0', esActivo ? 'bg-emerald-500' : 'bg-rose-400')} title={esActivo ? 'Activo' : 'Inactivo'} />
+                    </div>
+                    <div className="font-mono text-[10px] text-muted-foreground mt-0.5">{e.rfc}</div>
+                    {e.puesto && (
+                      <div className="text-xs text-violet-700 dark:text-violet-300 mt-1 font-medium">
+                        💼 {e.puesto}
+                      </div>
+                    )}
+                    {e.departamento && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        🏢 {e.departamento}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <Badge variant={esActivo ? 'default' : 'secondary'} className="text-[10px]">
+                    {esActivo ? '🟢 Activo' : '🔴 Inactivo'}
+                  </Badge>
+                  <div className="text-right">
+                    <div className="text-sm font-bold text-emerald-600">{fmt(e.salarioMensual || 0)}</div>
+                    <div className="text-[9px] text-muted-foreground">por mes</div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        /* Vista: Tabla */
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+          <div className="bg-gradient-to-r from-violet-700 to-indigo-700 dark:from-violet-900 dark:to-indigo-900 text-white px-5 py-3 flex items-center justify-between">
+            <span className="font-semibold text-sm flex items-center gap-2"><User size={16} className="text-violet-200" /> Agenda de Empleados</span>
+            <span className="text-xs text-violet-100">{empleadosFiltrados.length} resultados</span>
+          </div>
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10">
+                <tr className="text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                  <th className="px-4 py-3 text-left font-bold">Empleado</th>
+                  <th className="px-4 py-3 text-left font-bold">RFC</th>
+                  <th className="px-4 py-3 text-left font-bold">Puesto</th>
+                  <th className="px-4 py-3 text-left font-bold">Departamento</th>
+                  <th className="px-4 py-3 text-center font-bold">Estado</th>
+                  <th className="px-4 py-3 text-right font-bold">Salario mensual</th>
+                </tr>
+              </thead>
+              <tbody>
+                {empleadosFiltrados.map((e: any, idx: number) => {
+                  const esActivo = e.status === 'activo';
+                  return (
+                    <tr key={e.id} className={cn('border-b border-slate-100 dark:border-slate-800/50 transition-colors hover:bg-violet-50 dark:hover:bg-violet-900/10', idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/50 dark:bg-slate-800/20')}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className={cn('w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-xs flex-shrink-0',
+                            esActivo ? 'bg-gradient-to-br from-violet-500 to-indigo-500' : 'bg-slate-400')}>
+                            {e.nombre?.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="font-semibold text-sm">{e.nombre}</div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{e.rfc}</td>
+                      <td className="px-4 py-3 text-xs">{e.puesto || '—'}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{e.departamento || '—'}</td>
+                      <td className="px-4 py-3 text-center">
+                        <Badge variant={esActivo ? 'default' : 'secondary'} className="text-[10px]">
+                          {esActivo ? '🟢 Activo' : '🔴 Inactivo'}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-600">{fmt(e.salarioMensual || 0)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1309,11 +1580,9 @@ function InventarioView({ empresaId }: { empresaId?: string }) {
 
 function BancosView({ empresaId }: { empresaId?: string }) {
   const hoy = new Date();
-  const [periodoBanco, setPeriodoBanco] = useState({
-    mes: hoy.getMonth() + 1,
-    anio: hoy.getFullYear(),
-    cuentaId: '',
-  });
+  const [anioSel, setAnioSel] = useState(hoy.getFullYear());
+  const [selMes, setSelMes] = useState(hoy.getMonth() + 1); // Mes actual por defecto
+  const [cuentaIdSel, setCuentaIdSel] = useState(''); // '' = todas
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [showCuentaForm, setShowCuentaForm] = useState(false);
@@ -1321,22 +1590,23 @@ function BancosView({ empresaId }: { empresaId?: string }) {
   const [eliminandoBanco, setEliminandoBanco] = useState(false);
   const [bancoData, setBancoData] = useState<any>(null);
   const [loadingBancos, setLoadingBancos] = useState(true);
+  const [resumenAnual, setResumenAnual] = useState<any[]>([]);
 
   const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const mesesLargo = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-  // Cargar datos de bancos con filtro de periodo
+  // Cargar datos del mes seleccionado
   const cargarBancos = useCallback(async () => {
     if (!empresaId) { setLoadingBancos(false); return; }
     setLoadingBancos(true);
     try {
       const params = new URLSearchParams({
         empresaId,
-        mes: String(periodoBanco.mes),
-        anio: String(periodoBanco.anio),
+        mes: String(selMes),
+        anio: String(anioSel),
         pageSize: '500',
       });
-      if (periodoBanco.cuentaId) params.set('cuentaId', periodoBanco.cuentaId);
+      if (cuentaIdSel) params.set('cuentaId', cuentaIdSel);
       const r = await fetch(`/api/bancos?${params}`);
       const d = await r.json();
       setBancoData(d);
@@ -1345,11 +1615,42 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     } finally {
       setLoadingBancos(false);
     }
-  }, [empresaId, periodoBanco.mes, periodoBanco.anio, periodoBanco.cuentaId]);
+  }, [empresaId, selMes, anioSel, cuentaIdSel]);
+
+  // Cargar resumen anual para las pestañas
+  const cargarResumenAnual = useCallback(async () => {
+    if (!empresaId) return;
+    try {
+      const r = await fetch(`/api/bancos?empresaId=${empresaId}&anio=${anioSel}&pageSize=1000&all=true`);
+      const d = await r.json();
+      const movs = d?.movimientos || [];
+      // Agrupar por mes
+      const porMes: any[] = [];
+      for (let m = 1; m <= 12; m++) {
+        const movsMes = movs.filter((mov: any) => {
+          const f = new Date(mov.fecha);
+          return f.getMonth() + 1 === m && f.getFullYear() === anioSel;
+        });
+        porMes.push({
+          mes: m,
+          count: movsMes.length,
+          ingresos: movsMes.filter((m: any) => m.monto > 0).reduce((s: number, m: any) => s + m.monto, 0),
+          egresos: movsMes.filter((m: any) => m.monto < 0).reduce((s: number, m: any) => s + Math.abs(m.monto), 0),
+        });
+      }
+      setResumenAnual(porMes);
+    } catch (e) {
+      console.error('Error resumen anual:', e);
+    }
+  }, [empresaId, anioSel]);
 
   useEffect(() => {
     cargarBancos();
   }, [cargarBancos]);
+
+  useEffect(() => {
+    cargarResumenAnual();
+  }, [cargarResumenAnual]);
 
   const cuentas = bancoData?.cuentas || [];
   const movimientos = bancoData?.movimientos || [];
@@ -1378,15 +1679,15 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       toast.warning('Sin cuenta', 'Primero crea una cuenta bancaria');
       return;
     }
-    const cuentaIdSel = periodoBanco.cuentaId || cuentas[0].id;
+    const cuentaId = cuentaIdSel || cuentas[0].id;
     setUploading(true);
     setUploadMsg('');
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('cuentaId', cuentaIdSel);
-      formData.append('mes', String(periodoBanco.mes));
-      formData.append('anio', String(periodoBanco.anio));
+      formData.append('cuentaId', cuentaId);
+      formData.append('mes', String(selMes));
+      formData.append('anio', String(anioSel));
       if (empresaId) formData.append('empresaId', empresaId);
       const r = await fetch('/api/upload-estado-cuenta', { method: 'POST', body: formData });
       const d = await r.json();
@@ -1394,6 +1695,7 @@ function BancosView({ empresaId }: { empresaId?: string }) {
         setUploadMsg(`✅ ${d.message}`);
         toast.success('Estado de cuenta importado', d.message);
         cargarBancos();
+        cargarResumenAnual();
       } else {
         setUploadMsg(`❌ ${d.error || 'Error al subir archivo'}`);
         toast.error('Error', d.error || 'No se pudo procesar');
@@ -1408,14 +1710,14 @@ function BancosView({ empresaId }: { empresaId?: string }) {
   };
 
   const eliminarMesBanco = async () => {
-    const cuentaIdSel = periodoBanco.cuentaId || cuentas[0]?.id;
-    if (!cuentaIdSel) {
+    const cuentaId = cuentaIdSel || cuentas[0]?.id;
+    if (!cuentaId) {
       toast.warning('Sin cuenta', 'Primero crea una cuenta bancaria');
       return;
     }
-    const cuenta = cuentas.find(c => c.id === cuentaIdSel);
+    const cuenta = cuentas.find(c => c.id === cuentaId);
     if (!confirm(
-      `¿Eliminar TODOS los movimientos de ${mesesLargo[periodoBanco.mes - 1]} ${periodoBanco.anio}?\n\n` +
+      `¿Eliminar TODOS los movimientos de ${mesesLargo[selMes - 1]} ${anioSel}?\n\n` +
       `Cuenta: ${cuenta?.banco} ${cuenta?.cuenta}\n\n` +
       `Esto te permite volver a subir el estado de cuenta de ese mes.\n\n` +
       `Esta acción no se puede deshacer.`
@@ -1424,15 +1726,16 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     setEliminandoBanco(true);
     try {
       const params = new URLSearchParams({
-        cuentaId: cuentaIdSel,
-        mes: String(periodoBanco.mes),
-        anio: String(periodoBanco.anio),
+        cuentaId,
+        mes: String(selMes),
+        anio: String(anioSel),
       });
       const r = await fetch(`/api/upload-estado-cuenta?${params}`, { method: 'DELETE' });
       const d = await r.json();
       if (d.success) {
         toast.success('Movimientos eliminados', d.message);
         cargarBancos();
+        cargarResumenAnual();
       } else {
         toast.error('Error', d.error || 'Error');
       }
@@ -1443,12 +1746,12 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     }
   };
 
-  if (loadingBancos) return <LoadingView message="Cargando bancos y movimientos..." />;
+  if (loadingBancos && !bancoData) return <LoadingView message="Cargando bancos y movimientos..." />;
 
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Header con botón */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold flex items-center gap-2">
             <Banknote size={20} className="text-emerald-600" /> Bancos + Estados de Cuenta
@@ -1495,19 +1798,25 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       {cuentas.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {cuentas.map((c) => {
-            const isSelected = periodoBanco.cuentaId === c.id;
+            const isSelected = cuentaIdSel === c.id;
+            const tipoColor = c.tipo === 'inversion' ? 'border-amber-400 bg-amber-50/30 dark:bg-amber-900/10' :
+                              c.tipo === 'ahorro' ? 'border-blue-400 bg-blue-50/30 dark:bg-blue-900/10' :
+                              'border-emerald-400 bg-emerald-50/30 dark:bg-emerald-900/10';
+            const tipoIcon = c.tipo === 'inversion' ? '📈' : c.tipo === 'ahorro' ? '🏦' : '💳';
             return (
               <Card
                 key={c.id}
                 className={cn(
                   'p-5 cursor-pointer transition-all card-hover border-2',
-                  isSelected ? 'border-violet-500 bg-violet-50/30 dark:bg-violet-900/10' : 'border-transparent'
+                  isSelected ? 'border-violet-500 bg-violet-50/30 dark:bg-violet-900/10' : tipoColor
                 )}
-                onClick={() => setPeriodoBanco({ ...periodoBanco, cuentaId: isSelected ? '' : c.id })}
+                onClick={() => setCuentaIdSel(isSelected ? '' : c.id)}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <div className="text-xs uppercase font-semibold text-muted-foreground">{c.banco}</div>
+                    <div className="text-xs uppercase font-semibold text-muted-foreground flex items-center gap-1">
+                      <span>{tipoIcon}</span> {c.banco}
+                    </div>
                     <div className="font-mono text-sm mt-0.5">{c.cuenta}</div>
                   </div>
                   <Badge variant={c.tipo === 'operaciones' ? 'default' : 'secondary'} className="text-[10px]">{c.tipo}</Badge>
@@ -1524,95 +1833,114 @@ function BancosView({ empresaId }: { empresaId?: string }) {
         </div>
       )}
 
-      {/* KPIs del periodo */}
-      {movimientos.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Ingresos del mes</div>
-            <div className="text-xl font-bold text-emerald-600">{fmt(resumen.totalIngresos)}</div>
-            <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto > 0).length} depósitos</div>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Egresos del mes</div>
-            <div className="text-xl font-bold text-orange-600">{fmt(resumen.totalEgresos)}</div>
-            <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto < 0).length} retiros</div>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Flujo neto</div>
-            <div className={cn('text-xl font-bold', resumen.flujoNeto >= 0 ? 'text-violet-600' : 'text-red-600')}>
-              {fmt(resumen.flujoNeto)}
-            </div>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-blue-500 card-hover">
-            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Movimientos</div>
-            <div className="text-xl font-bold text-blue-600">{resumen.countMovimientos}</div>
-          </Card>
+      {/* Selector de año + Pestañas mensuales estilo Nómina */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground">Año:</span>
+          <select
+            value={anioSel}
+            onChange={e => setAnioSel(parseInt(e.target.value))}
+            className="h-9 px-3 rounded-md border bg-background text-sm"
+          >
+            {Array.from({ length: 5 }, (_, i) => hoy.getFullYear() - i).map(a => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+          <div className="h-8 w-px bg-border mx-1"></div>
+          <button
+            onClick={() => setSelMes(0)}
+            className={cn('px-3 py-2 rounded-lg text-xs font-bold transition-all border mr-2',
+              selMes === 0 ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+              : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100')}
+          >
+            📅 Todo {anioSel}
+          </button>
+          <div className="h-8 w-px bg-border mx-1"></div>
+          {meses.map((m, i) => {
+            const mesNum = i + 1;
+            const datosMes = resumenAnual.find(r => r.mes === mesNum);
+            const count = datosMes?.count || 0;
+            const isActive = selMes === mesNum;
+            const hasData = count > 0;
+            return (
+              <button key={m} onClick={() => setSelMes(mesNum)}
+                className={cn('px-3 py-2 rounded-lg text-xs font-medium transition-all border',
+                  isActive ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+                  : hasData ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
+                  : 'bg-muted/30 text-muted-foreground border-transparent hover:bg-muted/50')}
+                title={hasData ? `${count} movs · Ing: ${fmt(datosMes.ingresos)} | Egr: ${fmt(datosMes.egresos)}` : 'Sin movimientos'}
+              >
+                <div className="flex flex-col items-center gap-0.5 min-w-[44px]">
+                  <span>{m}</span>
+                  {hasData && <span className={cn('text-[9px] font-bold', isActive ? 'text-white/80' : 'text-emerald-500')}>{count}</span>}
+                </div>
+              </button>
+            );
+          })}
         </div>
-      )}
 
-      {/* Selector de periodo + Upload */}
+        <div className="flex items-center gap-2">
+          <select
+            value={cuentaIdSel}
+            onChange={e => setCuentaIdSel(e.target.value)}
+            className="h-9 px-3 rounded-md border bg-background text-sm"
+          >
+            <option value="">Todas las cuentas</option>
+            {cuentas.map(c => (
+              <option key={c.id} value={c.id}>{c.banco} {c.cuenta}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* KPIs del periodo */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="p-4 border-l-4 border-l-emerald-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Ingresos del {selMes === 0 ? 'año' : 'mes'}</div>
+          <div className="text-xl font-bold text-emerald-600">{fmt(resumen.totalIngresos)}</div>
+          <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto > 0).length} depósitos</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-orange-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Egresos del {selMes === 0 ? 'año' : 'mes'}</div>
+          <div className="text-xl font-bold text-orange-600">{fmt(resumen.totalEgresos)}</div>
+          <div className="text-[10px] text-muted-foreground">{movimientos.filter(m => m.monto < 0).length} retiros</div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-violet-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Flujo neto</div>
+          <div className={cn('text-xl font-bold', resumen.flujoNeto >= 0 ? 'text-violet-600' : 'text-red-600')}>
+            {fmt(resumen.flujoNeto)}
+          </div>
+        </Card>
+        <Card className="p-4 border-l-4 border-l-blue-500 card-hover">
+          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Movimientos</div>
+          <div className="text-xl font-bold text-blue-600">{resumen.countMovimientos}</div>
+        </Card>
+      </div>
+
+      {/* Upload + Eliminar mes */}
       <Card className="p-5">
-        <h3 className="font-semibold mb-3 flex items-center gap-2">
-          <Upload size={16} className="text-violet-600" /> Cargar estado de cuenta
-        </h3>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-          <div>
-            <label className="text-[10px] uppercase font-semibold text-muted-foreground">Cuenta</label>
-            <select
-              value={periodoBanco.cuentaId}
-              onChange={e => setPeriodoBanco({ ...periodoBanco, cuentaId: e.target.value })}
-              className="w-full h-9 px-2 rounded-md border bg-background text-sm"
-            >
-              <option value="">Todas las cuentas</option>
-              {cuentas.map(c => (
-                <option key={c.id} value={c.id}>{c.banco} {c.cuenta}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] uppercase font-semibold text-muted-foreground">Mes</label>
-            <select
-              value={periodoBanco.mes}
-              onChange={e => setPeriodoBanco({ ...periodoBanco, mes: parseInt(e.target.value) })}
-              className="w-full h-9 px-2 rounded-md border bg-background text-sm"
-            >
-              {mesesLargo.map((m, i) => (
-                <option key={m} value={i + 1}>{m}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] uppercase font-semibold text-muted-foreground">Año</label>
-            <select
-              value={periodoBanco.anio}
-              onChange={e => setPeriodoBanco({ ...periodoBanco, anio: parseInt(e.target.value) })}
-              className="w-full h-9 px-2 rounded-md border bg-background text-sm"
-            >
-              {Array.from({ length: 5 }, (_, i) => hoy.getFullYear() - i).map(a => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h3 className="font-semibold flex items-center gap-2">
+            <Upload size={16} className="text-violet-600" /> Cargar estado de cuenta
+          </h3>
+          {selMes !== 0 && (
             <Button
               variant="destructive"
               size="sm"
               onClick={eliminarMesBanco}
               disabled={eliminandoBanco || cuentas.length === 0}
-              className="w-full"
             >
               {eliminandoBanco ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-              Eliminar {meses[periodoBanco.mes - 1]} {periodoBanco.anio}
+              Eliminar {meses[selMes - 1]} {anioSel}
             </Button>
-          </div>
+          )}
         </div>
 
         <label className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
           <Upload size={28} className="text-muted-foreground mb-2" />
           <span className="text-sm font-medium">{uploading ? 'Procesando...' : 'Haz clic o arrastra tu archivo aquí'}</span>
           <span className="text-xs text-muted-foreground mt-1">
-            Formatos: <strong>Excel (.xlsx)</strong> · <strong>CSV</strong> · <strong>PDF</strong>
+            Formatos: <strong>Excel (.xlsx)</strong> · <strong>CSV</strong> · <strong>PDF</strong> · Mes destino: <strong>{selMes === 0 ? mesesLargo[hoy.getMonth()] : mesesLargo[selMes - 1]} {anioSel}</strong>
           </span>
           <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading || cuentas.length === 0} className="hidden" />
         </label>
@@ -1621,26 +1949,26 @@ function BancosView({ empresaId }: { empresaId?: string }) {
       </Card>
 
       {/* Tabla de movimientos del periodo */}
-      {movimientos.length > 0 ? (
-        <DataTableCard title={`Movimientos de ${mesesLargo[periodoBanco.mes - 1]} ${periodoBanco.anio} (${movimientos.length})`}>
+      {loadingBancos ? (
+        <LoadingView message={`Cargando movimientos de ${selMes === 0 ? `${anioSel}` : `${mesesLargo[selMes - 1]} ${anioSel}`}...`} />
+      ) : movimientos.length > 0 ? (
+        <DataTableCard title={`Movimientos de ${selMes === 0 ? `Todo ${anioSel}` : `${mesesLargo[selMes - 1]} ${anioSel}`} (${movimientos.length})`}>
           <table className="w-full text-sm">
             <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
               <th className="px-4 py-2">Fecha</th>
               <th className="px-4 py-2">Cuenta</th>
               <th className="px-4 py-2">Concepto</th>
               <th className="px-4 py-2 text-right">Monto</th>
-              <th className="px-4 py-2 text-right">Saldo</th>
             </tr></thead>
             <tbody>
               {movimientos.map((m) => (
                 <tr key={m.id} className="border-b hover:bg-muted/30">
                   <td className="px-4 py-2 whitespace-nowrap">{new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' })}</td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">{m.cuenta?.banco}</td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">{m.cuenta?.banco} <span className="text-[10px]">({m.cuenta?.tipo})</span></td>
                   <td className="px-4 py-2 max-w-md truncate" title={m.concepto}>{m.concepto}</td>
                   <td className={cn('px-4 py-2 text-right font-mono font-semibold whitespace-nowrap', m.monto >= 0 ? 'text-emerald-600' : 'text-red-600')}>
                     {m.monto >= 0 ? '+' : ''}{fmt(m.monto)}
                   </td>
-                  <td className="px-4 py-2 text-right font-mono text-muted-foreground">—</td>
                 </tr>
               ))}
             </tbody>
@@ -1651,8 +1979,8 @@ function BancosView({ empresaId }: { empresaId?: string }) {
                   <span className="text-emerald-600">+{fmt(resumen.totalIngresos)}</span>
                   {' / '}
                   <span className="text-orange-600">-{fmt(resumen.totalEgresos)}</span>
+                  <div className="text-violet-600 text-xs">Neto: {fmt(resumen.flujoNeto)}</div>
                 </td>
-                <td className="px-4 py-2 text-right text-violet-600">{fmt(resumen.flujoNeto)}</td>
               </tr>
             </tfoot>
           </table>
@@ -1661,7 +1989,7 @@ function BancosView({ empresaId }: { empresaId?: string }) {
         cuentas.length > 0 && (
           <EmptyState
             icon={Banknote}
-            message={`Sin movimientos en ${mesesLargo[periodoBanco.mes - 1]} ${periodoBanco.anio}. Sube un estado de cuenta para verlos aquí.`}
+            message={`Sin movimientos en ${selMes === 0 ? `el año ${anioSel}` : `${mesesLargo[selMes - 1]} ${anioSel}`}. Sube un estado de cuenta para verlos aquí.`}
           />
         )
       )}
@@ -1899,6 +2227,7 @@ function SatView() {
       {/* Selector de mes/año + Botón eliminar mes */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground">Año:</span>
           <select
             value={anioSel}
             onChange={e => setAnioSel(parseInt(e.target.value))}
@@ -1908,22 +2237,36 @@ function SatView() {
               <option key={a} value={a}>{a}</option>
             ))}
           </select>
+          <div className="h-8 w-px bg-border mx-1"></div>
           <button
             onClick={() => setSelMes(0)}
-            className={cn('px-3 py-1.5 text-xs rounded-md border transition',
-              selMes === 0 ? 'bg-violet-600 text-white border-violet-600' : 'border-border hover:bg-muted')}
+            className={cn('px-3 py-2 rounded-lg text-xs font-bold transition-all border mr-2',
+              selMes === 0 ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+              : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100')}
           >
-            Todo el año
+            📅 Todo {anioSel}
           </button>
+          <div className="h-8 w-px bg-border mx-1"></div>
           {meses.map((m, i) => {
             const mesNum = i + 1;
+            const datosMes = data?.resumenMensual?.find((r: any) => r.mes === mesNum);
+            const count = tab === 'recibidas'
+              ? (datosMes?.recibidas || 0) + (datosMes?.notasCreditoRecibidas || 0)
+              : (datosMes?.emitidas || 0) + (datosMes?.notasCreditoEmitidas || 0);
             const isActive = selMes === mesNum;
+            const hasData = count > 0;
             return (
               <button key={m} onClick={() => setSelMes(mesNum)}
-                className={cn('px-2.5 py-1.5 text-xs rounded-md border transition',
-                  isActive ? 'bg-violet-600 text-white border-violet-600' : 'border-border hover:bg-muted')}
+                className={cn('px-3 py-2 rounded-lg text-xs font-medium transition-all border',
+                  isActive ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+                  : hasData ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800 hover:bg-violet-100'
+                  : 'bg-muted/30 text-muted-foreground border-transparent hover:bg-muted/50')}
+                title={hasData ? `${count} CFDIs en ${m}` : 'Sin CFDIs'}
               >
-                {m.slice(0, 3)}
+                <div className="flex flex-col items-center gap-0.5 min-w-[44px]">
+                  <span>{m.slice(0, 3)}</span>
+                  {hasData && <span className={cn('text-[9px] font-bold', isActive ? 'text-white/80' : 'text-violet-500')}>{count}</span>}
+                </div>
               </button>
             );
           })}
