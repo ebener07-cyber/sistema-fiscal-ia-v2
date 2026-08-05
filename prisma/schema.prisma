@@ -148,6 +148,8 @@ model Factura {
   concepto        String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  // Relación inversa con movimientos bancarios conciliados
+  movimientosConciliados MovimientoBanco[] @relation("MovimientoFacturaConciliada")
 
   @@index([empresaId])
   @@index([clienteId])
@@ -156,6 +158,8 @@ model Factura {
   @@index([fecha])
   @@index([direccion])
   @@index([estado])
+  // Índice compuesto para consultas frecuentes por empresa + dirección (emitida/recibida) + fecha
+  @@index([empresaId, direccion, fecha])
 }
 
 // ============================================================================
@@ -208,6 +212,9 @@ model ReciboNomina {
 
   @@index([empleadoId])
   @@index([fecha])
+  @@index([empresaId])
+  // Índice compuesto para reportes mensuales por empresa
+  @@index([empresaId, fecha])
 }
 
 // ============================================================================
@@ -262,6 +269,8 @@ model CuentaBancaria {
   updatedAt   DateTime @updatedAt
 
   movimientos MovimientoBanco[]
+
+  @@index([empresaId])
 }
 
 model MovimientoBanco {
@@ -273,10 +282,23 @@ model MovimientoBanco {
   estado      String   @default("conciliado")
   cuentaId    String
   cuenta      CuentaBancaria @relation(fields: [cuentaId], references: [id])
+  // ===== Clasificación contable automática (agente categorizador) =====
+  categoria       String?  // Nómina, Proveedores, Comisiones, Transferencias, Renta, Servicios, Impuestos, Inversión, Préstamos, Otros
+  subcategoria    String?  // subcategoría más específica (ej: "Nómina Administrativa")
+  scoreConfianza  Float?   // 0.0 a 1.0 del categorizador
+  // ===== Conciliación con facturas (agente conciliador) =====
+  facturaConciliadaId String? // ID de factura con la que se concilió
+  facturaConciliada   Factura? @relation("MovimientoFacturaConciliada", fields: [facturaConciliadaId], references: [id])
+  conciliadoEn        DateTime? // fecha en que se concilió
+  // ===== Metadata =====
   createdAt   DateTime @default(now())
 
   @@index([cuentaId])
   @@index([fecha])
+  @@index([categoria])
+  @@index([facturaConciliadaId])
+  // Índice compuesto para consultas de movimientos por cuenta y fecha (estado de cuenta)
+  @@index([cuentaId, fecha])
 }
 
 model Poliza {
@@ -371,4 +393,34 @@ model Conversacion {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+// ============================================================================
+// AUDIT TRAIL — Trazabilidad obligatoria para agentes IA (Maker-Checker)
+// Registra cada llamada a herramienta con score de confianza y verificaciones
+// ============================================================================
+model AuditTrail {
+  id              String   @id @default(cuid())
+  // Identificación del agente que generó la entrada
+  agente          String   // "rag-fiscal" | "cfdi-validator" | "erp-query" | "red-team" | "orchestrator" | "maker" | "checker"
+  herramienta     String   // nombre de la tool invocada (ej: "buscar_articulo_cff")
+  // Datos de entrada y salida
+  input           Json     // parámetros con los que se llamó
+  output          Json?    // respuesta de la tool (null si falló)
+  // Verificación Maker-Checker
+  scoreConfianza  Float    @default(0) // 0.0 a 1.0
+  verificado      Boolean  @default(false) // true si pasó el checker
+  observaciones   String?  // notas del checker (ej: "artículo citado coincide con BD")
+  // Contexto
+  empresaId       String?  // empresa sobre la que se ejecutó
+  usuarioId       String?  // usuario que disparó la acción
+  conversacionId  String?  // conversación que originó la tool
+  // Metadata
+  duracionMs      Int?     // tiempo de ejecución
+  error           String?  // mensaje de error si falló
+  createdAt       DateTime @default(now())
+
+  @@index([agente, createdAt])
+  @@index([empresaId, createdAt])
+  @@index([verificado])
 }

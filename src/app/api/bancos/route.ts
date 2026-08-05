@@ -119,3 +119,63 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
+
+/**
+ * DELETE /api/bancos?id={cuentaId}
+ *
+ * Elimina una cuenta bancaria y TODOS sus movimientos asociados en cascada,
+ * usando una transacción Prisma para garantizar consistencia.
+ *
+ * Devuelve: { success: true, message: 'Cuenta eliminada con N movimientos' }
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'Falta el parámetro id de la cuenta bancaria' },
+        { status: 400 }
+      );
+    }
+
+    // Verificar que la cuenta exista antes de intentar borrar
+    const cuenta = await db.cuentaBancaria.findUnique({
+      where: { id },
+      select: { id: true, banco: true, cuenta: true, _count: { select: { movimientos: true } } },
+    });
+
+    if (!cuenta) {
+      return NextResponse.json(
+        { error: 'La cuenta bancaria no existe' },
+        { status: 404 }
+      );
+    }
+
+    const totalMovimientos = cuenta._count.movimientos;
+
+    // Transacción: borrar movimientos primero (por FK) y luego la cuenta
+    await db.$transaction([
+      db.movimientoBanco.deleteMany({ where: { cuentaId: id } }),
+      db.cuentaBancaria.delete({ where: { id } }),
+    ]);
+
+    return NextResponse.json({
+      success: true,
+      message: `Cuenta eliminada con ${totalMovimientos} movimientos`,
+      data: {
+        id,
+        banco: cuenta.banco,
+        cuenta: cuenta.cuenta,
+        movimientosEliminados: totalMovimientos,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error en DELETE /api/bancos:', error.message);
+    return NextResponse.json(
+      { error: error.message || 'Error al eliminar la cuenta bancaria' },
+      { status: 500 }
+    );
+  }
+}

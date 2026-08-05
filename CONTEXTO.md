@@ -9,8 +9,8 @@
 - **Repo GitHub:** https://github.com/ebener07-cyber/sistema-fiscal-ia-v2
 - **Deploy:** https://sistema-fiscal-ia-v2.vercel.app
 - **BD:** Neon PostgreSQL (ep-red-smoke-atnx331h-pooler.c-9.us-east-1.aws.neon.tech)
-- **Versión actual:** v2.4
-- **Fecha última actualización:** 2 agosto 2026 (tarde)
+- **Versión actual:** v3.2 (reportes SAT completos)
+- **Fecha última actualización:** 3 agosto 2026
 
 ---
 
@@ -456,6 +456,197 @@ bun install
 - `scripts/convertir-mal-clasificadas.ts` — Script para corregir 94 facturas mal clasificadas
 - `scripts/agregar-cuenta-santander.ts` — Script para crear cuenta Santander
 - `scripts/subir-santander-bd.ts` — Script para procesar PDF Santander y subir a BD
+
+---
+
+## 📝 v2.5 — Parser PDF Santander reescrito + 6 PDFs procesados (2 agosto 2026 noche)
+
+### Problemas resueltos:
+1. **Parser PDF Santander impreciso**:
+   - El parser viejo confundía folios (7113421), CLABEs (014180655090853560), y refs con montos
+   - No detectaba movimientos cuando el saldo final era $0.00 (filtro > 0.5 los descartaba)
+   - No distinguía correctamente las 2 secciones (operaciones + inversión)
+   - Reescrito completamente `parsePDFTextoMultiCuenta` con:
+     * FASE 1: Detección explícita de secciones por headers conocidos
+     * FASE 2: Parsear cada sección con su propio saldo inicial
+     * FASE 3: Combinar resultados
+   * Extracción ESTRICTA de montos: NN,NNN.NN con 2 decimales obligatorios
+   * Función inclusiva para detectar saldos en $0.00
+   * Maneja movimientos multi-línea correctamente
+
+2. **Cuenta Santander Inversión**:
+   - Creada cuenta SANTANDER Inversión 66-50908535-6 en BD de ELECTRONICMA
+   - En los 6 PDFs analizados, la cuenta de inversión no tuvo movimientos (saldo $0)
+
+3. **Procesamiento de 6 PDFs (Enero-Junio 2026)**:
+   - Enero: 32 movs | saldo inicial $119,827.38 → $62,073.29 ✓
+   - Febrero: 44 movs | saldo inicial $62,073.29 → $108,842.68 ✓
+   - Marzo: 46 movs | saldo inicial $108,842.68 → $299,955.21 ✓
+   - Abril: 30 movs | saldo inicial $299,955.21 → $82,075.16 ✓
+   - Mayo: 26 movs | saldo inicial $82,075.16 → $508,141.20 ✓
+   - Junio: 44 movs | saldo inicial $508,141.20 → $1,652.57 ✓
+   - **Saldo final de cuenta SANTANDER: $1,652.57** (coincide exactamente con el PDF)
+
+4. **Movimiento de apertura automático**:
+   - Cuando se sube el primer PDF a una cuenta vacía, se agrega el saldo inicial
+     como movimiento de apertura ("SALDO INICIAL DE APERTURA")
+   - Esto hace que el saldo de la cuenta cuadre con el saldo final del último PDF
+
+### Archivos modificados:
+- `src/app/api/upload-estado-cuenta/route.ts` — Parser reescrito + detección multi-cuenta + movimiento de apertura
+- `scripts/procesar-todos-santander.ts` — Script para procesar los 6 PDFs
+- `scripts/probar-parser-santander-v2.js` — Script de prueba del nuevo parser
+- `scripts/analizar-pdf-santander.js` — Script para extraer texto del PDF
+
+---
+
+## 📝 v3.0 — Arquitectura Multi-Agente Maker-Checker + Router + MCP (3 agosto 2026)
+
+### Nuevos componentes:
+
+1. **Audit Trail (Trazabilidad obligatoria)**:
+   - Modelo `AuditTrail` en Prisma con campos: agente, herramienta, input, output, scoreConfianza, verificado, observaciones, empresaId, duracionMs, error
+   - Helper `src/lib/audit-trail.ts` con funciones `registrarAuditTrail`, `marcarVerificado`, `conAuditoria`
+   - Endpoint `GET /api/audit-trail` con filtros y estadísticas
+   - Cada llamada de un agente IA queda registrada con score de confianza
+
+2. **Maker-Checker en Auditoría Fiscal**:
+   - Helper `src/lib/agentes/checker-fiscal.ts` que verifica citas de artículos
+   - API `/api/auditoria-fiscal` ahora hace:
+     1. **Maker** (GLM-4.6): genera respuesta citando artículos → audit trail
+     2. Stream token por token al frontend
+     3. **Checker** (determinista, NO LLM): verifica que las citas existan en los JSON
+     4. Score de confianza 0.0 a 1.0, verificado=true solo si >= 0.7
+   - El frontend recibe evento `{type: 'verificacion', scoreConfianza, verificado, citas, observaciones}`
+
+3. **Orchestrator Router** (`/api/agentes/router`):
+   - Clasifica la intención del usuario en 4 subagentes:
+     - **rag-fiscal** → preguntas sobre leyes
+     - **cfdi-validator** → validar CFDIs
+     - **erp-query** → consultas a BD
+     - **assistant** → tareas/notas/recordatorios
+   - Usa GLM-4.6 con prompt corto + few-shot examples
+   - Fallback heurístico por keywords si falla el LLM
+   - Devuelve `{subagente, razon, confianza, endpointSugerido, auditTrailId}`
+
+4. **Subagente ERP-Query** (`/api/agentes/erp-query`):
+   - Clasifica consulta con LLM (6 tipos: facturas, saldos, kpis, clientes, proveedores, nómina)
+   - Ejecuta función Prisma predefinida (NO genera SQL dinámico, seguro)
+   - 6 consultas soportadas con parámetros extraídos automáticamente
+
+5. **Subagente CFDI-Validator** (`/api/agentes/cfdi-validator`):
+   - Determinista (sin LLM) para garantizar consistencia
+   - Valida: estructura XML, campos obligatorios, RFC (12/13 chars), UUID (36 chars), tipo comprobante, fechas
+   - Verifica duplicados de UUID en BD
+   - Score de confianza 0.0 a 1.0
+
+6. **MCP Server Ligero** (`/api/mcp`):
+   - Implementación simplificada de Model Context Protocol
+   - 7 tools estandarizadas:
+     1. `buscar_articulo_cff(frase_clave, ley?)` — busca en 8 leyes JSON
+     2. `validar_estructura_cfdi(xml_string)` — valida XML de CFDI
+     3. `consultar_saldo_bancario(empresaId)` — saldos de cuentas
+     4. `calcular_isr_persona_moral(utilidad)` — ISR 30% (LISR Art. 9)
+     5. `calcular_iva(ventas, compras)` — IVA 16% (LIVA Art. 1)
+     6. `verificar_rfc(rfc)` — valida formato RFC
+     7. `listar_facturas_empresa(empresaId, direccion?)` — facturas de empresa
+   - GET devuelve manifest de tools con esquema de parámetros
+   - POST ejecuta tool y registra audit trail automáticamente
+   - Las tools son testeables independientemente del LLM
+
+### Arquitectura resultante:
+```
+Usuario → /api/agentes/router (Orchestrator)
+              ↓
+         [rag-fiscal]  → /api/auditoria-fiscal (Maker) → Checker → AuditTrail
+         [cfdi-valid]  → /api/agentes/cfdi-validator → AuditTrail
+         [erp-query]   → /api/agentes/erp-query → AuditTrail
+         [assistant]   → /api/assistant (23 tools) → AuditTrail
+
+APIs pueden llamar al MCP server (/api/mcp) para tools estandarizadas
+```
+
+### Archivos creados/modificados:
+- `prisma/schema.prisma` — + modelo AuditTrail
+- `src/lib/audit-trail.ts` — helper de trazabilidad
+- `src/lib/agentes/checker-fiscal.ts` — checker determinista
+- `src/app/api/audit-trail/route.ts` — endpoint de consulta
+- `src/app/api/agentes/router/route.ts` — orchestrator
+- `src/app/api/agentes/erp-query/route.ts` — subagente ERP
+- `src/app/api/agentes/cfdi-validator/route.ts` — subagente CFDI
+- `src/app/api/mcp/route.ts` — MCP server
+- `src/app/api/auditoria-fiscal/route.ts` — Maker-Checker implementado
+
+---
+
+## 📝 v3.1 — Categorizador + Conciliador Bancario + PII Masking (3 agosto 2026)
+
+### Nuevos componentes:
+
+1. **Agente Categorizador** (`/api/agentes/categorizador`):
+   - Clasifica movimientos bancarios en 10 categorías contables
+   - Estrategia de 2 pasadas:
+     - PASADA 1: Determinista por keywords (28 reglas, 100% preciso, gratis)
+     - PASADA 2: LLM GLM-4.6 con few-shot (solo si la determinista falla)
+   - Categorías: Nómina, Proveedores, Comisiones, Transferencias, Renta, Servicios, Impuestos, Inversión, Préstamos, Otros
+   - Persiste en MovimientoBanco: categoria, subcategoria, scoreConfianza
+   - Estadísticas: GET /api/agentes/categorizador?empresaId=xxx
+
+2. **Agente Conciliador Banco-Facturas** (`/api/agentes/conciliador-banco`):
+   - Concilia movimientos bancarios con facturas (emitidas/recibidas)
+   - Match por:
+     - Monto (tolerancia ±2% para comisiones)
+     - Fecha (tolerancia ±3 días, penaliza score)
+     - RFC (si el concepto menciona el RFC del emisor/receptor)
+   - Reglas:
+     - Movimiento positivo (depósito) → busca factura EMITIDA
+     - Movimiento negativo (pago) → busca factura RECIBIDA
+     - Match único → conciliado
+     - Múltiples matches score >= 0.85 → conciliado
+     - Múltiples matches ambiguos → pendiente_revision (HITL)
+   - Persiste en MovimientoBanco: facturaConciliadaId, conciliadoEn
+   - Estadísticas: GET /api/agentes/conciliador-banco?empresaId=xxx
+
+3. **PII Masking** (`/src/lib/pii-mask.ts`):
+   - Enmascara datos sensibles en logs y audit trail
+   - 8 patrones regex: RFC moral/física, CURP, CLABE, cuenta bancaria, tarjeta, teléfono, email
+   - Integrado en audit-trail.ts: todo input/output se enmascara automáticamente
+   - Funciones: maskPII(texto), maskPIIObject(obj), contienePII(texto), listarTiposPII()
+
+### Cambios en Prisma Schema:
+- **MovimientoBanco**: + campos categoria, subcategoria, scoreConfianza, facturaConciliadaId, conciliadoEn
+- **Factura**: + relación inversa movimientosConciliados
+- Nuevos índices: [categoria], [facturaConciliadaId]
+
+### MCP Server actualizado (11 tools):
+- 7 tools existentes: buscar_articulo_cff, validar_estructura_cfdi, consultar_saldo_bancario, calcular_isr_persona_moral, calcular_iva, verificar_rfc, listar_facturas_empresa
+- 4 tools nuevas: categorizar_movimiento, categorizar_movimientos_empresa, conciliar_movimientos_facturas, enmascarar_pii
+
+### Arquitectura multi-agente completa:
+```
+Usuario → /api/agentes/router (Orchestrator GLM-4.6)
+              ↓
+         [rag-fiscal]      → /api/auditoria-fiscal (Maker → Checker) → AuditTrail (PII masked)
+         [cfdi-validator]  → /api/agentes/cfdi-validator → AuditTrail
+         [erp-query]       → /api/agentes/erp-query → AuditTrail
+         [assistant]       → /api/assistant (23 tools) → AuditTrail
+
+Procesos batch:
+         Bancos → /api/agentes/categorizador → MovimientoBanco.categoria
+              → /api/agentes/conciliador-banco → MovimientoBanco.facturaConciliadaId
+
+MCP Server (/api/mcp): 11 tools estandarizadas accesibles por cualquier agente
+```
+
+### Archivos creados/modificados:
+- `prisma/schema.prisma` — + campos en MovimientoBanco, + relación en Factura
+- `src/lib/pii-mask.ts` — helper de enmascaramiento
+- `src/lib/audit-trail.ts` — integrado PII masking automático
+- `src/lib/agentes/categorizador.ts` — agente clasificador
+- `src/lib/agentes/conciliador-banco.ts` — agente conciliador
+- `src/app/api/agentes/categorizador/route.ts` — endpoint
+- `src/app/api/agentes/conciliador-banco/route.ts` — endpoint
+- `src/app/api/mcp/route.ts` — + 4 tools nuevas (total 11)
 
 ---
 

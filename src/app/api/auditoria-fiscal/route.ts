@@ -2,20 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { readFileSync } from 'fs';
 import path from 'path';
+import { registrarAuditTrail } from '@/lib/audit-trail';
+import { verificarRespuestaMaker } from '@/lib/agentes/checker-fiscal';
 
 /**
  * POST /api/auditoria-fiscal
  *
- * Recibe una pregunta fiscal del usuario, detecta qué ley(es) son relevantes,
- * carga el texto de los artículos pertinentes como contexto, y llama a GLM-5.2
- * para responder "especializado" en esa área.
+ * Arquitectura MAKER-CHECKER:
+ * - Maker (GLM-4.6): genera respuesta citando artículos de leyes
+ * - Checker (validador determinista): verifica que las citas existan en los JSON
  *
- * Body: { pregunta: string }
+ * Solo si el Checker confirma todas las citas, se marca como "Hallazgo Verificado".
+ * Si hay alucinaciones, se etiqueta con score < 1.0 y observaciones.
+ *
+ * Body: { pregunta: string, empresaId?: string }
  * Response: SSE streaming con:
  *   - data: {"type":"leyes_detectadas", "leyes": ["LISR", "LIVA"]}
  *   - data: {"type":"articulos_cargados", "count": 15}
  *   - data: {"type":"token", "content":"..."}
- *   - data: {"type":"done", "full":"..."}
+ *   - data: {"type":"verificacion", "scoreConfianza": 0.85, "verificado": true, "citas": [...]}
+ *   - data: {"type":"done", "full":"...", "verificacion": {...}}
  */
 
 export const runtime = 'nodejs';
@@ -114,7 +120,7 @@ CONTEXTO LEGAL CARGADO:`;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { pregunta } = body as { pregunta: string };
+    const { pregunta, empresaId } = body as { pregunta: string; empresaId?: string };
 
     if (!pregunta || typeof pregunta !== 'string') {
       return NextResponse.json({ error: 'pregunta requerida' }, { status: 400 });
@@ -158,6 +164,8 @@ export async function POST(req: NextRequest) {
           const { getZAI } = await import('@/lib/zai');
           const zai = await getZAI();
 
+          // ===== MAKER: LLM genera respuesta =====
+          const inicioMaker = Date.now();
           const respuesta = await zai.chat.completions.create({
             model: 'glm-4.6',
             messages: [
@@ -169,6 +177,17 @@ export async function POST(req: NextRequest) {
           });
 
           const textoFinal = respuesta.choices[0].message.content || 'No pude procesar la consulta.';
+          const duracionMaker = Date.now() - inicioMaker;
+
+          // Registrar audit trail del Maker
+          const auditTrailIdMaker = await registrarAuditTrail({
+            agente: 'maker',
+            herramienta: 'glm-4.6-auditoria-fiscal',
+            input: { pregunta, leyesUsadas: leyesDetectadas, articulosCargados: totalArticulos },
+            output: { respuesta: textoFinal },
+            empresaId,
+            duracionMs: duracionMaker,
+          });
 
           // Stream token por token
           const palabras = textoFinal.split(/(\s+)/);
@@ -181,7 +200,34 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          send({ type: 'done', full: textoFinal, leyes: leyesDetectadas, articulos: totalArticulos });
+          // ===== CHECKER: Verificar citas del Maker =====
+          send({ type: 'thinking', content: 'Verificando citas con el agente Checker...' });
+          const verificacion = await verificarRespuestaMaker(
+            textoFinal,
+            leyesDetectadas,
+            auditTrailIdMaker,
+            empresaId,
+          );
+
+          // Enviar resultado de verificación al frontend
+          send({
+            type: 'verificacion',
+            scoreConfianza: verificacion.scoreConfianza,
+            verificado: verificacion.verificado,
+            observaciones: verificacion.observaciones,
+            citas: verificacion.citas,
+            totalCitas: verificacion.totalCitas,
+            citasCorrectas: verificacion.citasCorrectas,
+            citasInventadas: verificacion.citasInventadas,
+          });
+
+          send({
+            type: 'done',
+            full: textoFinal,
+            leyes: leyesDetectadas,
+            articulos: totalArticulos,
+            verificacion,
+          });
         } catch (e: any) {
           console.error('Error en auditoria-fiscal:', e);
           send({ type: 'error', content: e.message || 'Error desconocido' });

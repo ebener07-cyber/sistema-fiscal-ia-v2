@@ -12,6 +12,7 @@ import {
   BookOpen, Satellite, Bot, Scale, ClipboardList, BarChart3, MessageSquare,
   Moon, Sun, Menu, Search, Pin, StickyNote, AlertTriangle, Clock,
   Upload, FileSpreadsheet, Heart, Home as HomeIcon, Plus, ShieldCheck, Briefcase, RefreshCw,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
@@ -26,6 +27,7 @@ import {
 } from 'recharts';
 import {
   Settings, KeyRound, Trash2, ShieldAlert, Lock, Shield,
+  Landmark,
 } from 'lucide-react';
 
 // ====================== TIPOS ======================
@@ -95,12 +97,26 @@ export function SistemaCompleto() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [abbaxOpen, setAbbaxOpen] = useState(false);
+  const [busquedaOpen, setBusquedaOpen] = useState(false);
   const { theme, toggle } = useTheme();
   const [authChecked, setAuthChecked] = useState(false);
   const [usuario, setUsuario] = useState<any>(null);
   const { empresa, empresas, setEmpresa } = useEmpresa();
   const router = useRouter();
   useToastBridge(); // Inicializa el sistema de toasts global
+
+  // Atajo global Ctrl+K / Cmd+K para abrir la búsqueda
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setBusquedaOpen(prev => !prev);
+      }
+      // Cerrar con Escape lo maneja el modal internamente
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Verificar autenticación al cargar
   useEffect(() => {
@@ -284,8 +300,15 @@ export function SistemaCompleto() {
               )}
 
               <div className="relative hidden md:block">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Buscar... (Ctrl+K)" className="pl-9 w-48 lg:w-56 h-9 text-sm" />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <button
+                  type="button"
+                  onClick={() => setBusquedaOpen(true)}
+                  className="pl-9 pr-3 w-48 lg:w-56 h-9 text-sm text-left text-muted-foreground rounded-md border bg-background hover:bg-muted/50 transition flex items-center cursor-pointer"
+                  title="Abrir búsqueda (Ctrl+K)"
+                >
+                  Buscar... (Ctrl+K)
+                </button>
               </div>
               <Button variant="ghost" size="icon" onClick={toggle} title="Modo oscuro/claro" className="h-9 w-9">
                 {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
@@ -339,6 +362,257 @@ export function SistemaCompleto() {
           <Zap size={22} />
         </button>
       )}
+
+      {/* MODAL DE BÚSQUEDA GLOBAL (Ctrl+K / Cmd+K) */}
+      <BusquedaGlobalModal
+        open={busquedaOpen}
+        onClose={() => setBusquedaOpen(false)}
+        empresaId={empresa?.id}
+        onNavigate={(v) => { setView(v); setBusquedaOpen(false); }}
+      />
+    </div>
+  );
+}
+
+// ====================== MODAL DE BÚSQUEDA GLOBAL (Ctrl+K) ======================
+function BusquedaGlobalModal({
+  open,
+  onClose,
+  empresaId,
+  onNavigate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  empresaId?: string;
+  onNavigate: (view: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [resultados, setResultados] = useState<any>(null);
+  const [cargando, setCargando] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Debounce: dispara la búsqueda 300ms después de que el usuario deja de escribir
+  useEffect(() => {
+    if (!open) {
+      setQuery('');
+      setResultados(null);
+      return;
+    }
+    // Foco automático al abrir
+    const t = setTimeout(() => inputRef.current?.focus(), 50);
+    return () => clearTimeout(t);
+  }, [open]);
+
+  // ESC cierra el modal
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
+  // Debounce de la consulta
+  useEffect(() => {
+    if (!open) return;
+    if (query.trim().length < 2) {
+      setResultados(null);
+      return;
+    }
+    setCargando(true);
+    const t = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: query.trim() });
+        if (empresaId) params.set('empresaId', empresaId);
+        const r = await fetch(`/api/buscar?${params}`, { credentials: 'include' });
+        const d = await r.json();
+        setResultados(d);
+      } catch (e) {
+        console.error('Error en búsqueda:', e);
+      } finally {
+        setCargando(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query, open, empresaId]);
+
+  if (!open) return null;
+
+  const clientes = resultados?.clientes || [];
+  const proveedores = resultados?.proveedores || [];
+  const facturas = resultados?.facturas || [];
+  const empleados = resultados?.empleados || [];
+  const total = resultados?.total || 0;
+
+  const hayResultados = clientes.length + proveedores.length + facturas.length + empleados.length > 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] px-4 bg-black/50 backdrop-blur-sm animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl bg-background rounded-xl shadow-2xl border border-border overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Input de búsqueda */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+          <Search size={18} className="text-muted-foreground flex-shrink-0" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar clientes, proveedores, facturas, empleados..."
+            className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {cargando && <Loader2 size={16} className="animate-spin text-muted-foreground" />}
+          <kbd className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono text-muted-foreground border border-border rounded">
+            ESC
+          </kbd>
+        </div>
+
+        {/* Resultados agrupados */}
+        <div className="max-h-[60vh] overflow-y-auto">
+          {query.trim().length < 2 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              <Search size={32} className="mx-auto mb-2 opacity-30" />
+              Escribe al menos 2 caracteres para buscar
+              <div className="mt-3 flex flex-wrap gap-2 justify-center">
+                {[
+                  { label: 'Clientes', v: 'clientes' },
+                  { label: 'Proveedores', v: 'proveedores' },
+                  { label: 'Facturas', v: 'facturacion' },
+                  { label: 'Empleados', v: 'empleados' },
+                ].map((s) => (
+                  <button
+                    key={s.v}
+                    onClick={() => onNavigate(s.v)}
+                    className="px-3 py-1 text-xs rounded-md border border-border hover:bg-muted transition"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : !hayResultados && !cargando ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              <Search size={32} className="mx-auto mb-2 opacity-30" />
+              Sin resultados para <strong>&ldquo;{query}&rdquo;</strong>
+            </div>
+          ) : (
+            <div className="py-2">
+              {/* Clientes */}
+              {clientes.length > 0 && (
+                <SeccionResultados
+                  titulo="Clientes"
+                  icon={<Users size={13} className="text-violet-600" />}
+                  items={clientes.map((c: any) => ({
+                    id: c.id,
+                    titulo: c.nombre,
+                    subtitulo: c.rfc || 'Sin RFC',
+                    extra: c.email || c.telefono || '',
+                    onClick: () => onNavigate('clientes'),
+                  }))}
+                />
+              )}
+              {/* Proveedores */}
+              {proveedores.length > 0 && (
+                <SeccionResultados
+                  titulo="Proveedores"
+                  icon={<Truck size={13} className="text-orange-600" />}
+                  items={proveedores.map((p: any) => ({
+                    id: p.id,
+                    titulo: p.nombre,
+                    subtitulo: p.rfc || 'Sin RFC',
+                    extra: p.servicio || '',
+                    onClick: () => onNavigate('proveedores'),
+                  }))}
+                />
+              )}
+              {/* Facturas */}
+              {facturas.length > 0 && (
+                <SeccionResultados
+                  titulo="Facturas"
+                  icon={<FileText size={13} className="text-blue-600" />}
+                  items={facturas.map((f: any) => ({
+                    id: f.id,
+                    titulo: `${f.serie || ''}${f.folio} · ${fmt(f.total)}`,
+                    subtitulo: f.direccion === 'emitida'
+                      ? `↗ Emitida a ${(f.receptorNombre || f.receptorRfc || '—')}`
+                      : `↙ Recibida de ${(f.emisorNombre || f.emisorRfc || '—')}`,
+                    extra: new Date(f.fecha).toLocaleDateString('es-MX'),
+                    onClick: () => onNavigate('facturacion'),
+                  }))}
+                />
+              )}
+              {/* Empleados */}
+              {empleados.length > 0 && (
+                <SeccionResultados
+                  titulo="Empleados"
+                  icon={<User size={13} className="text-fuchsia-600" />}
+                  items={empleados.map((e: any) => ({
+                    id: e.id,
+                    titulo: e.nombre,
+                    subtitulo: e.rfc || 'Sin RFC',
+                    extra: [e.puesto, e.departamento].filter(Boolean).join(' · '),
+                    onClick: () => onNavigate('empleados'),
+                  }))}
+                />
+              )}
+              {/* Footer con total */}
+              {hayResultados && (
+                <div className="px-4 py-2 text-[11px] text-muted-foreground border-t border-border mt-2">
+                  {total} resultado(s) para <strong>&ldquo;{query}&rdquo;</strong>
+                  {empresaId && <span> · Filtrado por empresa activa</span>}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Subcomponente: sección agrupada de resultados
+function SeccionResultados({
+  titulo,
+  icon,
+  items,
+}: {
+  titulo: string;
+  icon: React.ReactNode;
+  items: Array<{ id: string; titulo: string; subtitulo: string; extra?: string; onClick: () => void }>;
+}) {
+  return (
+    <div className="mb-1">
+      <div className="px-4 py-1.5 text-[10px] uppercase tracking-wider font-bold text-muted-foreground flex items-center gap-1.5 bg-muted/30">
+        {icon}
+        <span>{titulo}</span>
+        <span className="ml-auto text-[9px] opacity-70">{items.length}</span>
+      </div>
+      {items.map((it) => (
+        <button
+          key={it.id}
+          onClick={it.onClick}
+          className="w-full px-4 py-2 flex items-center gap-3 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors text-left group"
+        >
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium truncate group-hover:text-violet-700 dark:group-hover:text-violet-300">
+              {it.titulo}
+            </div>
+            <div className="text-xs text-muted-foreground truncate font-mono">
+              {it.subtitulo}
+              {it.extra && <span className="ml-2 not-italic">· {it.extra}</span>}
+            </div>
+          </div>
+          <ChevronRight size={14} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+        </button>
+      ))}
     </div>
   );
 }
@@ -623,18 +897,43 @@ function EmptyState({ icon: Icon, message, action }: { icon: any; message: strin
   );
 }
 
-/** Skeleton loader para tablas */
-function TableSkeleton({ cols = 5, rows = 5 }: { cols?: number; rows?: number }) {
+/** Skeleton loader para tablas — muestra encabezado + filas con shimmer */
+function TableSkeleton({ cols = 5, rows = 6 }: { cols?: number; rows?: number }) {
   return (
     <div className="p-4 space-y-3">
+      {/* Encabezado skeleton */}
+      <div className="flex gap-3 pb-2 border-b border-border/40">
+        {Array.from({ length: cols }).map((_, c) => (
+          <div key={`h-${c}`} className="skeleton h-3.5 flex-1" style={{ width: `${100 / cols}%` }} />
+        ))}
+      </div>
+      {/* Filas skeleton */}
       {Array.from({ length: rows }).map((_, r) => (
-        <div key={r} className="flex gap-3">
+        <div key={r} className="flex gap-3 items-center">
           {Array.from({ length: cols }).map((_, c) => (
-            <div key={c} className="skeleton h-4 flex-1" style={{ width: `${100 / cols}%` }} />
+            <div
+              key={`${r}-${c}`}
+              className="skeleton h-4 flex-1"
+              // Variación de ancho para que se vea natural
+              style={{ width: `${100 / cols}%`, opacity: 1 - (r * 0.05) }}
+            />
           ))}
         </div>
       ))}
     </div>
+  );
+}
+
+/** Tarjeta de tabla con skeleton — útil para reemplazar LoadingView manteniendo el layout */
+function TableSkeletonCard({ title, cols = 5, rows = 6 }: { title: string; cols?: number; rows?: number }) {
+  return (
+    <Card className="overflow-hidden animate-fade-in">
+      <div className="px-4 py-3 border-b font-semibold text-sm flex items-center gap-2">
+        <Loader2 size={14} className="animate-spin text-muted-foreground" />
+        <span>{title}</span>
+      </div>
+      <TableSkeleton cols={cols} rows={rows} />
+    </Card>
   );
 }
 
@@ -667,7 +966,22 @@ function ClientesView() {
   const { empresa } = useEmpresa();
   const { data, loading } = useApiData<{ clientes: any[] }>('/api/clientes', empresa?.id);
   const [busqueda, setBusqueda] = useState('');
-  if (loading) return <LoadingView message="Cargando clientes..." />;
+  // Skeleton: 5 columnas (Cliente, RFC, Contacto, Facturas, Saldo) — 7 filas shimmer
+  if (loading) return (
+    <div className="space-y-4 animate-fade-in">
+      <div className="flex items-center gap-3">
+        <div className="skeleton w-11 h-11 rounded-xl" />
+        <div className="space-y-2">
+          <div className="skeleton h-5 w-32" />
+          <div className="skeleton h-3 w-48" />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-20 rounded-xl" />)}
+      </div>
+      <TableSkeletonCard title="Cargando agenda de clientes..." cols={5} rows={7} />
+    </div>
+  );
   if (!data?.clientes?.length) return <EmptyState icon={Users} message="Sin clientes registrados" />;
 
   const clientesFiltrados = data.clientes.filter((c: any) => {
@@ -772,7 +1086,22 @@ function ProveedoresView() {
   const { data, loading } = useApiData<{ proveedores: any[] }>('/api/proveedores', empresa?.id);
   const [busqueda, setBusqueda] = useState('');
   const [filtroServicio, setFiltroServicio] = useState('todos');
-  if (loading) return <LoadingView message="Cargando proveedores..." />;
+  // Skeleton: 6 columnas (Proveedor, RFC, Servicio, Contacto, Órdenes, Saldo) — 7 filas shimmer
+  if (loading) return (
+    <div className="space-y-4 animate-fade-in">
+      <div className="flex items-center gap-3">
+        <div className="skeleton w-11 h-11 rounded-xl" />
+        <div className="space-y-2">
+          <div className="skeleton h-5 w-32" />
+          <div className="skeleton h-3 w-48" />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-20 rounded-xl" />)}
+      </div>
+      <TableSkeletonCard title="Cargando agenda de proveedores..." cols={6} rows={7} />
+    </div>
+  );
   if (!data?.proveedores?.length) return <EmptyState icon={Truck} message="Sin proveedores registrados" />;
 
   // Lista única de servicios
@@ -901,7 +1230,26 @@ function EmpleadosView() {
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'activo' | 'inactivo'>('todos');
   const [vista, setVista] = useState<'grid' | 'tabla'>('grid');
 
-  if (loading) return <LoadingView message="Cargando empleados..." />;
+  // Skeleton: cards (grid default) o tabla (6 columnas) — 6 cards/filas shimmer
+  if (loading) return (
+    <div className="space-y-4 animate-fade-in">
+      <div className="flex items-center gap-3">
+        <div className="skeleton w-11 h-11 rounded-xl" />
+        <div className="space-y-2">
+          <div className="skeleton h-5 w-32" />
+          <div className="skeleton h-3 w-48" />
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-20 rounded-xl" />)}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="skeleton h-32 rounded-lg" />
+        ))}
+      </div>
+    </div>
+  );
   if (!data?.empleados?.length) return <EmptyState icon={User} message="Sin empleados registrados" />;
 
   const empleadosFiltrados = data.empleados.filter((e: any) => {
@@ -1117,7 +1465,15 @@ function FacturacionView() {
 
   const { data, loading, refresh } = useApiData<any>(url);
 
-  if (loading) return <LoadingView message="Cargando facturas..." />;
+  // Skeleton: 6 columnas (Folio, Fecha, RFC contraparte, Concepto, Tipo, Total) — 7 filas shimmer
+  if (loading) return (
+    <div className="space-y-4 animate-fade-in">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-20 rounded-lg" />)}
+      </div>
+      <TableSkeletonCard title="Cargando facturas..." cols={6} rows={7} />
+    </div>
+  );
   if (!data?.facturas?.length) return <EmptyState icon={FileText} message="Sin facturas cargadas. Sube tus CFDIs desde el módulo SAT." />;
 
   const facturas = data.facturas || [];
@@ -1390,9 +1746,12 @@ function NominaView({ empresaId }: { empresaId?: string }) {
 
       {/* Tabla de recibos */}
       {loading ? (
-        <div className="text-center py-8">
-          {selMes === 0 ? `Cargando nómina del año ${anioSel}...` : `Cargando nómina de ${meses[selMes - 1]} ${anioSel}...`}
-        </div>
+        // Skeleton: 10 columnas (Folio, Fecha, Empleado, RFC, Periodo, Percepciones, ISR, IMSS, Deducciones, Neto)
+        <TableSkeletonCard
+          title={selMes === 0 ? `Cargando nómina del año ${anioSel}...` : `Cargando nómina de ${meses[selMes - 1]} ${anioSel}...`}
+          cols={10}
+          rows={6}
+        />
       ) : (data?.recibos?.length || 0) === 0 ? (
         <Card className="p-8 text-center text-muted-foreground">
           <Wallet size={32} className="mx-auto mb-2 opacity-40" />
@@ -1546,7 +1905,7 @@ function InventarioView({ empresaId }: { empresaId?: string }) {
       {(data?.productos?.length || 0) === 0 ? (
         <EmptyState icon={Package} message="Sin productos — agrega tu primer producto" />
       ) : (
-        <DataTableCard title={`Productos (${data.productos.length})`}>
+        <DataTableCard title={`Productos (${data?.productos?.length || 0})`}>
           <table className="w-full text-sm">
             <thead><tr className="bg-muted/50 text-[11px] uppercase text-left">
               <th className="px-4 py-2">Código</th><th className="px-4 py-2">Producto</th>
@@ -1555,7 +1914,7 @@ function InventarioView({ empresaId }: { empresaId?: string }) {
               <th className="px-4 py-2">Estado</th>
             </tr></thead>
             <tbody>
-              {data.productos.map((p) => (
+              {data?.productos?.map((p) => (
                 <tr key={p.id} className="border-b hover:bg-muted/30">
                   <td className="px-4 py-2 font-mono text-xs">{p.codigo}</td>
                   <td className="px-4 py-2 font-medium">{p.nombre}</td>
@@ -1588,6 +1947,7 @@ function BancosView({ empresaId }: { empresaId?: string }) {
   const [showCuentaForm, setShowCuentaForm] = useState(false);
   const [cuentaForm, setCuentaForm] = useState({ banco: '', cuenta: '', saldo: '0', tipo: 'operaciones' });
   const [eliminandoBanco, setEliminandoBanco] = useState(false);
+  const [eliminandoCuentaId, setEliminandoCuentaId] = useState<string | null>(null);
   const [bancoData, setBancoData] = useState<any>(null);
   const [loadingBancos, setLoadingBancos] = useState(true);
   const [resumenAnual, setResumenAnual] = useState<any[]>([]);
@@ -1746,7 +2106,62 @@ function BancosView({ empresaId }: { empresaId?: string }) {
     }
   };
 
-  if (loadingBancos && !bancoData) return <LoadingView message="Cargando bancos y movimientos..." />;
+  // Elimina una cuenta bancaria completa (cascada: movimientos + cuenta) vía DELETE /api/bancos?id=...
+  const eliminarCuentaBancaria = async (cuenta: any) => {
+    const totalMovs = cuenta._count?.movimientos || 0;
+    const ok = confirm(
+      `¿Eliminar la cuenta ${cuenta.banco} ${cuenta.cuenta}?\n\n` +
+      `Se eliminarán TODOS los ${totalMovs} movimientos asociados.\n\n` +
+      `Esta acción no se puede deshacer.`
+    );
+    if (!ok) return;
+
+    setEliminandoCuentaId(cuenta.id);
+    try {
+      const r = await fetch(`/api/bancos?id=${encodeURIComponent(cuenta.id)}`, { method: 'DELETE' });
+      const d = await r.json();
+      if (d.success) {
+        toast.success('Cuenta eliminada', d.message);
+        // Si la cuenta eliminada era la seleccionada, limpiar selección
+        if (cuentaIdSel === cuenta.id) setCuentaIdSel('');
+        cargarBancos();
+        cargarResumenAnual();
+      } else {
+        toast.error('Error', d.error || 'No se pudo eliminar la cuenta');
+      }
+    } catch (e: any) {
+      toast.error('Error', e.message || 'No se pudo eliminar la cuenta');
+    } finally {
+      setEliminandoCuentaId(null);
+    }
+  };
+
+  if (loadingBancos && !bancoData) return (
+    <div className="space-y-4 animate-fade-in">
+      {/* Header skeleton */}
+      <div className="flex justify-between items-center flex-wrap gap-3">
+        <div className="space-y-2">
+          <div className="skeleton h-6 w-64" />
+          <div className="skeleton h-3 w-96" />
+        </div>
+        <div className="skeleton h-9 w-32 rounded-md" />
+      </div>
+      {/* Skeleton de tarjetas de cuentas */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-28 rounded-lg" />)}
+      </div>
+      {/* Skeleton de pestañas mensuales */}
+      <div className="flex gap-2 flex-wrap">
+        {Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton h-9 w-16 rounded-lg" />)}
+      </div>
+      {/* Skeleton de KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-20 rounded-lg" />)}
+      </div>
+      {/* Skeleton de tabla de movimientos — 4 columnas (Fecha, Cuenta, Concepto, Monto) */}
+      <TableSkeletonCard title="Cargando bancos y movimientos..." cols={4} rows={7} />
+    </div>
+  );
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -1803,12 +2218,14 @@ function BancosView({ empresaId }: { empresaId?: string }) {
                               c.tipo === 'ahorro' ? 'border-blue-400 bg-blue-50/30 dark:bg-blue-900/10' :
                               'border-emerald-400 bg-emerald-50/30 dark:bg-emerald-900/10';
             const tipoIcon = c.tipo === 'inversion' ? '📈' : c.tipo === 'ahorro' ? '🏦' : '💳';
+            const estaEliminando = eliminandoCuentaId === c.id;
             return (
               <Card
                 key={c.id}
                 className={cn(
-                  'p-5 cursor-pointer transition-all card-hover border-2',
-                  isSelected ? 'border-violet-500 bg-violet-50/30 dark:bg-violet-900/10' : tipoColor
+                  'p-5 cursor-pointer transition-all card-hover border-2 group relative',
+                  isSelected ? 'border-violet-500 bg-violet-50/30 dark:bg-violet-900/10' : tipoColor,
+                  estaEliminando && 'opacity-60 pointer-events-none'
                 )}
                 onClick={() => setCuentaIdSel(isSelected ? '' : c.id)}
               >
@@ -1827,6 +2244,24 @@ function BancosView({ empresaId }: { empresaId?: string }) {
                 <div className="text-[10px] text-muted-foreground mt-1">
                   {c._count?.movimientos || 0} movimientos totales
                 </div>
+                {/* Botón eliminar cuenta — aparece al hacer hover, detiene propagación del click */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    eliminarCuentaBancaria(c);
+                  }}
+                  disabled={estaEliminando}
+                  title="Eliminar cuenta y todos sus movimientos"
+                  className={cn(
+                    'absolute top-3 right-3 w-7 h-7 rounded-md flex items-center justify-center transition-all',
+                    'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800',
+                    'opacity-0 group-hover:opacity-100 hover:bg-red-600 hover:text-white hover:border-red-600',
+                    'disabled:opacity-60 disabled:cursor-not-allowed'
+                  )}
+                >
+                  {estaEliminando ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                </button>
               </Card>
             );
           })}
@@ -1950,7 +2385,12 @@ function BancosView({ empresaId }: { empresaId?: string }) {
 
       {/* Tabla de movimientos del periodo */}
       {loadingBancos ? (
-        <LoadingView message={`Cargando movimientos de ${selMes === 0 ? `${anioSel}` : `${mesesLargo[selMes - 1]} ${anioSel}`}...`} />
+        // Skeleton: 4 columnas (Fecha, Cuenta, Concepto, Monto) — 6 filas shimmer
+        <TableSkeletonCard
+          title={`Cargando movimientos de ${selMes === 0 ? `${anioSel}` : `${mesesLargo[selMes - 1]} ${anioSel}`}...`}
+          cols={4}
+          rows={6}
+        />
       ) : movimientos.length > 0 ? (
         <DataTableCard title={`Movimientos de ${selMes === 0 ? `Todo ${anioSel}` : `${mesesLargo[selMes - 1]} ${anioSel}`} (${movimientos.length})`}>
           <table className="w-full text-sm">
@@ -2345,7 +2785,8 @@ function SatView() {
 
       {/* Facturas cargadas */}
       {loading ? (
-        <LoadingView message={`Cargando CFDIs ${tab}...`} />
+        // Skeleton: 6 columnas (Folio, Fecha, Proveedor/Cliente, RFC, Total, UUID) — 7 filas shimmer
+        <TableSkeletonCard title={`Cargando CFDIs ${tab}...`} cols={6} rows={7} />
       ) : (data?.facturas?.length || 0) === 0 ? (
         <EmptyState icon={Satellite} message={`Sin CFDIs ${tab} en el período seleccionado`} />
       ) : (
@@ -3350,6 +3791,171 @@ function ReportesView({ stats }: { stats: Stats | null }) {
                 <AlertTriangle size={14} /> Subir Excel y conciliar
               </div>
             </label>
+          </div>
+        </div>
+      </Card>
+
+      {/* ===== REPORTES SAT OFICIALES (v3.2) ===== */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <Landmark size={18} className="text-blue-600" /> Reportes SAT Oficiales (listos para subir al portal)
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Genera los reportes en el formato exacto que requiere el SAT. Cada reporte se calcula automáticamente
+          con los datos de tu sistema (facturas, nómina, movimientos bancarios).
+        </p>
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* DIOT TXT */}
+          <div className="border-2 border-blue-200 dark:border-blue-800 rounded-lg p-4 bg-blue-50/30 dark:bg-blue-900/10">
+            <h4 className="font-semibold mb-2 flex items-center gap-2 text-blue-700 dark:text-blue-300">
+              <FileText size={16} /> DIOT (TXT para SAT)
+            </h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Archivo pipe-delimited listo para subir al portal del SAT. Reporta operaciones con proveedores.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                  const hoy = new Date();
+                  const params = new URLSearchParams({
+                    mes: String(hoy.getMonth() + 1),
+                    anio: String(hoy.getFullYear()),
+                    formato: 'txt',
+                    empresaId: empresa.id,
+                  });
+                  window.open(`/api/diot?${params}`, '_blank');
+                }}
+              >
+                <FileText size={14} className="mr-1" /> TXT
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                  const hoy = new Date();
+                  const params = new URLSearchParams({
+                    mes: String(hoy.getMonth() + 1),
+                    anio: String(hoy.getFullYear()),
+                    formato: 'excel',
+                    empresaId: empresa.id,
+                  });
+                  window.open(`/api/diot?${params}`, '_blank');
+                }}
+              >
+                <FileSpreadsheet size={14} className="mr-1" /> Excel
+              </Button>
+            </div>
+          </div>
+
+          {/* INEGI */}
+          <div className="border-2 border-emerald-200 dark:border-emerald-800 rounded-lg p-4 bg-emerald-50/30 dark:bg-emerald-900/10">
+            <h4 className="font-semibold mb-2 flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+              <BarChart3 size={16} /> Cuestionario INEGI
+            </h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Cuestionario mensual para constructora E122. Personal, remuneraciones, gastos, ingresos (miles de pesos).
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                const hoy = new Date();
+                const params = new URLSearchParams({
+                  mes: String(hoy.getMonth() + 1),
+                  anio: String(hoy.getFullYear()),
+                  formato: 'excel',
+                  empresaId: empresa.id,
+                });
+                window.open(`/api/inegi?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={14} className="mr-1" /> Descargar Excel INEGI
+            </Button>
+          </div>
+
+          {/* ISN */}
+          <div className="border-2 border-amber-200 dark:border-amber-800 rounded-lg p-4 bg-amber-50/30 dark:bg-amber-900/10">
+            <h4 className="font-semibold mb-2 flex items-center gap-2 text-amber-700 dark:text-amber-300">
+              <Users size={16} /> Impuesto sobre Nómina
+            </h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Concentrado de trabajadores para declaración ISN. Sueldos, cuotas IMSS, ISR, base gravable.
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                const params = new URLSearchParams({
+                  mesInicio: '1',
+                  mesFin: String(new Date().getMonth() + 1),
+                  anio: String(new Date().getFullYear()),
+                  empresaId: empresa.id,
+                  estado: 'CDMX',
+                  formato: 'excel',
+                });
+                window.open(`/api/nomina/impuesto-sobre-nomina?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={14} className="mr-1" /> Descargar ISN
+            </Button>
+          </div>
+
+          {/* Reporte Financiero Mensual */}
+          <div className="border-2 border-violet-200 dark:border-violet-800 rounded-lg p-4 bg-violet-50/30 dark:bg-violet-900/10">
+            <h4 className="font-semibold mb-2 flex items-center gap-2 text-violet-700 dark:text-violet-300">
+              <TrendingUp size={16} /> Reporte Financiero Mensual
+            </h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Estado de Resultados + Anexo IVA + Flujo de Efectivo. 3 hojas Excel con cifras reales del mes.
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                const hoy = new Date();
+                const params = new URLSearchParams({
+                  mes: String(hoy.getMonth() + 1),
+                  anio: String(hoy.getFullYear()),
+                  empresaId: empresa.id,
+                  formato: 'excel',
+                });
+                window.open(`/api/finanzas/reporte-mensual?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={14} className="mr-1" /> Descargar Finanzas
+            </Button>
+          </div>
+
+          {/* CFDI Mensual Consolidado */}
+          <div className="border-2 border-fuchsia-200 dark:border-fuchsia-800 rounded-lg p-4 bg-fuchsia-50/30 dark:bg-fuchsia-900/10">
+            <h4 className="font-semibold mb-2 flex items-center gap-2 text-fuchsia-700 dark:text-fuchsia-300">
+              <FileText size={16} /> CFDI Mensual Consolidado
+            </h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Excel con 5 hojas: Resumen, Emitidas, Recibidas, Notas de Crédito, Top 10 clientes/proveedores.
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                const hoy = new Date();
+                const params = new URLSearchParams({
+                  mes: String(hoy.getMonth() + 1),
+                  anio: String(hoy.getFullYear()),
+                  empresaId: empresa.id,
+                });
+                window.open(`/api/export/cfdi-mensual?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={14} className="mr-1" /> Descargar CFDI
+            </Button>
           </div>
         </div>
       </Card>
