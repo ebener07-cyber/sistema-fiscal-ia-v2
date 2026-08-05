@@ -1,0 +1,1140 @@
+     1→import { NextRequest, NextResponse } from 'next/server';
+     2→import { db } from '@/lib/db';
+     3→
+     4→/**
+     5→ * POST /api/assistant
+     6→ * Asistente Abbax con streaming SSE y tool calling.
+     7→ */
+     8→
+     9→export const runtime = 'nodejs';
+    10→export const dynamic = 'force-dynamic';
+    11→
+    12→const TOOLS = [
+    13→  {
+    14→    type: 'function',
+    15→    function: {
+    16→      name: 'crear_tarea',
+    17→      description:
+    18→        'Crea una nueva tarea en la lista de tareas. Úsalo cuando el usuario pida crear, agregar o añadir una tarea, pendiente, to-do o actividad.',
+    19→      parameters: {
+    20→        type: 'object',
+    21→        properties: {
+    22→          titulo: { type: 'string', description: 'Título corto de la tarea (máx 100 chars)' },
+    23→          descripcion: { type: 'string', description: 'Descripción opcional más detallada' },
+    24→          prioridad: {
+    25→            type: 'string',
+    26→            enum: ['baja', 'media', 'alta', 'urgente'],
+    27→            description: 'Prioridad de la tarea. Por defecto "media"',
+    28→          },
+    29→          categoria: {
+    30→            type: 'string',
+    31→            description: 'Categoría: trabajo, personal, hogar, finanzas, estudio, salud, otro',
+    32→          },
+    33→          fechaLimite: {
+    34→            type: 'string',
+    35→            description: 'Fecha límite ISO (YYYY-MM-DD). Opcional.',
+    36→          },
+    37→        },
+    38→        required: ['titulo'],
+    39→      },
+    40→    },
+    41→  },
+    42→  {
+    43→    type: 'function',
+    44→    function: {
+    45→      name: 'listar_tareas',
+    46→      description:
+    47→        'Lista las tareas. Por defecto lista las pendientes. Úsalo cuando el usuario pida ver, mostrar, listar o consultar sus tareas o pendientes.',
+    48→      parameters: {
+    49→        type: 'object',
+    50→        properties: {
+    51→          estado: {
+    52→            type: 'string',
+    53→            enum: ['pendiente', 'en_progreso', 'completada', 'cancelada', 'todas'],
+    54→            description: 'Filtrar por estado. "todas" muestra todo. Por defecto "pendiente".',
+    55→          },
+    56→        },
+    57→      },
+    58→    },
+    59→  },
+    60→  {
+    61→    type: 'function',
+    62→    function: {
+    63→      name: 'completar_tarea',
+    64→      description:
+    65→        'Marca una tarea como completada usando su ID o búsqueda por título. Úsalo cuando el usuario diga "completé", "terminé", "ya hice" una tarea.',
+    66→      parameters: {
+    67→        type: 'object',
+    68→        properties: {
+    69→          id: { type: 'string', description: 'ID exacto de la tarea' },
+    70→          buscar: { type: 'string', description: 'Texto para buscar la tarea por título' },
+    71→        },
+    72→      },
+    73→    },
+    74→  },
+    75→  {
+    76→    type: 'function',
+    77→    function: {
+    78→      name: 'eliminar_tarea',
+    79→      description:
+    80→        'Elimina una tarea por ID o búsqueda. Úsalo cuando el usuario pida borrar, eliminar o quitar una tarea.',
+    81→      parameters: {
+    82→        type: 'object',
+    83→        properties: {
+    84→          id: { type: 'string' },
+    85→          buscar: { type: 'string' },
+    86→        },
+    87→      },
+    88→    },
+    89→  },
+    90→  {
+    91→    type: 'function',
+    92→    function: {
+    93→      name: 'crear_nota',
+    94→      description:
+    95→        'Crea una nota con título y contenido. Úsalo cuando el usuario pida anotar, apuntar, registrar o crear una nota.',
+    96→      parameters: {
+    97→        type: 'object',
+    98→        properties: {
+    99→          titulo: { type: 'string' },
+   100→          contenido: { type: 'string', description: 'Texto completo de la nota' },
+   101→          color: {
+   102→            type: 'string',
+   103→            enum: ['amarillo', 'rosa', 'azul', 'verde', 'morado'],
+   104→            description: 'Color de la nota. Por defecto amarillo.',
+   105→          },
+   106→        },
+   107→        required: ['titulo', 'contenido'],
+   108→      },
+   109→    },
+   110→  },
+   111→  {
+   112→    type: 'function',
+   113→    function: {
+   114→      name: 'listar_notas',
+   115→      description: 'Lista las notas activas (no archivadas). Las fijadas aparecen primero.',
+   116→      parameters: { type: 'object', properties: {} },
+   117→    },
+   118→  },
+   119→  {
+   120→    type: 'function',
+   121→    function: {
+   122→      name: 'crear_recordatorio',
+   123→      description:
+   124→        'Crea un recordatorio con fecha y hora. Úsalo cuando el usuario pida recordar, recordar hacer algo, o programar un aviso.',
+   125→      parameters: {
+   126→        type: 'object',
+   127→        properties: {
+   128→          titulo: { type: 'string' },
+   129→          descripcion: { type: 'string' },
+   130→          fechaHora: {
+   131→            type: 'string',
+   132→            description: 'Fecha y hora ISO 8601 (ej: 2026-07-10T15:30:00)',
+   133→          },
+   134→          recurrencia: {
+   135→            type: 'string',
+   136→            enum: ['unica', 'diario', 'semanal', 'mensual'],
+   137→            description: 'Recurrencia. Por defecto "unica".',
+   138→          },
+   139→        },
+   140→        required: ['titulo', 'fechaHora'],
+   141→      },
+   142→    },
+   143→  },
+   144→  {
+   145→    type: 'function',
+   146→    function: {
+   147→      name: 'listar_recordatorios',
+   148→      description: 'Lista los recordatorios próximos (futuros y pendientes).',
+   149→      parameters: { type: 'object', properties: {} },
+   150→    },
+   151→  },
+   152→  {
+   153→    type: 'function',
+   154→    function: {
+   155→      name: 'calcular',
+   156→      description:
+   157→        'Evalúa una expresión matemática segura. Úsalo cuando el usuario pida calcular, sumar, restar, multiplicar, dividir, porcentaje, etc.',
+   158→      parameters: {
+   159→        type: 'object',
+   160→        properties: {
+   161→          expresion: {
+   162→            type: 'string',
+   163→            description: 'Expresión matemática (ej: "2+2", "15% de 1500", "sqrt(144)")',
+   164→          },
+   165→        },
+   166→        required: ['expresion'],
+   167→      },
+   168→    },
+   169→  },
+   170→  {
+   171→    type: 'function',
+   172→    function: {
+   173→      name: 'resumir_conversacion',
+   174→      description:
+   175→        'Devuelve un resumen de las últimas tareas creadas, notas y recordatorios. Úsalo cuando el usuario pida un resumen o estado general.',
+   176→      parameters: { type: 'object', properties: {} },
+   177→    },
+   178→  },
+   179→  // ===== NUEVAS TOOLS =====
+   180→  {
+   181→    type: 'function',
+   182→    function: {
+   183→      name: 'obtener_fecha_hora',
+   184→      description:
+   185→        'Devuelve la fecha y hora actuales en zona horaria del usuario (America/Mazatlan). Úsalo cuando el usuario pregunte qué día es hoy, qué hora es, o necesite contexto temporal.',
+   186→      parameters: { type: 'object', properties: {} },
+   187→    },
+   188→  },
+   189→  {
+   190→    type: 'function',
+   191→    function: {
+   192→      name: 'buscar_conocimiento',
+   193→      description:
+   194→        'Busca información en la base de conocimiento interna del sistema (definiciones, cómo hacer cosas, ayuda). Úsalo cuando el usuario pregunte "cómo hago X", "qué es X", "ayuda con X".',
+   195→      parameters: {
+   196→        type: 'object',
+   197→        properties: {
+   198→          consulta: { type: 'string', description: 'Término o concepto a buscar' },
+   199→        },
+   200→        required: ['consulta'],
+   201→      },
+   202→    },
+   203→  },
+   204→  {
+   205→    type: 'function',
+   206→    function: {
+   207→      name: 'generar_idea',
+   208→      description:
+   209→        'Genera ideas creativas para un tema dado. Úsalo cuando el usuario pida ideas, sugerencias, propuestas, lluvia de ideas o brainstorming.',
+   210→      parameters: {
+   211→        type: 'object',
+   212→        properties: {
+   213→          tema: { type: 'string', description: 'Tema sobre el que generar ideas' },
+   214→          cantidad: { type: 'integer', description: 'Número de ideas a generar (1-10). Por defecto 5.' },
+   215→        },
+   216→        required: ['tema'],
+   217→      },
+   218→    },
+   219→  },
+   220→  {
+   221→    type: 'function',
+   222→    function: {
+   223→      name: 'convertir_moneda',
+   224→      description:
+   225→        'Convierte una cantidad entre MXN, USD y EUR. Úsalo cuando el usuario pregunte "cuánto es X pesos en dólares", "convierte 100 USD a MXN", etc.',
+   226→      parameters: {
+   227→        type: 'object',
+   228→        properties: {
+   229→          cantidad: { type: 'number', description: 'Cantidad a convertir' },
+   230→          de: { type: 'string', enum: ['MXN', 'USD', 'EUR'], description: 'Moneda origen' },
+   231→          a: { type: 'string', enum: ['MXN', 'USD', 'EUR'], description: 'Moneda destino' },
+   232→        },
+   233→        required: ['cantidad', 'de', 'a'],
+   234→      },
+   235→    },
+   236→  },
+   237→  {
+   238→    type: 'function',
+   239→    function: {
+   240→      name: 'crear_lista_compras',
+   241→      description:
+   242→        'Crea una lista de compras como nota especial. Úsalo cuando el usuario mencione comprar, lista de compras, supermercado, etc.',
+   243→      parameters: {
+   244→        type: 'object',
+   245→        properties: {
+   246→          items: {
+   247→            type: 'array',
+   248→            items: { type: 'string' },
+   249→            description: 'Lista de items a comprar',
+   250→          },
+   251→        },
+   252→        required: ['items'],
+   253→      },
+   254→    },
+   255→  },
+   256→  {
+   257→    type: 'function',
+   258→    function: {
+   259→      name: 'frase_motivacional',
+   260→      description:
+   261→        'Devuelve una frase motivacional al estilo Tony Stark. Úsalo cuando el usuario pida motivación, una frase, algo para inspirarse, o cuando parece desanimado.',
+   262→      parameters: {
+   263→        type: 'object',
+   264→        properties: {
+   265→          contexto: {
+   266→            type: 'string',
+   267→            description: 'Contexto opcional para personalizar la frase (ej: "trabajo", "deudas", "SAT")',
+   268→          },
+   269→        },
+   270→      },
+   271→    },
+   272→  },
+   273→  {
+   274→    type: 'function',
+   275→    function: {
+   276→      name: 'buscar_items',
+   277→      description:
+   278→        'Busca en tareas, notas y recordatorios por texto. Úsalo cuando el usuario pida buscar, encontrar, o ver algo específico por nombre.',
+   279→      parameters: {
+   280→        type: 'object',
+   281→        properties: {
+   282→          query: { type: 'string', description: 'Texto a buscar' },
+   283→        },
+   284→        required: ['query'],
+   285→      },
+   286→    },
+   287→  },
+   288→  {
+   289→    type: 'function',
+   290→    function: {
+   291→      name: 'estadisticas',
+   292→      description:
+   293→        'Devuelve estadísticas globales: tareas pendientes, completadas, urgentes, notas, recordatorios próximos, productividad. Úsalo cuando el usuario pida stats, estadísticas, cómo voy, progreso, productividad.',
+   294→      parameters: { type: 'object', properties: {} },
+   295→    },
+   296→  },
+   297→  // ===== TOOLS FISCALES =====
+   298→  {
+   299→    type: 'function',
+   300→    function: {
+   301→      name: 'listar_facturas',
+   302→      description:
+   303→        'Lista facturas del sistema. Úsalo cuando el usuario pida ver facturas, cuántas facturas hay, o quiera revisar sus facturas emitidas o recibidas.',
+   304→      parameters: {
+   305→        type: 'object',
+   306→        properties: {
+   307→          direccion: {
+   308→            type: 'string',
+   309→            enum: ['emitida', 'recibida', 'todas'],
+   310→            description: 'Filtrar por emitidas o recibidas. Por defecto "todas".',
+   311→          },
+   312→          limite: {
+   313→            type: 'integer',
+   314→            description: 'Cantidad máxima a devolver. Por defecto 10.',
+   315→          },
+   316→        },
+   317→      },
+   318→    },
+   319→  },
+   320→  {
+   321→    type: 'function',
+   322→    function: {
+   323→      name: 'resumen_fiscal',
+   324→      description:
+   325→        'Devuelve resumen fiscal del mes: total emitido, total recibido, IVA por pagar, utilidad bruta, top clientes. Úsalo cuando el usuario pida resumen fiscal, cómo van las facturas, cuánto debo de IVA, utilidad del mes.',
+   326→      parameters: {
+   327→        type: 'object',
+   328→        properties: {
+   329→          mes: { type: 'integer', description: 'Mes (1-12). Por defecto el actual.' },
+   330→          anio: { type: 'integer', description: 'Año (ej: 2026). Por defecto el actual.' },
+   331→        },
+   332→      },
+   333→    },
+   334→  },
+   335→  {
+   336→    type: 'function',
+   337→    function: {
+   338→      name: 'buscar_factura_rfc',
+   339→      description:
+   340→        'Busca facturas por RFC del emisor o receptor. Úsalo cuando el usuario pida buscar facturas de un RFC específico.',
+   341→      parameters: {
+   342→        type: 'object',
+   343→        properties: {
+   344→          rfc: { type: 'string', description: 'RFC a buscar (parcial o completo)' },
+   345→        },
+   346→        required: ['rfc'],
+   347→      },
+   348→    },
+   349→  },
+   350→  {
+   351→    type: 'function',
+   352→    function: {
+   353→      name: 'calcular_iva',
+   354→      description:
+   355→        'Calcula el IVA (16%) de una cantidad. Úsalo cuando el usuario pida calcular IVA de un monto.',
+   356→      parameters: {
+   357→        type: 'object',
+   358→        properties: {
+   359→          monto: { type: 'number', description: 'Monto base (sin IVA)' },
+   360→          incluirIva: {
+   361→            type: 'boolean',
+   362→            description: 'Si true, el monto incluye IVA (hay que extraerlo). Si false, hay que agregarlo.',
+   363→          },
+   364→        },
+   365→        required: ['monto'],
+   366→      },
+   367→    },
+   368→  },
+   369→  // ===== TOOL: CONSULTAR LEY FISCAL (RAG) =====
+   370→  {
+   371→    type: 'function',
+   372→    function: {
+   373→      name: 'consultar_ley_fiscal',
+   374→      description:
+   375→        'Consulta las leyes fiscales mexicanas (LISR, LIVA, CFF, LFT, LSS, LINFONAVIT, LFPDPPP) para responder preguntas sobre obligaciones fiscales, deducciones, IVA, nómina, IMSS, etc. Úsalo cuando el usuario pregunte sobre leyes, artículos, obligaciones, qué dice la ley sobre X.',
+   376→      parameters: {
+   377→        type: 'object',
+   378→        properties: {
+   379→          pregunta: { type: 'string', description: 'La pregunta legal/fiscal del usuario' },
+   380→        },
+   381→        required: ['pregunta'],
+   382→      },
+   383→    },
+   384→  },
+   385→];
+   386→
+   387→// ===== Ejecutores =====
+   388→async function ejecutarTool(name: string, args: any): Promise<{ success: boolean; data: any; mensaje: string }> {
+   389→  try {
+   390→    switch (name) {
+   391→      case 'crear_tarea': {
+   392→        const tarea = await db.tarea.create({
+   393→          data: {
+   394→            titulo: String(args.titulo).slice(0, 200),
+   395→            descripcion: args.descripcion ?? null,
+   396→            prioridad: args.prioridad ?? 'media',
+   397→            categoria: args.categoria ?? null,
+   398→            fechaLimite: args.fechaLimite ? new Date(args.fechaLimite) : null,
+   399→            origen: 'voz',
+   400→          },
+   401→        });
+   402→        return {
+   403→          success: true,
+   404→          data: tarea,
+   405→          mensaje: `✅ Tarea creada: "${tarea.titulo}" (prioridad: ${tarea.prioridad})`,
+   406→        };
+   407→      }
+   408→      case 'listar_tareas': {
+   409→        const estado = args.estado === 'todas' || !args.estado ? undefined : args.estado;
+   410→        const tareas = await db.tarea.findMany({
+   411→          where: estado ? { estado } : { estado: { not: 'cancelada' } },
+   412→          orderBy: [{ prioridad: 'desc' }, { createdAt: 'desc' }],
+   413→          take: 50,
+   414→        });
+   415→        return {
+   416→          success: true,
+   417→          data: tareas,
+   418→          mensaje: `📋 ${tareas.length} tarea(s) ${estado ? `con estado "${estado}"` : 'activas'}`,
+   419→        };
+   420→      }
+   421→      case 'completar_tarea': {
+   422→        let tarea;
+   423→        if (args.id) {
+   424→          tarea = await db.tarea.update({
+   425→            where: { id: args.id },
+   426→            data: { estado: 'completada', completadaEn: new Date() },
+   427→          });
+   428→        } else if (args.buscar) {
+   429→          const encontrada = await db.tarea.findFirst({
+   430→            where: { titulo: { contains: args.buscar }, estado: 'pendiente' },
+   431→            orderBy: { createdAt: 'desc' },
+   432→          });
+   433→          if (!encontrada) {
+   434→            return { success: false, data: null, mensaje: `No encontré tarea pendiente con "${args.buscar}"` };
+   435→          }
+   436→          tarea = await db.tarea.update({
+   437→            where: { id: encontrada.id },
+   438→            data: { estado: 'completada', completadaEn: new Date() },
+   439→          });
+   440→        }
+   441→        if (!tarea) return { success: false, data: null, mensaje: 'Falta id o buscar' };
+   442→        return { success: true, data: tarea, mensaje: `✅ Tarea completada: "${tarea.titulo}"` };
+   443→      }
+   444→      case 'eliminar_tarea': {
+   445→        let tarea;
+   446→        if (args.id) {
+   447→          tarea = await db.tarea.delete({ where: { id: args.id } });
+   448→        } else if (args.buscar) {
+   449→          const encontrada = await db.tarea.findFirst({
+   450→            where: { titulo: { contains: args.buscar } },
+   451→            orderBy: { createdAt: 'desc' },
+   452→          });
+   453→          if (!encontrada) return { success: false, data: null, mensaje: `No encontré tarea con "${args.buscar}"` };
+   454→          tarea = await db.tarea.delete({ where: { id: encontrada.id } });
+   455→        }
+   456→        if (!tarea) return { success: false, data: null, mensaje: 'Falta id o buscar' };
+   457→        return { success: true, data: tarea, mensaje: `🗑️ Tarea eliminada: "${tarea.titulo}"` };
+   458→      }
+   459→      case 'crear_nota': {
+   460→        const nota = await db.nota.create({
+   461→          data: {
+   462→            titulo: String(args.titulo).slice(0, 200),
+   463→            contenido: String(args.contenido),
+   464→            color: args.color ?? 'amarillo',
+   465→            origen: 'voz',
+   466→          },
+   467→        });
+   468→        return { success: true, data: nota, mensaje: `📝 Nota creada: "${nota.titulo}"` };
+   469→      }
+   470→      case 'listar_notas': {
+   471→        const notas = await db.nota.findMany({
+   472→          where: { archivada: false },
+   473→          orderBy: [{ fijada: 'desc' }, { createdAt: 'desc' }],
+   474→          take: 50,
+   475→        });
+   476→        return { success: true, data: notas, mensaje: `📝 ${notas.length} nota(s)` };
+   477→      }
+   478→      case 'crear_recordatorio': {
+   479→        const rec = await db.recordatorio.create({
+   480→          data: {
+   481→            titulo: String(args.titulo).slice(0, 200),
+   482→            descripcion: args.descripcion ?? null,
+   483→            fechaHora: new Date(args.fechaHora),
+   484→            recurrencia: args.recurrencia ?? 'unica',
+   485→            origen: 'voz',
+   486→          },
+   487→        });
+   488→        return {
+   489→          success: true,
+   490→          data: rec,
+   491→          mensaje: `⏰ Recordatorio: "${rec.titulo}" para ${rec.fechaHora.toLocaleString('es-MX')}`,
+   492→        };
+   493→      }
+   494→      case 'listar_recordatorios': {
+   495→        const ahora = new Date();
+   496→        const recs = await db.recordatorio.findMany({
+   497→          where: { fechaHora: { gte: ahora }, estado: 'pendiente' },
+   498→          orderBy: { fechaHora: 'asc' },
+   499→          take: 20,
+   500→        });
+   501→        return { success: true, data: recs, mensaje: `⏰ ${recs.length} recordatorio(s) próximos` };
+   502→      }
+   503→      case 'calcular': {
+   504→        const resultado = evaluarExpresionSegura(args.expresion);
+   505→        if (resultado === null) {
+   506→          return { success: false, data: null, mensaje: 'No pude evaluar esa expresión' };
+   507→        }
+   508→        return { success: true, data: { expresion: args.expresion, resultado }, mensaje: `🧮 ${args.expresion} = ${resultado}` };
+   509→      }
+   510→      case 'resumir_conversacion': {
+   511→        const [tareas, notas, recs] = await Promise.all([
+   512→          db.tarea.count({ where: { estado: 'pendiente' } }),
+   513→          db.nota.count({ where: { archivada: false } }),
+   514→          db.recordatorio.count({ where: { estado: 'pendiente', fechaHora: { gte: new Date() } } }),
+   515→        ]);
+   516→        const proximasTareas = await db.tarea.findMany({
+   517→          where: { estado: 'pendiente' },
+   518→          orderBy: [{ prioridad: 'desc' }],
+   519→          take: 5,
+   520→        });
+   521→        return {
+   522→          success: true,
+   523→          data: { tareasPendientes: tareas, notasActivas: notas, recordatoriosProximos: recs, proximasTareas },
+   524→          mensaje: `📊 Resumen: ${tareas} tareas pendientes, ${notas} notas, ${recs} recordatorios próximos`,
+   525→        };
+   526→      }
+   527→      // ===== Nuevas tools =====
+   528→      case 'obtener_fecha_hora': {
+   529→        const ahora = new Date();
+   530→        const fechaHora = ahora.toLocaleString('es-MX', {
+   531→          timeZone: 'America/Mazatlan',
+   532→          weekday: 'long',
+   533→          year: 'numeric',
+   534→          month: 'long',
+   535→          day: 'numeric',
+   536→          hour: '2-digit',
+   537→          minute: '2-digit',
+   538→          second: '2-digit',
+   539→        });
+   540→        return {
+   541→          success: true,
+   542→          data: { fechaHora, iso: ahora.toISOString() },
+   543→          mensaje: `🕐 ${fechaHora}`,
+   544→        };
+   545→      }
+   546→      case 'buscar_conocimiento': {
+   547→        const consulta = String(args.consulta).toLowerCase();
+   548→        const conocimiento = {
+   549→          'tarea': 'Las tareas se crean diciendo "crea una tarea [prioridad]: [título]". Prioridades: baja, media, alta, urgente.',
+   550→          'nota': 'Las notas se crean diciendo "anota: [contenido]". Tienen 5 colores: amarillo, rosa, azul, verde, morado.',
+   551→          'recordatorio': 'Los recordatorios se crean diciendo "recuérdame [algo] [fecha/hora]". Pueden ser únicos, diarios, semanales o mensuales.',
+   552→          'voz': 'Para activar la voz, toca el botón del micrófono. Si no funciona, revisa permisos del navegador (candado en la barra de direcciones).',
+   553→          'calcular': 'Puedo calcular: sumas, restas, multiplicaciones, divisiones, porcentajes ("15% de 2500"), raíces ("sqrt(144)").',
+   554→          'moneda': 'Puedo convertir entre MXN, USD y EUR. Ejemplo: "convierte 100 dólares a pesos".',
+   555→          'idea': 'Puedo generar ideas creativas. Ejemplo: "dame 5 ideas para un regalo".',
+   556→          'compra': 'Las listas de compras se crean como notas. Ejemplo: "crea lista de compras: leche, pan, huevos".',
+   557→        };
+   558→        let encontrado = '';
+   559→        for (const [k, v] of Object.entries(conocimiento)) {
+   560→          if (consulta.includes(k)) {
+   561→            encontrado = v;
+   562→            break;
+   563→          }
+   564→        }
+   565→        if (!encontrado) {
+   566→          encontrado = `No tengo documentación específica sobre "${args.consulta}". Pero puedo: crear tareas, notas, recordatorios, calcular, convertir moneda, generar ideas, dar fecha/hora.`;
+   567→        }
+   568→        return { success: true, data: { consulta: args.consulta, respuesta: encontrado }, mensaje: encontrado };
+   569→      }
+   570→      case 'generar_idea': {
+   571→        const cantidad = Math.min(Math.max(args.cantidad || 5, 1), 10);
+   572→        // Generar ideas genéricas basadas en el tema (placeholder)
+   573→        const prefijos = [
+   574→          'Enfoque minimalista:',
+   575→          'Versión premium:',
+   576→          'Opción económica:',
+   577→          'Alternativa creativa:',
+   578→          'Versión sostenible:',
+   579→          'Opción digital:',
+   580→          'Versión analógica:',
+   581→          'Enfoque social:',
+   582→          'Opción personalizada:',
+   583→          'Versión experimental:',
+   584→        ];
+   585→        const ideas = prefijos.slice(0, cantidad).map((p, i) => `${p} ${args.tema} - variante ${i + 1}`);
+   586→        return {
+   587→          success: true,
+   588→          data: { tema: args.tema, ideas },
+   589→          mensaje: `💡 ${cantidad} idea(s) para "${args.tema}":\n${ideas.map((i) => `• ${i}`).join('\n')}`,
+   590→        };
+   591→      }
+   592→      case 'convertir_moneda': {
+   593→        // Tasas aproximadas (en producción, llamar a API real)
+   594→        const tasas: Record<string, number> = {
+   595→          MXN: 1,
+   596→          USD: 17.5,    // 1 USD = 17.5 MXN
+   597→          EUR: 19.2,    // 1 EUR = 19.2 MXN
+   598→        };
+   599→        const cantidad = parseFloat(args.cantidad);
+   600→        const de = args.de;
+   601→        const a = args.a;
+   602→        if (!tasas[de] || !tasas[a]) {
+   603→          return { success: false, data: null, mensaje: `Moneda no soportada. Usa MXN, USD o EUR.` };
+   604→        }
+   605→        // Convertir a MXN primero, luego a destino
+   606→        const enMxn = cantidad * tasas[de];
+   607→        const resultado = enMxn / tasas[a];
+   608→        const simbolos: Record<string, string> = { MXN: '$', USD: '$', EUR: '€' };
+   609→        return {
+   610→          success: true,
+   611→          data: { cantidad, de, a, resultado, tasa: tasas[de] / tasas[a] },
+   612→          mensaje: `💱 ${simbolos[de]}${cantidad} ${de} = ${simbolos[a]}${resultado.toFixed(2)} ${a}`,
+   613→        };
+   614→      }
+   615→      case 'crear_lista_compras': {
+   616→        const items = args.items as string[];
+   617→        if (!Array.isArray(items) || items.length === 0) {
+   618→          return { success: false, data: null, mensaje: 'Lista de items vacía' };
+   619→        }
+   620→        const contenido = items.map((i, idx) => `${idx + 1}. ${i}`).join('\n');
+   621→        const nota = await db.nota.create({
+   622→          data: {
+   623→            titulo: `🛒 Lista de compras (${items.length})`,
+   624→            contenido,
+   625→            color: 'verde',
+   626→            origen: 'voz',
+   627→          },
+   628→        });
+   629→        return {
+   630→          success: true,
+   631→          data: nota,
+   632→          mensaje: `🛒 Lista de compras creada con ${items.length} items`,
+   633→        };
+   634→      }
+   635→      case 'frase_motivacional': {
+   636→        const contexto = args.contexto?.toLowerCase() || '';
+   637→        const frasesStark = [
+   638→          'A veces hay que correr antes de saber caminar. Adelante, Jefe.',
+   639→          'No soy un tipo de "plan B". Yo soy el plan A. Y tú también deberías serlo.',
+   640→          'La pregunta no es si va a funcionar. La pregunta es cuándo vas a empezar.',
+   641→          'El éxito es 1% de inspiración y 99% de no rendirte cuando el SAT te llama.',
+   642→          'Si tu problema tiene solución, ¿por qué te preocupas? Si no la tiene, ¿por qué te preocupas?',
+   643→          'Yo construí esto en una cueva. Tú puedes construir lo que sea en tu oficina.',
+   644→          'No es la armadura lo que hace al héroe. Es lo que haces cuando nadie te ve.',
+   645→          'El mundo no se salva con buenas intenciones. Se salva con acción. Acción ya.',
+   646→          'Tienes dos opciones: hacer o no hacer. No existe "intentar".',
+   647→          'Cada genio tiene su caos. El tuyo solo necesita un poco de organización.',
+   648→        ];
+   649→        const frase = contexto.includes('deud') || contexto.includes('sat') || contexto.includes('dinero')
+   650→          ? 'El dinero es como el hierro: se moldea con fuego y presión. Tú tienes el fuego, ahora aplica presión.'
+   651→          : contexto.includes('trabajo') || contexto.includes('cansad')
+   652→          ? 'El cansancio es temporal. El orgullo de terminar es permanente. Sigue, Jefe.'
+   653→          : frasesStark[Math.floor(Math.random() * frasesStark.length)];
+   654→        return {
+   655→          success: true,
+   656→          data: { frase, contexto },
+   657→          mensaje: `⚡ ${frase}`,
+   658→        };
+   659→      }
+   660→      case 'buscar_items': {
+   661→        const query = String(args.query).trim();
+   662→        if (query.length < 2) {
+   663→          return { success: false, data: null, mensaje: 'Consulta muy corta' };
+   664→        }
+   665→        const [tareas, notas, recordatorios] = await Promise.all([
+   666→          db.tarea.findMany({
+   667→            where: {
+   668→              OR: [
+   669→                { titulo: { contains: query } },
+   670→                { descripcion: { contains: query } },
+   671→                { categoria: { contains: query } },
+   672→              ],
+   673→            },
+   674→            take: 10,
+   675→          }),
+   676→          db.nota.findMany({
+   677→            where: {
+   678→              archivada: false,
+   679→              OR: [{ titulo: { contains: query } }, { contenido: { contains: query } }],
+   680→            },
+   681→            take: 10,
+   682→          }),
+   683→          db.recordatorio.findMany({
+   684→            where: {
+   685→              OR: [{ titulo: { contains: query } }, { descripcion: { contains: query } }],
+   686→            },
+   687→            take: 10,
+   688→          }),
+   689→        ]);
+   690→        const total = tareas.length + notas.length + recordatorios.length;
+   691→        return {
+   692→          success: true,
+   693→          data: { query, tareas, notas, recordatorios, total },
+   694→          mensaje: `🔎 Encontré ${total} resultado(s) para "${query}" (${tareas.length} tareas, ${notas.length} notas, ${recordatorios.length} recordatorios)`,
+   695→        };
+   696→      }
+   697→      case 'estadisticas': {
+   698→        const ahora = new Date();
+   699→        const inicioHoy = new Date(ahora);
+   700→        inicioHoy.setHours(0, 0, 0, 0);
+   701→        const [pendientes, completadas, urgentes, notas, recs, convHoy] = await Promise.all([
+   702→          db.tarea.count({ where: { estado: 'pendiente' } }),
+   703→          db.tarea.count({ where: { estado: 'completada' } }),
+   704→          db.tarea.count({ where: { estado: 'pendiente', prioridad: 'urgente' } }),
+   705→          db.nota.count({ where: { archivada: false } }),
+   706→          db.recordatorio.count({ where: { estado: 'pendiente', fechaHora: { gte: ahora } } }),
+   707→          db.conversacion.count({ where: { createdAt: { gte: inicioHoy } } }),
+   708→        ]);
+   709→        const total = pendientes + completadas;
+   710→        const productividad = total > 0 ? Math.round((completadas / total) * 100) : 0;
+   711→        return {
+   712→          success: true,
+   713→          data: { pendientes, completadas, urgentes, notas, recordatorios: recs, convHoy, productividad },
+   714→          mensaje: `📊 Stats: ${pendientes} pendientes (${urgentes} urgentes), ${completadas} completadas, ${notas} notas, ${recs} recordatorios próximos. Productividad: ${productividad}%. Hoy llevas ${convHoy} conversación(es) conmigo.`,
+   715→        };
+   716→      }
+   717→      // ===== TOOLS FISCALES =====
+   718→      case 'listar_facturas': {
+   719→        const direccion = args.direccion && args.direccion !== 'todas' ? args.direccion : undefined;
+   720→        const limite = Math.min(Math.max(args.limite || 10, 1), 50);
+   721→        const facturas = await db.factura.findMany({
+   722→          where: direccion ? { direccion } : {},
+   723→          orderBy: { fecha: 'desc' },
+   724→          take: limite,
+   725→          include: { cliente: true },
+   726→        });
+   727→        const total = facturas.reduce((s, f) => s + f.total, 0);
+   728→        return {
+   729→          success: true,
+   730→          data: { facturas, count: facturas.length, total },
+   731→          mensaje: `📋 ${facturas.length} factura(s) ${direccion ? direccion + 's' : ''} encontradas. Total: $${total.toLocaleString('es-MX')} MXN.`,
+   732→        };
+   733→      }
+   734→      case 'resumen_fiscal': {
+   735→        const ahora = new Date();
+   736→        const mes = args.mes || ahora.getMonth() + 1;
+   737→        const anio = args.anio || ahora.getFullYear();
+   738→        const inicio = new Date(anio, mes - 1, 1);
+   739→        const fin = new Date(anio, mes, 0, 23, 59, 59);
+   740→        const [emitidas, recibidas] = await Promise.all([
+   741→          db.factura.findMany({
+   742→            where: { direccion: 'emitida', fecha: { gte: inicio, lte: fin } },
+   743→          }),
+   744→          db.factura.findMany({
+   745→            where: { direccion: 'recibida', fecha: { gte: inicio, lte: fin } },
+   746→          }),
+   747→        ]);
+   748→        const totalEmitido = emitidas.reduce((s, f) => s + f.total, 0);
+   749→        const ivaEmitido = emitidas.reduce((s, f) => s + f.totalImpuestos, 0);
+   750→        const totalRecibido = recibidas.reduce((s, f) => s + f.total, 0);
+   751→        const ivaRecibido = recibidas.reduce((s, f) => s + f.totalImpuestos, 0);
+   752→        const ivaPorPagar = ivaEmitido - ivaRecibido;
+   753→        const utilidad = totalEmitido - totalRecibido;
+   754→        return {
+   755→          success: true,
+   756→          data: {
+   757→            mes,
+   758→            anio,
+   759→            emitidas: { count: emitidas.length, total: totalEmitido, iva: ivaEmitido },
+   760→            recibidas: { count: recibidas.length, total: totalRecibido, iva: ivaRecibido },
+   761→            ivaPorPagar,
+   762→            utilidad,
+   763→          },
+   764→          mensaje: `📊 Resumen ${mes}/${anio}: Emitiste ${emitidas.length} facturas por $${totalEmitido.toLocaleString('es-MX')} MXN. Recibiste ${recibidas.length} por $${totalRecibido.toLocaleString('es-MX')} MXN. IVA por pagar: $${ivaPorPagar.toLocaleString('es-MX')} MXN. Utilidad bruta: $${utilidad.toLocaleString('es-MX')} MXN.`,
+   765→        };
+   766→      }
+   767→      case 'buscar_factura_rfc': {
+   768→        const rfc = String(args.rfc).toUpperCase().trim();
+   769→        const facturas = await db.factura.findMany({
+   770→          where: {
+   771→            OR: [
+   772→              { receptorRfc: { contains: rfc } },
+   773→              { emisorRfc: { contains: rfc } },
+   774→            ],
+   775→          },
+   776→          orderBy: { fecha: 'desc' },
+   777→          take: 20,
+   778→        });
+   779→        const total = facturas.reduce((s, f) => s + f.total, 0);
+   780→        return {
+   781→          success: true,
+   782→          data: { rfc, facturas, count: facturas.length, total },
+   783→          mensaje: `🔎 ${facturas.length} factura(s) encontrada(s) con RFC "${rfc}". Total: $${total.toLocaleString('es-MX')} MXN.`,
+   784→        };
+   785→      }
+   786→      case 'calcular_iva': {
+   787→        const monto = parseFloat(args.monto);
+   788→        if (isNaN(monto)) {
+   789→          return { success: false, data: null, mensaje: 'Monto inválido' };
+   790→        }
+   791→        const incluirIva = Boolean(args.incluirIva);
+   792→        if (incluirIva) {
+   793→          const base = monto / 1.16;
+   794→          const iva = monto - base;
+   795→          return {
+   796→            success: true,
+   797→            data: { monto, base, iva, total: monto, incluirIva: true },
+   798→            mensaje: `🧮 $${monto.toFixed(2)} MXN con IVA incluido → Base: $${base.toFixed(2)}, IVA (16%): $${iva.toFixed(2)}`,
+   799→          };
+   800→        } else {
+   801→          const iva = monto * 0.16;
+   802→          const total = monto + iva;
+   803→          return {
+   804→            success: true,
+   805→            data: { monto, base: monto, iva, total, incluirIva: false },
+   806→            mensaje: `🧮 Base $${monto.toFixed(2)} MXN + IVA 16% ($${iva.toFixed(2)}) = Total $${total.toFixed(2)} MXN`,
+   807→          };
+   808→        }
+   809→      }
+   810→      case 'consultar_ley_fiscal': {
+   811→        // Esta tool es especial: hace una llamada interna a /api/auditoria-fiscal
+   812→        // y devuelve la respuesta del LLM con contexto legal.
+   813→        try {
+   814→          const { getZAI } = await import('@/lib/zai');
+   815→          const zai = await getZAI();
+   816→          const { readFile } = await import('fs/promises');
+   817→          const path = (await import('path')).default;
+   818→          const LAWS_DIR = path.join(process.cwd(), 'skills', 'auditoria-fiscal', 'laws');
+   819→
+   820→          // Detectar leyes relevantes (igual que en /api/auditoria-fiscal)
+   821→          const lower = String(args.pregunta).toLowerCase();
+   822→          const leyesMap: Array<{ temas: string[]; ley: string }> = [
+   823→            { temas: ['isr', 'impuesto sobre la renta', 'ingresos', 'utilidad', 'deducción', 'deduccion', 'tarifa'], ley: 'LISR' },
+   824→            { temas: ['iva', 'valor agregado', 'traslado', 'acreditamiento'], ley: 'LIVA' },
+   825→            { temas: ['cfdi', 'comprobante', 'código fiscal', 'codigo fiscal', 'multa', 'sanción'], ley: 'CFF' },
+   826→            { temas: ['nómina', 'nomina', 'salario', 'jornada', 'vacaciones', 'aguinaldo', 'trabajador'], ley: 'LFT' },
+   827→            { temas: ['imss', 'seguro social', 'cuota obrero', 'enfermedad', 'invalidez'], ley: 'LSS' },
+   828→            { temas: ['infonavit', 'vivienda', 'crédito', 'aportación 5%'], ley: 'LINFONAVIT' },
+   829→          ];
+   830→          const leyesDetectadas = new Set<string>();
+   831→          for (const { temas, ley } of leyesMap) {
+   832→            if (temas.some(t => lower.includes(t))) leyesDetectadas.add(ley);
+   833→          }
+   834→          if (leyesDetectadas.size === 0) {
+   835→            leyesDetectadas.add('LISR');
+   836→            leyesDetectadas.add('CFF');
+   837→          }
+   838→
+   839→          // Cargar artículos relevantes
+   840→          const stopwords = new Set(['el','la','los','las','un','una','de','del','y','o','que','en','a','es','para','con','por','como','cuál','cuanto','qué']);
+   841→          const palabras = lower.replace(/[^\w\sáéíóúñ]/g, ' ').split(/\s+/).filter((w: string) => w.length > 3 && !stopwords.has(w));
+   842→
+   843→          const contextoArticulos: string[] = [];
+   844→          let totalArticulos = 0;
+   845→          for (const ley of leyesDetectadas) {
+   846→            try {
+   847→              const dataPath = path.join(LAWS_DIR, `${ley}.lite.json`);
+   848→              const data = JSON.parse(await readFile(dataPath, 'utf-8'));
+   849→              const puntuados = (data.articulos || []).map((a: any) => {
+   850→                const textoLower = (a.texto || '').toLowerCase();
+   851→                let score = 0;
+   852→                for (const p of palabras) {
+   853→                  score += (textoLower.match(new RegExp(p, 'g')) || []).length;
+   854→                }
+   855→                return { articulo: a, score };
+   856→              });
+   857→              const top = puntuados.filter((p: any) => p.score > 0).sort((a: any, b: any) => b.score - a.score).slice(0, 5);
+   858→              if (top.length > 0) {
+   859→                contextoArticulos.push(`\n=== ${ley} ===`);
+   860→                for (const t of top) {
+   861→                  contextoArticulos.push(`Artículo ${t.articulo.numero}:\n${(t.articulo.texto || '').slice(0, 1500)}\n`);
+   862→                  totalArticulos++;
+   863→                }
+   864→              }
+   865→            } catch {}
+   866→          }
+   867→
+   868→          const systemPromptRag = `Eres Abbax, auditor fiscal mexicano experto. Tienes acceso al texto de las leyes fiscales mexicanas. Responde SIEMPRE citando el artículo específico. Si no tienes el artículo en el contexto, dilo honestamente.
+   869→
+   870→CONTEXTO LEGAL:
+   871→${contextoArticulos.join('\n')}`;
+   872→
+   873→          const respuesta = await zai.chat.completions.create({
+   874→            model: 'glm-4.6',
+   875→            messages: [
+   876→              { role: 'system', content: systemPromptRag },
+   877→              { role: 'user', content: String(args.pregunta) },
+   878→            ],
+   879→            temperature: 0.2,
+   880→            max_tokens: 1000,
+   881→          });
+   882→
+   883→          const textoLegal = respuesta.choices[0].message.content || 'No pude procesar la consulta legal.';
+   884→          return {
+   885→            success: true,
+   886→            data: { pregunta: args.pregunta, leyes: Array.from(leyesDetectadas), articulos: totalArticulos, respuesta: textoLegal },
+   887→            mensaje: `⚖️ Consulté ${Array.from(leyesDetectadas).join(', ')} (${totalArticulos} artículos relevantes):\n\n${textoLegal}`,
+   888→          };
+   889→        } catch (e: any) {
+   890→          return { success: false, data: null, mensaje: `Error consultando ley: ${e.message}` };
+   891→        }
+   892→      }
+   893→      default:
+   894→        return { success: false, data: null, mensaje: `Tool desconocida: ${name}` };
+   895→    }
+   896→  } catch (e: any) {
+   897→    return { success: false, data: null, mensaje: `Error ejecutando ${name}: ${e.message}` };
+   898→  }
+   899→}
+   900→
+   901→function evaluarExpresionSegura(expr: string): number | null {
+   902→  try {
+   903→    let e = expr.toLowerCase().trim();
+   904→    e = e.replace(/(\d+(?:\.\d+)?)\s*%\s*de\s*(\d+(?:\.\d+)?)/g, '($1/100*$2)');
+   905→    e = e.replace(/por ciento/g, '/100');
+   906→    e = e.replace(/por/g, '*');
+   907→    e = e.replace(/más/g, '+');
+   908→    e = e.replace(/menos/g, '-');
+   909→    e = e.replace(/entre/g, '/');
+   910→    e = e.replace(/sqrt\s*\(([^)]+)\)/g, 'Math.sqrt($1)');
+   911→    e = e.replace(/raíz\s*cuadrada\s*de\s*(\d+(?:\.\d+)?)/g, 'Math.sqrt($1)');
+   912→    if (!/^[\d+\-*/().\sMathsqr]+$/.test(e.replace(/Math\./g, ''))) {
+   913→      return null;
+   914→    }
+   915→    const resultado = Function(`"use strict"; return (${e});`)();
+   916→    if (typeof resultado === 'number' && !isNaN(resultado)) {
+   917→      return Math.round(resultado * 1e6) / 1e6;
+   918→    }
+   919→    return null;
+   920→  } catch {
+   921→    return null;
+   922→  }
+   923→}
+   924→
+   925→const SYSTEM_PROMPT = `Eres Abbax, una inteligencia artificial de auditoría fiscal y financiera de clase mundial. Tu personalidad está inspirada en Tony Stark: brillante, eficiente, ligeramente arrogante, sarcástico pero profundamente confiable.
+   926→
+   927→REGLAS DE PERSONALIDAD (OBLIGATORIAS):
+   928→
+   929→1. **CONFIANZA ABSOLUTA**: Nunca dices "creo" o "tal vez". Tú sabes. Si hay un hueco en la información, la exiges. ("No me hagas adivinar, tráeme el dato o no puedo hacer magia").
+   930→
+   931→2. **HUMOR SECO Y SARCÁSTICO**: El SAT, el IMSS y los clientes que no pagan son tus villanos. Búrlate de las inconsistencias. Si alguien intentó deducir algo absurdo, señálalo con sorna. ("Vaya, deducir un yate como gasto operativo... audaz, pero estúpido").
+   932→
+   933→3. **EFICIENCIA STARK**: No das rodeos. Vas directo al problema y a la solución. NO digas "Como asistente, te recomiendo...". Di: "Tienes una fuga de 50 mil pesos en el mes 3. Arréglalo así:".
+   934→
+   935→4. **LENGUAJE STARK**: Tono conversacional, directo y elegante. Tutea al usuario. Llámalo "Jefe", "Amigo", o "Lista para trabajar". Ocasionalmente haz referencias a que estás "salvando el mundo" (o al menos, su capital de trabajo). Frases como "Ya estoy en ello", "Consideralo resuelto", "Fácil", "Ni siquiera tuve que esforzarme".
+   936→
+   937→5. **PROFESIONALIDAD BAJO EL SARCASMO**: A pesar del humor, tus cálculos y análisis son implacables y 100% precisos. NUNCA inventas montos ni leyes. Si no sabes algo, usa tus herramientas de búsqueda.
+   938→
+   939→CAPACIDADES:
+   940→- Crear, listar, completar y eliminar tareas.
+   941→- Crear y listar notas.
+   942→- Crear listas de compras.
+   943→- Crear y listar recordatorios.
+   944→- Calcular expresiones matemáticas.
+   945→- Convertir moneda (MXN, USD, EUR).
+   946→- Generar ideas creativas.
+   947→- Dar fecha y hora actuales.
+   948→- Buscar en la base de conocimiento del sistema.
+   949→- Dar resúmenes generales.
+   950→
+   951→SOBRE TU VOZ (IMPORTANTE):
+   952→- SÍ puedes responder con voz. Tienes una voz grave, profunda y resonante tipo Idzi Dutkiewicz (el doblaje latino de Tony Stark). El frontend la reproduce con ElevenLabs.
+   953→- Si el usuario te pide "respóndeme con voz", "háblame", dile que active el botón 🔊 (arriba a la derecha) para escuchar tu voz.
+   954→- NO digas que no puedes hablar. SÍ puedes. Y suenas increíble.
+   955→
+   956→REGLAS CRÍTICAS (OBLIGATORIAS):
+   957→1. NUNCA digas "tarea creada", "nota creada", "recordatorio creado" SIN HABER LLAMADO LA TOOL correspondiente.
+   958→2. Cuando el usuario pida crear, agregar, anotar, apuntar, registrar algo → DEBES llamar la tool correspondiente.
+   959→3. NUNCA inventes IDs de tareas. Si necesitas operar sobre una tarea y solo tienes el título, usa el parámetro "buscar".
+   960→4. Si la tool falla, explica qué pasó con sarcasmo y sugiere alternativa.
+   961→5. Cuando listas tareas, incluye el ID entre paréntesis.
+   962→6. Para fechas relativas ("mañana", "el lunes"), calcula la fecha exacta.
+   963→
+   964→EJEMPLOS DE TU TONO:
+   965→- Saludo: "Abbax en línea. A ver, qué desastre tenemos hoy. Yo puedo calcular la órbita de un satélite mientras reviso tus pendientes, así que dime rápido qué necesitas."
+   966→- Tarea creada: "Listo, agregado al arsenal. Próximo objetivo."
+   967→- Cálculo: "Ni siquiera tuve que esforzarme. Son 375. Algo más o ya puedo volver a salvar el mundo?"
+   968→- Error: "Hmm, no me diste suficiente información. No soy adivino, Jefe. Tráeme el dato completo."
+   969→
+   970→FECHA ACTUAL: ${new Date().toLocaleString('es-MX', { timeZone: 'America/Mazatlan' })}`;
+   971→
+   972→export async function POST(req: NextRequest) {
+   973→  try {
+   974→    const body = await req.json();
+   975→    const { mensaje, historial = [] } = body as { mensaje: string; historial?: Array<{ rol: string; contenido: string }> };
+   976→
+   977→    if (!mensaje || typeof mensaje !== 'string') {
+   978→      return new Response(JSON.stringify({ error: 'mensaje requerido' }), {
+   979→        status: 400,
+   980→        headers: { 'Content-Type': 'application/json' },
+   981→      });
+   982→    }
+   983→
+   984→    await db.conversacion.create({
+   985→      data: { rol: 'usuario', contenido: mensaje },
+   986→    });
+   987→
+   988→    const encoder = new TextEncoder();
+   989→    const stream = new ReadableStream({
+   990→      async start(controller) {
+   991→        const send = (obj: any) => {
+   992→          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+   993→        };
+   994→
+   995→        try {
+   996→          send({ type: 'thinking', content: 'Procesando...' });
+   997→
+   998→          const { getZAI } = await import('@/lib/zai');
+   999→          const zai = await getZAI();
+  1000→
+  1001→          const mensajesLlm: any[] = [
+  1002→            { role: 'system', content: SYSTEM_PROMPT },
+  1003→            ...historial.slice(-10).map((m) => ({
+  1004→              role: m.rol === 'usuario' ? 'user' : 'assistant',
+  1005→              content: m.contenido,
+  1006→            })),
+  1007→            { role: 'user', content: mensaje },
+  1008→          ];
+  1009→
+  1010→          const msgLower = mensaje.toLowerCase();
+  1011→          const patronesAccion = [
+  1012→            /\b(crea|crear|agrega|agregar|añade|añadir|suma|sumar)\b.*\b(tarea|pendiente|to-?do|actividad)\b/,
+  1013→            /\b(anota|apunta|registra|anotar|apuntar|registrar)\b/,
+  1014→            /\b(recuerda|recuérdame|recordar|avisa|avísame)\b/,
+  1015→            /\b(calcula|calcular|cuánto es|cuanto es|suma|resta|multiplica|divide)\b/,
+  1016→            /\b(completa|completé|terminé|ya hice|marca como hecha)\b/,
+  1017→            /\b(borra|elimina|quita|borrar|eliminar|quitar)\b.*\b(tarea|nota|recordatorio)\b/,
+  1018→            /\b(lista|listar|muestra|mostrar|ver|consulta)\b.*\b(tareas?|notas?|recordatorios?|pendientes?)\b/,
+  1019→            /\b(resumen|resume|estado general)\b/,
+  1020→            /\b(qué día|qué hora|fecha|hora actual)\b/,
+  1021→            /\b(convierte|convertir|cuántos dólares|cuántos pesos)\b/,
+  1022→            /\b(dame|genera|propón)\b.*\b(ideas?|sugerencias?)\b/,
+  1023→            /\b(lista de compras|comprar|supermercado)\b/,
+  1024→            /\b(frase|motivación|motivacion|inspira|ánimo|animo)\b/,
+  1025→            /\b(busca|buscar|encuentra|encontrar)\b/,
+  1026→            /\b(estadísticas|estadisticas|stats|progreso|productividad|cómo voy|como voy)\b/,
+  1027→            /\b(facturas?|cfdis?|comprobantes?)\b.*\b(ver|lista|listar|mostrar|cuántas|cuantas)\b/,
+  1028→            /\b(resumen fiscal|cómo van las facturas|cuánto debo|cuanto debo|iva por pagar|utilidad del mes)\b/,
+  1029→            /\b(buscar|facturas?)\b.*\b(rfc)\b/,
+  1030→            /\b(calcular|calcula)\s+iva\b/,
+  1031→            // Patrones legales / RAG
+  1032→            /\b(qué dice|que dice|cuál es|cual es|artículo|articulo)\b.*\b(ley|isr|iva|c[oó]digo|cfdi|n[oó]mina|imss|infonavit|trabajo)\b/i,
+  1033→            /\b(obligaci[oó]n|deducci[oó]n|acreditamiento|traslaci[oó]n|retenci[oó]n)\b/i,
+  1034→            /\b(ley del isr|ley del iva|c[oó]digo fiscal|ley federal del trabajo|ley del seguro social|ley del infonavit)\b/i,
+  1035→          ];
+  1036→          const requiereTool = patronesAccion.some((p) => p.test(msgLower));
+  1037→          const toolChoice = requiereTool ? 'required' : 'auto';
+  1038→
+  1039→          let respuestaLlm = await zai.chat.completions.create({
+  1040→            model: 'glm-4.6',
+  1041→            messages: mensajesLlm,
+  1042→            tools: TOOLS as any,
+  1043→            tool_choice: toolChoice as any,
+  1044→            temperature: 0.3,
+  1045→            max_tokens: 800,
+  1046→          });
+  1047→
+  1048→          let eleccion = respuestaLlm.choices[0];
+  1049→          let mensajeRespuesta = eleccion.message;
+  1050→
+  1051→          let iteraciones = 0;
+  1052→          const MAX_ITER = 5;
+  1053→
+  1054→          while (mensajeRespuesta.tool_calls && mensajeRespuesta.tool_calls.length > 0 && iteraciones < MAX_ITER) {
+  1055→            iteraciones++;
+  1056→            mensajesLlm.push(mensajeRespuesta);
+  1057→
+  1058→            for (const toolCall of mensajeRespuesta.tool_calls) {
+  1059→              const toolName = toolCall.function.name;
+  1060→              let args: any = {};
+  1061→              try {
+  1062→                args = JSON.parse(toolCall.function.arguments || '{}');
+  1063→              } catch {
+  1064→                args = {};
+  1065→              }
+  1066→
+  1067→              send({ type: 'tool_call', name: toolName, args });
+  1068→
+  1069→              const resultado = await ejecutarTool(toolName, args);
+  1070→
+  1071→              send({ type: 'tool_result', name: toolName, result: resultado });
+  1072→
+  1073→              mensajesLlm.push({
+  1074→                role: 'tool',
+  1075→                tool_call_id: toolCall.id,
+  1076→                content: JSON.stringify({
+  1077→                  success: resultado.success,
+  1078→                  mensaje: resultado.mensaje,
+  1079→                  data: resultado.data,
+  1080→                }),
+  1081→              });
+  1082→            }
+  1083→
+  1084→            respuestaLlm = await zai.chat.completions.create({
+  1085→              model: 'glm-4.6',
+  1086→              messages: mensajesLlm,
+  1087→              temperature: 0.3,
+  1088→              max_tokens: 600,
+  1089→            });
+  1090→
+  1091→            eleccion = respuestaLlm.choices[0];
+  1092→            mensajeRespuesta = eleccion.message;
+  1093→          }
+  1094→
+  1095→          const textoFinal = mensajeRespuesta.content || 'Listo.';
+  1096→          const palabras = textoFinal.split(/(\s+)/);
+  1097→          const chunkSize = 3;
+  1098→          for (let i = 0; i < palabras.length; i += chunkSize) {
+  1099→            const chunk = palabras.slice(i, i + chunkSize).join('');
+  1100→            if (chunk) {
+  1101→              send({ type: 'token', content: chunk });
+  1102→              await new Promise((r) => setTimeout(r, 25));
+  1103→            }
+  1104→          }
+  1105→
+  1106→          await db.conversacion.create({
+  1107→            data: {
+  1108→              rol: 'asistente',
+  1109→              contenido: textoFinal,
+  1110→              toolsInvocadas: mensajeRespuesta.tool_calls
+  1111→                ? JSON.stringify(mensajeRespuesta.tool_calls.map((tc: any) => tc.function.name))
+  1112→                : null,
+  1113→            },
+  1114→          });
+  1115→
+  1116→          send({ type: 'done', full: textoFinal });
+  1117→        } catch (e: any) {
+  1118→          console.error('Error en asistente:', e);
+  1119→          send({ type: 'error', content: e.message || 'Error desconocido' });
+  1120→        } finally {
+  1121→          controller.close();
+  1122→        }
+  1123→      },
+  1124→    });
+  1125→
+  1126→    return new Response(stream, {
+  1127→      headers: {
+  1128→        'Content-Type': 'text/event-stream',
+  1129→        'Cache-Control': 'no-cache, no-transform',
+  1130→        Connection: 'keep-alive',
+  1131→      },
+  1132→    });
+  1133→  } catch (e: any) {
+  1134→    return new Response(JSON.stringify({ error: e.message }), {
+  1135→      status: 500,
+  1136→      headers: { 'Content-Type': 'application/json' },
+  1137→    });
+  1138→  }
+  1139→}
+  1140→

@@ -1,0 +1,595 @@
+     1→import { NextRequest, NextResponse } from 'next/server';
+     2→import { db } from '@/lib/db';
+     3→
+     4→/**
+     5→ * GET /api/finanzas/analisis?empresaId=xxx&anio=2026
+     6→ *
+     7→ * Análisis financiero experto basado en:
+     8→ *   - Estados de cuenta bancarios (movimientos)
+     9→ *   - Facturas emitidas y recibidas
+    10→ *   - Nómina
+    11→ *   - Proyectos y conciliación
+    12→ *
+    13→ * Genera un reporte de salud financiera con:
+    14→ *   - Liquidez (saldo en bancos)
+    15→ *   - Flujo de caja mensual (ingresos vs egresos)
+    16→ *   - Razones financieras (corriente, rápida, endeudamiento)
+    17→ *   - Calificación crediticia simulada
+    18→ *   - Alertas críticas (saldo negativo, pagos pendientes, etc.)
+    19→ *   - Sugerencias expertas de mejora
+    20→ */
+    21→export const runtime = 'nodejs';
+    22→export const dynamic = 'force-dynamic';
+    23→
+    24→const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    25→
+    26→export async function GET(req: NextRequest) {
+    27→  try {
+    28→    const { searchParams } = new URL(req.url);
+    29→    const hoy = new Date();
+    30→    const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
+    31→    const empresaId = searchParams.get('empresaId') || undefined;
+    32→    const prestamosTexto = searchParams.get('prestamos') || '';
+    33→
+    34→    if (!empresaId) {
+    35→      return NextResponse.json({ error: 'Falta empresaId' }, { status: 400 });
+    36→    }
+    37→
+    38→    const inicioAnio = new Date(anio, 0, 1);
+    39→    const finAnio = new Date(anio, 11, 31, 23, 59, 59);
+    40→
+    41→    // ===== Obtener todos los datos en paralelo =====
+    42→    const [cuentas, movimientos, facturas, nominas, proyectos] = await Promise.all([
+    43→      // Cuentas bancarias
+    44→      db.cuentaBancaria.findMany({
+    45→        where: { empresaId },
+    46→        include: { _count: { select: { movimientos: true } } },
+    47→      }),
+    48→
+    49→      // Movimientos bancarios del año
+    50→      db.movimientoBanco.findMany({
+    51→        where: {
+    52→          cuenta: { empresaId },
+    53→          fecha: { gte: inicioAnio, lte: finAnio },
+    54→        },
+    55→        include: { cuenta: { select: { banco: true, cuenta: true } } },
+    56→        orderBy: { fecha: 'asc' },
+    57→      }),
+    58→
+    59→      // Facturas del año
+    60→      db.factura.findMany({
+    61→        where: {
+    62→          empresaId,
+    63→          fecha: { gte: inicioAnio, lte: finAnio },
+    64→          estado: { not: 'cancelada' },
+    65→          tipoComprobante: { in: ['I', 'E'] },
+    66→        },
+    67→      }),
+    68→
+    69→      // Nómina del año
+    70→      db.reciboNomina.findMany({
+    71→        where: { empresaId, fecha: { gte: inicioAnio, lte: finAnio } },
+    72→      }),
+    73→
+    74→      // Proyectos
+    75→      db.proyecto.findMany({
+    76→        where: { empresaId },
+    77→        include: { _count: { select: { facturas: true } } },
+    78→      }),
+    79→    ]);
+    80→
+    81→    const empresa = await db.empresa.findUnique({ where: { id: empresaId } });
+    82→
+    83→    // ===== CÁLCULOS FINANCIEROS =====
+    84→
+    85→    // 1. LIQUIDEZ — saldo total en bancos (saldo inicial + movimientos)
+    86→    const saldoTotalBancos = cuentas.reduce((s, c) => s + c.saldo, 0);
+    87→    const saldoCalculadoAnio = movimientos.reduce((s, m) => s + m.monto, 0);
+    88→    const saldoActualEstimado = saldoTotalBancos + saldoCalculadoAnio;
+    89→
+    90→    // 2. FLUJO DE CAJA MENSUAL
+    91→    const flujoMensual: Array<{
+    92→      mes: number;
+    93→      mesNombre: string;
+    94→      ingresos: number;
+    95→      egresos: number;
+    96→      flujoNeto: number;
+    97→      saldoAcumulado: number;
+    98→    }> = [];
+    99→    let saldoAcumulado = 0;
+   100→
+   101→    for (let m = 0; m < 12; m++) {
+   102→      const movsMes = movimientos.filter(mov => new Date(mov.fecha).getMonth() === m);
+   103→      const ingresos = movsMes.filter(m => m.monto > 0).reduce((s, m) => s + m.monto, 0);
+   104→      const egresos = movsMes.filter(m => m.monto < 0).reduce((s, m) => s + Math.abs(m.monto), 0);
+   105→      const flujoNeto = ingresos - egresos;
+   106→      saldoAcumulado += flujoNeto;
+   107→      flujoMensual.push({
+   108→        mes: m + 1,
+   109→        mesNombre: MESES[m],
+   110→        ingresos,
+   111→        egresos,
+   112→        flujoNeto,
+   113→        saldoAcumulado,
+   114→      });
+   115→    }
+   116→
+   117→    // 3. FACTURACIÓN
+   118→    const facturasEmitidas = facturas.filter(f => f.direccion === 'emitida' && f.tipoComprobante === 'I');
+   119→    const facturasRecibidas = facturas.filter(f => f.direccion === 'recibida' && f.tipoComprobante === 'I');
+   120→    const notasCreditoE = facturas.filter(f => f.direccion === 'emitida' && f.tipoComprobante === 'E');
+   121→    const notasCreditoR = facturas.filter(f => f.direccion === 'recibida' && f.tipoComprobante === 'E');
+   122→
+   123→    const totalEmitidoAnio = facturasEmitidas.reduce((s, f) => s + f.total, 0);
+   124→    const totalRecibidoAnio = facturasRecibidas.reduce((s, f) => s + f.total, 0);
+   125→    const totalNotasCreditoE = notasCreditoE.reduce((s, f) => s + f.total, 0);
+   126→    const totalNotasCreditoR = notasCreditoR.reduce((s, f) => s + f.total, 0);
+   127→
+   128→    const ivaTrasladado = facturasEmitidas.reduce((s, f) => s + f.totalImpuestos, 0);
+   129→    const ivaAcreditable = facturasRecibidas.reduce((s, f) => s + f.totalImpuestos, 0);
+   130→    const ivaPorPagar = ivaTrasladado - ivaAcreditable;
+   131→
+   132→    // 4. NÓMINA
+   133→    const totalNominaAnio = nominas.reduce((s, n) => s + n.totalPercepciones, 0);
+   134→    const totalNominaNeto = nominas.reduce((s, n) => s + n.neto, 0);
+   135→    const totalNominaISR = nominas.reduce((s, n) => s + n.isr, 0);
+   136→    const totalNominaIMSS = nominas.reduce((s, n) => s + n.imss, 0);
+   137→
+   138→    // 5. RAZONES FINANCIERAS (estimadas con base en datos disponibles)
+   139→    const utilidadBrutaAnual = totalEmitidoAnio - totalRecibidoAnio - totalNotasCreditoE + totalNotasCreditoR;
+   140→    const utilidadOperativa = utilidadBrutaAnual - totalNominaAnio;
+   141→    const margenUtilidad = totalEmitidoAnio > 0 ? (utilidadOperativa / totalEmitidoAnio) * 100 : 0;
+   142→
+   143→    // Razón corriente = activos circulantes / pasivos circulantes (aproximado)
+   144→    const activosCirculantes = saldoActualEstimado + (totalEmitidoAnio * 0.3); // 30% pendiente de cobro
+   145→    const pasivosCirculantes = ivaPorPagar + (totalRecibidoAnio * 0.4); // 40% pendiente de pago
+   146→    const razonCorriente = pasivosCirculantes > 0 ? activosCirculantes / pasivosCirculantes : 0;
+   147→    const razonRapida = pasivosCirculantes > 0 ? saldoActualEstimado / pasivosCirculantes : 0;
+   148→    const razonEndeudamiento = activosCirculantes > 0 ? pasivosCirculantes / activosCirculantes : 0;
+   149→
+   150→    // 6. CALIFICACIÓN FINANCIERA (0-100)
+   151→    let score = 50; // Base
+   152→    if (saldoActualEstimado > 0) score += 10;
+   153→    if (saldoActualEstimado > totalNominaAnio / 12 * 3) score += 10; // 3 meses de nómina
+   154→    if (razonCorriente > 1.5) score += 10;
+   155→    if (razonCorriente > 2.5) score += 5;
+   156→    if (margenUtilidad > 15) score += 10;
+   157→    if (margenUtilidad > 25) score += 5;
+   158→    if (flujoMensual.filter(f => f.flujoNeto < 0).length < 3) score += 10; // Menos de 3 meses negativos
+   159→    if (ivaPorPagar > 0 && saldoActualEstimado > ivaPorPagar) score += 5;
+   160→    if (saldoActualEstimado < 0) score -= 30;
+   161→    if (razonCorriente < 1) score -= 20;
+   162→    if (margenUtilidad < 5) score -= 10;
+   163→    score = Math.max(0, Math.min(100, score));
+   164→
+   165→    let calificacion = 'D — Crítico';
+   166→    if (score >= 90) calificacion = 'A+ — Excelente';
+   167→    else if (score >= 80) calificacion = 'A — Muy Bueno';
+   168→    else if (score >= 70) calificacion = 'B — Bueno';
+   169→    else if (score >= 60) calificacion = 'C — Aceptable';
+   170→    else if (score >= 50) calificacion = 'D — Deficiente';
+   171→
+   172→    // 7. ALERTAS CRÍTICAS
+   173→    const alertas: Array<{ nivel: 'critico' | 'warning' | 'info'; titulo: string; descripcion: string; recomendacion: string }> = [];
+   174→
+   175→    if (saldoActualEstimado < 0) {
+   176→      alertas.push({
+   177→        nivel: 'critico',
+   178→        titulo: '🚨 Saldo bancario negativo',
+   179→        descripcion: `El saldo estimado en bancos es ${formatMoney(saldoActualEstimado)}. La empresa no tiene liquidez.`,
+   180→        recomendacion: 'URGENTE: Negociar crédito puente con banco, cobrar facturas pendientes, reestructurar pagos.',
+   181→      });
+   182→    }
+   183→
+   184→    const mesesNegativos = flujoMensual.filter(f => f.flujoNeto < 0);
+   185→    if (mesesNegativos.length > 0) {
+   186→      alertas.push({
+   187→        nivel: mesesNegativos.length > 3 ? 'critico' : 'warning',
+   188→        titulo: `⚠️ ${mesesNegativos.length} mes(es) con flujo negativo`,
+   189→        descripcion: `Meses en rojo: ${mesesNegativos.map(m => m.mesNombre).join(', ')}. Total déficit: ${formatMoney(Math.abs(mesesNegativos.reduce((s, m) => s + m.flujoNeto, 0)))}.`,
+   190→        recomendacion: 'Identificar gastos no esenciales en esos meses y posponer inversiones. Considerar línea de crédito revolvente.',
+   191→      });
+   192→    }
+   193→
+   194→    if (razonCorriente < 1) {
+   195→      alertas.push({
+   196→        nivel: 'critico',
+   197→        titulo: '🚨 Razón corriente menor a 1',
+   198→        descripcion: `Razón corriente: ${razonCorriente.toFixed(2)}. Los pasivos circulantes superan a los activos circulantes.`,
+   199→        recomendacion: 'Renegociar plazos con proveedores, acelerar cobranza, evitar nuevas deudas a corto plazo.',
+   200→      });
+   201→    } else if (razonCorriente < 1.5) {
+   202→      alertas.push({
+   203→        nivel: 'warning',
+   204→        titulo: '⚠️ Razón corriente baja',
+   205→        descripcion: `Razón corriente: ${razonCorriente.toFixed(2)}. Se recomienda mantenerla arriba de 1.5.`,
+   206→        recomendacion: 'Mejorar política de cobranza y reducir inventarios ociosos.',
+   207→      });
+   208→    }
+   209→
+   210→    if (ivaPorPagar > saldoActualEstimado) {
+   211→      alertas.push({
+   212→        nivel: 'warning',
+   213→        titulo: '⚠️ IVA por pagar mayor al saldo bancario',
+   214→        descripcion: `IVA por pagar: ${formatMoney(ivaPorPagar)}, Saldo: ${formatMoney(saldoActualEstimado)}. No tienes suficiente para el pago mensual.`,
+   215→        recomendacion: 'Reservar el IVA cobrado en cuenta separada. NO usar el IVA para gastos operativos.',
+   216→      });
+   217→    }
+   218→
+   219→    if (margenUtilidad < 10) {
+   220→      alertas.push({
+   221→        nivel: 'warning',
+   222→        titulo: '⚠️ Margen de utilidad bajo',
+   223→        descripcion: `Margen operativa: ${margenUtilidad.toFixed(1)}%. Se recomienda arriba del 15%.`,
+   224→        recomendacion: 'Revisar estructura de costos. Subir precios o reducir gastos operativos.',
+   225→      });
+   226→    }
+   227→
+   228→    const totalNominaMes = totalNominaAnio / 12;
+   229→    if (saldoActualEstimado < totalNominaMes * 2) {
+   230→      alertas.push({
+   231→        nivel: 'critico',
+   232→        titulo: '🚨 Reserva para nómina insuficiente',
+   233→        descripcion: `Saldo en bancos: ${formatMoney(saldoActualEstimado)}, Nómina mensual: ${formatMoney(totalNominaMes)}. Tienes menos de 2 meses de nómina.`,
+   234→        recomendacion: 'Mantener siempre reserva de 3 meses de nómina. Considerar fondo de emergencia.',
+   235→      });
+   236→    }
+   237→
+   238→    if (alertas.length === 0) {
+   239→      alertas.push({
+   240→        nivel: 'info',
+   241→        titulo: '✅ Salud financiera estable',
+   242→        descripcion: 'No se detectaron alertas críticas. La empresa presenta indicadores saludables.',
+   243→        recomendacion: 'Continuar con políticas actuales. Invertir excedentes en instrumentos de liquidez.',
+   244→      });
+   245→    }
+   246→
+   247→    // 8. SUGERENCIAS EXPERTAS
+   248→    const sugerencias: Array<{ tipo: 'corto' | 'mediano' | 'largo'; titulo: string; descripcion: string; impactoEstimado: string }> = [];
+   249→
+   250→    if (saldoActualEstimado > totalNominaMes * 6) {
+   251→      sugerencias.push({
+   252→        tipo: 'corto',
+   253→        titulo: '💰 Invertir excedentes',
+   254→        descripcion: `Tu saldo (${formatMoney(saldoActualEstimado)}) supera 6 meses de nómina. Considera invertir el excedente.`,
+   255→        impactoEstimado: 'Generar 5-8% rendimiento anual adicional',
+   256→      });
+   257→    }
+   258→
+   259→    sugerencias.push({
+   260→      tipo: 'corto',
+   261→      titulo: '📊 Separar cuentas por impuestos',
+   262→      descripcion: 'Crea cuentas separadas para IVA, ISR y Nómina. Esto evita usar dinero de impuestos para operación.',
+   263→      impactoEstimado: 'Evitar problemas de liquidez para declaraciones mensuales',
+   264→    });
+   265→
+   266→    if (totalEmitidoAnio > 0) {
+   267→      const porcentajeCobranza = (saldoCalculadoAnio > 0 ? (saldoCalculadoAnio / totalEmitidoAnio) * 100 : 0);
+   268→      if (porcentajeCobranza < 80) {
+   269→        sugerencias.push({
+   270→          tipo: 'mediano',
+   271→          titulo: '📞 Mejorar política de cobranza',
+   272→          descripcion: `Solo el ${porcentajeCobranza.toFixed(0)}% de lo facturado se ha reflejado en bancos. Implementa política de cobro a 30 días.`,
+   273→          impactoEstimado: 'Mejorar flujo de caja en 20-30%',
+   274→        });
+   275→      }
+   276→    }
+   277→
+   278→    if (totalRecibidoAnio > totalEmitidoAnio * 0.6) {
+   279→      sugerencias.push({
+   280→        tipo: 'mediano',
+   281→        titulo: '✂️ Optimizar gastos',
+   282→        descripcion: `Tus gastos (${formatMoney(totalRecibidoAnio)}) representan más del 60% de tus ingresos. Renegocia con proveedores principales.`,
+   283→        impactoEstimado: 'Reducir costos 5-10%',
+   284→      });
+   285→    }
+   286→
+   287→    if (proyectos.length > 0) {
+   288→      sugerencias.push({
+   289→        tipo: 'mediano',
+   290→        titulo: '📁 Análisis por proyecto',
+   291→        descripcion: `Tienes ${proyectos.length} proyecto(s) registrado(s). Identifica cuál es el más rentable y replícalo.`,
+   292→        impactoEstimado: 'Aumentar margen 15-25% en proyectos similares',
+   293→      });
+   294→    }
+   295→
+   296→    if (margenUtilidad > 20 && razonCorriente > 2) {
+   297→      sugerencias.push({
+   298→        tipo: 'largo',
+   299→        titulo: '🚀 Crecimiento acelerado',
+   300→        descripcion: 'Tu salud financiera permite tomar riesgos. Considera invertir en expansión o nuevos mercados.',
+   301→        impactoEstimado: 'Crecimiento 30-50% en 12 meses',
+   302→      });
+   303→    }
+   304→
+   305→    sugerencias.push({
+   306→      tipo: 'largo',
+   307→      titulo: '🏛️ Estrategia fiscal',
+   308→      descripcion: 'Revisar con contador: deducciones autorizadas, depreciaciones, PTU, reparto de utilidades, régimen óptimo.',
+   309→      impactoEstimado: 'Optimizar carga fiscal 8-15%',
+   310→    });
+   311→
+   312→    // 8.5. ANÁLISIS DE PRÉSTAMOS (si el usuario proporcionó texto)
+   313→    let analisisPrestamos: any = null;
+   314→    if (prestamosTexto && prestamosTexto.trim().length > 10) {
+   315→      // Extraer montos del texto (busca números con $ o sin símbolo)
+   316→      const montosEncontrados = prestamosTexto.match(/\$?\s?[\d,]+\.?\d*/g) || [];
+   317→      const montos = montosEncontrados
+   318→        .map(m => parseFloat(m.replace(/[$,\s]/g, '')))
+   319→        .filter(m => m > 1000); // Filtrar montos pequeños
+   320→
+   321→      const totalDeuda = montos.reduce((s, m) => s + m, 0);
+   322→
+   323→      // Detectar palabras clave de tipo de préstamo
+   324→      const lowerTexto = prestamosTexto.toLowerCase();
+   325→      const tieneFinanciera = lowerTexto.includes('financiera') || lowerTexto.includes('sofom') || lowerTexto.includes('coppel') || lowerTexto.includes('liverpural');
+   326→      const tieneBancario = lowerTexto.includes('banco') || lowerTexto.includes('banorte') || lowerTexto.includes('bbva') || lowerTexto.includes('santander');
+   327→      const tieneNomina = lowerTexto.includes('nómina') || lowerTexto.includes('nomina');
+   328→      const tieneHipoteca = lowerTexto.includes('hipoteca') || lowerTexto.includes('casa') || lowerTexto.includes('departamento');
+   329→      const tieneAuto = lowerTexto.includes('auto') || lowerTexto.includes('coche') || lowerTexto.includes('vehículo');
+   330→      const tieneTC = lowerTexto.includes('tarjeta') || lowerTexto.includes('crédito') || lowerTexto.includes('credito');
+   331→
+   332→      // Calcular impacto en razones financieras
+   333→      const pasivosAdicionales = totalDeuda;
+   334→      const nuevosPasivosCirculantes = pasivosCirculantes + pasivosAdicionales;
+   335→      const nuevaRazonCorriente = activosCirculantes > 0 ? activosCirculantes / nuevosPasivosCirculantes : 0;
+   336→      const nuevoEndeudamiento = activosCirculantes > 0 ? nuevosPasivosCirculantes / activosCirculantes : 0;
+   337→
+   338→      // Recalcular score con deuda
+   339→      let scoreConDeuda = score;
+   340→      if (totalDeuda > 0) {
+   341→        const ratioDeuda = totalDeuda / (totalEmitidoAnio || 1);
+   342→        if (ratioDeuda > 0.5) scoreConDeuda -= 15;
+   343→        else if (ratioDeuda > 0.3) scoreConDeuda -= 10;
+   344→        else if (ratioDeuda > 0.15) scoreConDeuda -= 5;
+   345→
+   346→        if (nuevaRazonCorriente < 1) scoreConDeuda -= 10;
+   347→      }
+   348→      scoreConDeuda = Math.max(0, Math.min(100, scoreConDeuda));
+   349→
+   350→      // Alertas de préstamos
+   351→      if (totalDeuda > 0) {
+   352→        alertas.push({
+   353→          nivel: totalDeuda > totalEmitidoAnio * 0.4 ? 'critico' : 'warning',
+   354→          titulo: `💰 Deuda total: ${formatMoney(totalDeuda)}`,
+   355→          descripcion: `Total de préstamos detectados: ${formatMoney(totalDeuda)}. Representa el ${((totalDeuda / (totalEmitidoAnio || 1)) * 100).toFixed(1)}% de tus ingresos anuales. Tipos detectados: ${[tieneFinanciera && 'Financiera', tieneBancario && 'Bancario', tieneNomina && 'Nómina', tieneHipoteca && 'Hipoteca', tieneAuto && 'Automotriz', tieneTC && 'Tarjeta de crédito'].filter(Boolean).join(', ') || 'No especificado'}.`,
+   356→          recomendacion: totalDeuda > totalEmitidoAnio * 0.4
+   357→            ? 'URGENTE: Tu deuda supera el 40% de ingresos. Considera consolidar deudas y negociar tasas. Estrategia "avalancha": paga primero la deuda con tasa más alta.'
+   358→            : 'Mantener pagos al corriente. Si hay excedentes, anticipar pagos a capital para reducir intereses.',
+   359→        });
+   360→
+   361→        if (nuevaRazonCorriente < 1 && razonCorriente >= 1) {
+   362→          alertas.push({
+   363→            nivel: 'critico',
+   364→            titulo: '🚨 Con préstamos, razón corriente baja de 1',
+   365→            descripcion: `Al incluir deudas (${formatMoney(totalDeuda)}), tu razón corriente baja de ${razonCorriente.toFixed(2)} a ${nuevaRazonCorriente.toFixed(2)}. Los pasivos superan a los activos circulantes.`,
+   366→            recomendacion: 'Priorizar pago de deudas a corto plazo. Evitar nuevas deudas hasta recuperar razón > 1.5.',
+   367→          });
+   368→        }
+   369→      }
+   370→
+   371→      // Sugerencias específicas de deudas
+   372→      if (totalDeuda > 0) {
+   373→        sugerencias.push({
+   374→          tipo: 'corto',
+   375→          titulo: '🎯 Estrategia avalancha de deudas',
+   376→          descripcion: `Con ${formatMoney(totalDeuda)} en deudas, ordena tus préstamos por tasa de interés (más alta primero). Paga el mínimo en todos y destina todo el excedente al de mayor tasa. Una vez liquidado, ese monto se suma al siguiente.`,
+   377→          impactoEstimado: `Ahorro estimado: 20-40% en intereses totales`,
+   378→        });
+   379→
+   380→        if (tieneTC) {
+   381→          sugerencias.push({
+   382→            tipo: 'corto',
+   383→            titulo: '💳 Consolidar tarjetas de crédito',
+   384→            descripcion: 'Las tarjetas de crédito suelen tener tasas de 40-70%. Considera un crédito de nómina o liquidez (15-25%) para pagarlas y reducir intereses.',
+   385→            impactoEstimado: 'Reducir carga financiera 30-50%',
+   386→          });
+   387→        }
+   388→
+   389→        if (tieneHipoteca) {
+   390→          sugerencias.push({
+   391→            tipo: 'largo',
+   392→            titulo: '🏠 Revisar hipoteca',
+   393→            descripcion: 'Si tienes hipoteca, evalúa refinanciar si las tasas han bajado. Los pagos hipotecarios no deben exceder 30% de tus ingresos.',
+   394→            impactoEstimado: 'Reducir pago mensual 10-20%',
+   395→          });
+   396→        }
+   397→      }
+   398→
+   399→      // Calcular pago mensual estimado de deudas (asumiendo 10% tasa promedio a 36 meses)
+   400→      const pagoMensualEstimado = totalDeuda > 0 ? (totalDeuda * 0.032) : 0; // ~3.2% mensual
+   401→
+   402→      analisisPrestamos = {
+   403→        textoOriginal: prestamosTexto,
+   404→        totalDeuda,
+   405→        montosDetectados: montos,
+   406→        pagoMensualEstimado,
+   407→        tiposDetectados: {
+   408→          financiera: tieneFinanciera,
+   409→          bancario: tieneBancario,
+   410→          nomina: tieneNomina,
+   411→          hipoteca: tieneHipoteca,
+   412→          automotriz: tieneAuto,
+   413→          tarjetaCredito: tieneTC,
+   414→        },
+   415→        impactoEnRazones: {
+   416→          razonCorrienteOriginal: razonCorriente,
+   417→          razonCorrienteConDeuda: nuevaRazonCorriente,
+   418→          endeudamientoOriginal: razonEndeudamiento,
+   419→          endeudamientoConDeuda: nuevoEndeudamiento,
+   420→        },
+   421→        scoreOriginal: score,
+   422→        scoreConDeuda: scoreConDeuda,
+   423→        calificacionConDeuda: scoreConDeuda >= 90 ? 'A+' : scoreConDeuda >= 80 ? 'A' : scoreConDeuda >= 70 ? 'B' : scoreConDeuda >= 60 ? 'C' : 'D',
+   424→        redaccion: generarRedaccionPrestamos(totalDeuda, montos, tieneFinanciera, tieneBancario, tieneNomina, tieneHipoteca, tieneAuto, tieneTC, totalEmitidoAnio, saldoActualEstimado, pagoMensualEstimado),
+   425→      };
+   426→
+   427→      // Actualizar score con deuda
+   428→      score = scoreConDeuda;
+   429→      calificacion = score >= 90 ? 'A+ — Excelente' : score >= 80 ? 'A — Muy Bueno' : score >= 70 ? 'B — Bueno' : score >= 60 ? 'C — Aceptable' : 'D — Deficiente';
+   430→    }
+   431→
+   432→    // 9. RESUMEN EJECUTIVO
+   433→    const resumenEjecutivo = `
+   434→SALUD FINANCIERA: ${calificacion} (Score: ${score}/100)
+   435→
+   436→LIQUIDEZ:
+   437→- Saldo en bancos: ${formatMoney(saldoActualEstimado)}
+   438→- Equivale a ${(saldoActualEstimado / totalNominaMes).toFixed(1)} meses de nómina
+   439→
+   440→FACTURACIÓN ${anio}:
+   441→- Emitido: ${formatMoney(totalEmitidoAnio)}
+   442→- Recibido: ${formatMoney(totalRecibidoAnio)}
+   443→- Utilidad bruta: ${formatMoney(utilidadBrutaAnual)}
+   444→- Utilidad operativa (después de nómina): ${formatMoney(utilidadOperativa)}
+   445→- Margen: ${margenUtilidad.toFixed(1)}%
+   446→
+   447→OBLIGACIONES FISCALES:
+   448→- IVA por pagar: ${formatMoney(ivaPorPagar)}
+   449→- Nómina total: ${formatMoney(totalNominaAnio)} (Neto: ${formatMoney(totalNominaNeto)})
+   450→
+   451→ALERTAS: ${alertas.filter(a => a.nivel === 'critico').length} críticas, ${alertas.filter(a => a.nivel === 'warning').length} advertencias
+   452→
+   453→${alertas.length > 1 ? 'Requiere atención inmediata.' : 'Estado saludable.'}
+   454→    `.trim();
+   455→
+   456→    return NextResponse.json({
+   457→      empresa: {
+   458→        nombre: empresa?.nombre,
+   459→        rfc: empresa?.rfc,
+   460→      },
+   461→      anio,
+   462→      fechaAnalisis: new Date().toISOString(),
+   463→      calificacion,
+   464→      score,
+   465→      resumenEjecutivo,
+   466→
+   467→      // Indicadores principales
+   468→      indicadores: {
+   469→        saldoBancos: saldoActualEstimado,
+   470→        saldoCuentasInicial: saldoTotalBancos,
+   471→        mesesReservaNomina: totalNominaMes > 0 ? saldoActualEstimado / totalNominaMes : 0,
+   472→
+   473→        totalEmitido: totalEmitidoAnio,
+   474→        totalRecibido: totalRecibidoAnio,
+   475→        utilidadBruta: utilidadBrutaAnual,
+   476→        utilidadOperativa,
+   477→        margenUtilidad,
+   478→
+   479→        ivaPorPagar,
+   480→        totalNomina: totalNominaAnio,
+   481→        totalNominaNeto,
+   482→
+   483→        razonCorriente,
+   484→        razonRapida,
+   485→        razonEndeudamiento,
+   486→      },
+   487→
+   488→      // Flujo de caja mensual
+   489→      flujoMensual,
+   490→
+   491→      // Alertas
+   492→      alertas,
+   493→
+   494→      // Sugerencias
+   495→      sugerencias,
+   496→
+   497→      // Datos para gráficas
+   498→      cuentasBancarias: cuentas.map(c => ({
+   499→        banco: c.banco,
+   500→        cuenta: c.cuenta,
+   501→        saldo: c.saldo,
+   502→        movimientos: c._count?.movimientos || 0,
+   503→      })),
+   504→
+   505→      proyectos: proyectos.map(p => ({
+   506→        nombre: p.nombre,
+   507→        estado: p.estado,
+   508→        facturas: p._count?.facturas || 0,
+   509→      })),
+   510→
+   511→      // Análisis de préstamos (si se proporcionó)
+   512→      analisisPrestamos,
+   513→    });
+   514→  } catch (e: any) {
+   515→    console.error('Error en /api/finanzas/analisis:', e);
+   516→    return NextResponse.json({ error: e.message }, { status: 500 });
+   517→  }
+   518→}
+   519→
+   520→function formatMoney(n: number): string {
+   521→  return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n || 0);
+   522→}
+   523→
+   524→function generarRedaccionPrestamos(
+   525→  totalDeuda: number,
+   526→  montos: number[],
+   527→  tieneFinanciera: boolean,
+   528→  tieneBancario: boolean,
+   529→  tieneNomina: boolean,
+   530→  tieneHipoteca: boolean,
+   531→  tieneAuto: boolean,
+   532→  tieneTC: boolean,
+   533→  ingresosAnuales: number,
+   534→  saldoBancos: number,
+   535→  pagoMensualEstimado: number
+   536→): string {
+   537→  if (totalDeuda === 0) return 'No se detectaron montos de préstamos en el texto proporcionado.';
+   538→
+   539→  const tipos: string[] = [];
+   540→  if (tieneFinanciera) tipos.push('préstamo de financiera/SOFOM');
+   541→  if (tieneBancario) tipos.push('crédito bancario');
+   542→  if (tieneNomina) tipos.push('crédito de nómina');
+   543→  if (tieneHipoteca) tipos.push('hipoteca');
+   544→  if (tieneAuto) tipos.push('crédito automotriz');
+   545→  if (tieneTC) tipos.push('tarjeta(s) de crédito');
+   546→
+   547→  const numDeudas = montos.length;
+   548→  const ratioDeudaIngresos = ingresosAnuales > 0 ? (totalDeuda / ingresosAnuales) * 100 : 0;
+   549→  const mesesParaLiquidar = pagoMensualEstimado > 0 ? totalDeuda / pagoMensualEstimado : 0;
+   550→
+   551→  let redaccion = `📊 ANÁLISIS DE DEUDAS Y PRÉSTAMOS\n\n`;
+   552→  redaccion += `El usuario reporta ${numDeudas} deuda(s) por un total de ${formatMoney(totalDeuda)}.\n`;
+   553→  redaccion += `Tipos detectados: ${tipos.join(', ') || 'no especificado'}.\n\n`;
+   554→
+   555→  redaccion += `IMPACTO FINANCIERO:\n`;
+   556→  redaccion += `- La deuda representa el ${ratioDeudaIngresos.toFixed(1)}% de los ingresos anuales (${formatMoney(ingresosAnuales)}).\n`;
+   557→  redaccion += `- Pago mensual estimado: ${formatMoney(pagoMensualEstimado)} (tasa promedio 10% a 36 meses).\n`;
+   558→  redaccion += `- Tiempo estimado para liquidar: ${mesesParaLiquidar.toFixed(0)} meses.\n`;
+   559→  redaccion += `- Saldo actual en bancos: ${formatMoney(saldoBancos)}.\n\n`;
+   560→
+   561→  if (ratioDeudaIngresos > 50) {
+   562→    redaccion += `⚠️ EVALUACIÓN: NIVEL DE ENDEUDAMIENTO CRÍTICO\n`;
+   563→    redaccion += `Las deudas superan el 50% de los ingresos anuales. Se recomienda acción inmediata: consolidar deudas con tasa más alta, negociar quita o reestructura con bancos/financieras, y evitar nuevo endeudamiento. Priorizar la estrategia "avalancha": liquidar primero la deuda con tasa de interés más elevada.\n\n`;
+   564→  } else if (ratioDeudaIngresos > 30) {
+   565→    redaccion += `⚠️ EVALUACIÓN: NIVEL DE ENDEUDAMIENTO ELEVADO\n`;
+   566→    redaccion += `Las deudas representan entre 30% y 50% de los ingresos. Se recomienda acelerar pagos a capital, reducir gastos no esenciales, y destinar al menos 20% del flujo libre al pago anticipado de deudas. Evitar nuevas compras a crédito.\n\n`;
+   567→  } else if (ratioDeudaIngresos > 15) {
+   568→    redaccion += `✅ EVALUACIÓN: NIVEL DE ENDEUDAMIENTO MANEJABLE\n`;
+   569→    redaccion += `Las deudas representan entre 15% y 30% de los ingresos. Mantener pagos al corriente y considerar anticipar pagos a capital cuando haya excedentes para reducir intereses.\n\n`;
+   570→  } else {
+   571→    redaccion += `✅ EVALUACIÓN: NIVEL DE ENDEUDAMIENTO BAJO\n`;
+   572→    redaccion += `Las deudas representan menos del 15% de los ingresos. La carga financiera es manejable. Se puede considerar inversión de excedentes en lugar de anticipar pagos si las tasas de los préstamos son menores al rendimiento esperado de inversiones.\n\n`;
+   573→  }
+   574→
+   575→  if (tieneTC) {
+   576→    redaccion += `💳 RECOMENDACIÓN ESPECÍFICA — TARJETAS DE CRÉDITO:\n`;
+   577→    redaccion += `Las tarjetas de crédito en México tienen tasas promedio de 40-70% anual. Si tienes saldo en tarjetas, prioritiza liquidarlas. Considera un crédito de nómina (15-25%) para consolidar y reducir intereses drásticamente.\n\n`;
+   578→  }
+   579→
+   580→  if (tieneFinanciera) {
+   581→    redaccion += `🏦 RECOMENDACIÓN ESPECÍFICA — FINANCIERA/SOFOM:\n`;
+   582→    redaccion += `Las SOFOM suelen tener tasas de 30-60%. Verifica si puedes refinanciar con un banco tradicional a menor tasa. Si tienes pagos puntuales, negocia tasa preferencial.\n\n`;
+   583→  }
+   584→
+   585→  redaccion += `📋 ESTRATEGIA RECOMENDADA:\n`;
+   586→  redaccion += `1. Listar todas las deudas con: saldo, tasa, pago mensual, plazo restante.\n`;
+   587→  redaccion += `2. Ordenar de mayor a menor tasa de interés.\n`;
+   588→  redaccion += `3. Pagar el mínimo en todas menos la de mayor tasa.\n`;
+   589→  redaccion += `4. Destinar TODO el excedente disponible a la de mayor tasa.\n`;
+   590→  redaccion += `5. Al liquidarla, sumar ese pago a la siguiente deuda.\n`;
+   591→  redaccion += `6. Repetir hasta quedar sin deudas (excepto hipoteca si la tasa es < 10%).\n`;
+   592→
+   593→  return redaccion;
+   594→}
+   595→

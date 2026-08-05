@@ -1,0 +1,1356 @@
+     1→import { NextRequest, NextResponse } from 'next/server';
+     2→import { db } from '@/lib/db';
+     3→
+     4→/**
+     5→ * POST /api/upload-estado-cuenta
+     6→ * Carga un estado de cuenta (Excel, CSV o PDF) y procesa los movimientos.
+     7→ *
+     8→ * Body (multipart/form-data):
+     9→ *   - file: archivo .xlsx, .csv o .pdf
+    10→ *   - cuentaId: ID de la cuenta bancaria
+    11→ *   - mes: mes del estado (1-12)
+    12→ *   - anio: año del estado
+    13→ *
+    14→ * Formatos soportados:
+    15→ *   - Excel (.xlsx, .xls): usa exceljs para leer hojas
+    16→ *   - CSV (.csv): parsea con separador automático (, ; \t)
+    17→ *   - PDF (.pdf): guarda el archivo pero NO extrae movimientos automáticamente
+    18→ *                  (requiere OCR/parseo manual)
+    19→ *
+    20→ * Si ya existen movimientos con misma fecha + concepto + monto, los salta (dedupe).
+    21→ */
+    22→
+    23→export const runtime = 'nodejs';
+    24→export const dynamic = 'force-dynamic';
+    25→
+    26→import { writeFile, mkdir, readdir } from 'fs/promises';
+    27→import { existsSync } from 'fs';
+    28→import path from 'path';
+    29→
+    30→interface MovimientoImportado {
+    31→  fecha: Date;
+    32→  concepto: string;
+    33→  monto: number;
+    34→}
+    35→
+    36→// ===== Parser de CSV =====
+    37→function parseCSV(texto: string): MovimientoImportado[] {
+    38→  const lineas = texto.split(/\r?\n/).filter(l => l.trim());
+    39→  if (lineas.length === 0) return [];
+    40→
+    41→  // Detectar separador
+    42→  const separador = lineas[0].includes(';') ? ';' : lineas[0].includes('\t') ? '\t' : ',';
+    43→
+    44→  // Saltar header si existe
+    45→  let empezarDesde = 0;
+    46→  if (lineas[0].toLowerCase().includes('fecha') || lineas[0].toLowerCase().includes('date')) {
+    47→    empezarDesde = 1;
+    48→  }
+    49→
+    50→  const movimientos: MovimientoImportado[] = [];
+    51→
+    52→  for (let i = empezarDesde; i < lineas.length; i++) {
+    53→    const partes = lineas[i].split(separador).map(p => p.trim().replace(/"/g, ''));
+    54→    if (partes.length < 3) continue;
+    55→
+    56→    try {
+    57→      // Parsear fecha (DD/MM/YYYY o YYYY-MM-DD o DD-MM-YYYY)
+    58→      let fecha: Date;
+    59→      const fechaStr = partes[0];
+    60→      if (fechaStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+    61→        fecha = new Date(fechaStr);
+    62→      } else if (fechaStr.match(/^\d{1,2}\/\d{1,2}\/\d{4}/)) {
+    63→        const [dia, mes, anio] = fechaStr.split('/');
+    64→        fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
+    65→      } else if (fechaStr.match(/^\d{1,2}-\d{1,2}-\d{4}/)) {
+    66→        const [dia, mes, anio] = fechaStr.split('-');
+    67→        fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
+    68→      } else {
+    69→        continue;
+    70→      }
+    71→
+    72→      // Buscar monto (puede estar en columna 2, 3, 4, etc.)
+    73→      let monto = 0;
+    74→      let concepto = partes[1] || 'Movimiento';
+    75→      for (let j = 2; j < partes.length; j++) {
+    76→        const valor = partes[j].replace(/[$,\s]/g, '').replace(',', '.');
+    77→        // Intentar parsear como número
+    78→        const cleaned = valor.replace(/[^0-9.-]/g, '');
+    79→        const parsed = parseFloat(cleaned);
+    80→        if (!isNaN(parsed) && parsed !== 0) {
+    81→          monto = parsed;
+    82→          if (partes[j + 1]) concepto = `${concepto} ${partes[j + 1]}`.trim();
+    83→          break;
+    84→        }
+    85→      }
+    86→
+    87→      if (monto === 0) continue;
+    88→
+    89→      movimientos.push({ fecha, concepto, monto });
+    90→    } catch {
+    91→      continue;
+    92→    }
+    93→  }
+    94→
+    95→  return movimientos;
+    96→}
+    97→
+    98→// ===== Parser de Excel (.xlsx) usando exceljs =====
+    99→// Soporta formatos:
+   100→//   - Genérico: Fecha | Concepto | Monto (con signo)
+   101→//   - Banorte: CUENTA | FECHA | REFERENCIA | DESCRIPCIÓN | DEPÓSITOS | RETIROS | SALDO
+   102→//   - BBVA: Fecha | Concepto | Depósitos | Retiros | Saldo
+   103→//   - Cualquier banco con columnas separadas de Cargo/Abono o Depósito/Retiro
+   104→async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
+   105→  const ExcelJS = (await import('exceljs')).default;
+   106→  const wb = new ExcelJS.Workbook();
+   107→  await wb.xlsx.load(buffer);
+   108→
+   109→  const movimientos: MovimientoImportado[] = [];
+   110→
+   111→  for (const ws of wb.worksheets) {
+   112→    // Buscar fila de headers (puede no ser la primera)
+   113→    let headerRow = 1;
+   114→    const headers: string[] = [];
+   115→    for (let r = 1; r <= Math.min(10, ws.rowCount); r++) {
+   116→      const fila = ws.getRow(r);
+   117→      const tempHeaders: string[] = [];
+   118→      fila.eachCell((cell, col) => {
+   119→        tempHeaders[col] = String(cell.value || '').toLowerCase().trim();
+   120→      });
+   121→      const joined = tempHeaders.join('|');
+   122→      // Detectar fila con headers de banco
+   123→      if (
+   124→        joined.includes('fecha') &&
+   125→        (joined.includes('descripci') || joined.includes('concepto') || joined.includes('descrip'))
+   126→      ) {
+   127→        for (let c = 1; c <= tempHeaders.length; c++) headers[c] = tempHeaders[c];
+   128→        headerRow = r;
+   129→        break;
+   130→      }
+   131→    }
+   132→
+   133→    // Si no encontró headers, intentar con la primera fila
+   134→    if (headers.length === 0) {
+   135→      const primeraFila = ws.getRow(1);
+   136→      primeraFila.eachCell((cell, col) => {
+   137→        headers[col] = String(cell.value || '').toLowerCase().trim();
+   138→      });
+   139→    }
+   140→
+   141→    // Mapear columnas
+   142→    let colFecha = 1, colConcepto = 2, colDeposito = 0, colRetiro = 0, colMonto = 0;
+   143→    let colDescripcionDetallada = 0;
+   144→    let colReferencia = 0;
+   145→
+   146→    for (let c = 1; c <= Math.max(headers.length, 20); c++) {
+   147→      const h = headers[c] || '';
+   148→      if (h.includes('fecha') && !h.includes('opera')) colFecha = c;
+   149→      else if (h.includes('fecha')) colFecha = c; // "FECHA DE OPERACIÓN" también cuenta
+   150→      if (h === 'descripción' || h === 'descripcion' || h.includes('descrip') || h.includes('concepto') || h.includes('detalle')) {
+   151→        if (!colConcepto || colConcepto === 2) colConcepto = c;
+   152→      }
+   153→      if (h.includes('descripción detallada') || h.includes('descripcion detallada')) colDescripcionDetallada = c;
+   154→      if (h.includes('referencia')) colReferencia = c;
+   155→      // Depósitos / Abonos / Créditos
+   156→      if (h.includes('depósito') || h.includes('deposito') || h.includes('abono') || h.includes('crédito') || h.includes('credito') || h.includes('ingreso')) {
+   157→        colDeposito = c;
+   158→      }
+   159→      // Retiros / Cargos / Débitos
+   160→      if (h.includes('retiro') || h.includes('cargo') || h.includes('débito') || h.includes('debito') || h.includes('egreso')) {
+   161→        colRetiro = c;
+   162→      }
+   163→      // Monto único (con signo)
+   164→      if (h.includes('monto') || h.includes('importe') || h.includes('amount') || h.includes('movimiento')) {
+   165→        colMonto = c;
+   166→      }
+   167→    }
+   168→
+   169→    const filaInicio = headerRow + 1;
+   170→
+   171→    for (let r = filaInicio; r <= ws.rowCount; r++) {
+   172→      const fila = ws.getRow(r);
+   173→      try {
+   174→        const cellFecha = fila.getCell(colFecha).value;
+   175→
+   176→        // Saltar filas vacías
+   177→        if (!cellFecha) continue;
+   178→
+   179→        // Parsear fecha
+   180→        let fecha: Date | null = null;
+   181→        if (cellFecha instanceof Date) {
+   182→          fecha = cellFecha;
+   183→        } else if (typeof cellFecha === 'number') {
+   184→          // Excel serial date
+   185→          fecha = new Date(Date.UTC(1899, 11, 30) + cellFecha * 24 * 60 * 60 * 1000);
+   186→        } else if (typeof cellFecha === 'string') {
+   187→          if (cellFecha.match(/^\d{4}-\d{2}-\d{2}/)) {
+   188→            fecha = new Date(cellFecha);
+   189→          } else if (cellFecha.match(/^\d{1,2}\/\d{1,2}\/\d{4}/)) {
+   190→            const [dia, mes, anio] = cellFecha.split('/');
+   191→            fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
+   192→          } else if (cellFecha.match(/^\d{1,2}-\d{1,2}-\d{4}/)) {
+   193→            const [dia, mes, anio] = cellFecha.split('-');
+   194→            fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
+   195→          }
+   196→        }
+   197→        if (!fecha || isNaN(fecha.getTime())) continue;
+   198→
+   199→        // Concepto (principal + descripción detallada si existe)
+   200→        const conceptoBase = String(fila.getCell(colConcepto).value || 'Movimiento').trim();
+   201→        let concepto = conceptoBase;
+   202→        if (colDescripcionDetallada) {
+   203→          const detalle = String(fila.getCell(colDescripcionDetallada).value || '').trim();
+   204→          if (detalle && detalle !== '-' && detalle !== conceptoBase) {
+   205→            concepto = `${conceptoBase} — ${detalle}`.slice(0, 500);
+   206→          }
+   207→        }
+   208→        if (colReferencia) {
+   209→          const ref = String(fila.getCell(colReferencia).value || '').trim();
+   210→          if (ref && ref !== '-') {
+   211→            concepto = `Ref: ${ref} · ${concepto}`.slice(0, 500);
+   212→          }
+   213→        }
+   214→
+   215→        // Calcular monto según el formato detectado
+   216→        let monto = 0;
+   217→
+   218→        // Caso 1: Banorte-style — columnas separadas Depósito/Retiro
+   219→        if (colDeposito || colRetiro) {
+   220→          let deposito = 0, retiro = 0;
+   221→          if (colDeposito) {
+   222→            const val = parseNumberFromCell(fila.getCell(colDeposito).value);
+   223→            deposito = val;
+   224→          }
+   225→          if (colRetiro) {
+   226→            const val = parseNumberFromCell(fila.getCell(colRetiro).value);
+   227→            retiro = val;
+   228→          }
+   229→          monto = deposito - retiro;
+   230→        }
+   231→        // Caso 2: Monto único con signo
+   232→        else if (colMonto) {
+   233→          monto = parseNumberFromCell(fila.getCell(colMonto).value);
+   234→        }
+   235→        // Caso 3: Fallback — buscar cualquier número en la fila después de la columna concepto
+   236→        else {
+   237→          for (let c = colConcepto + 1; c <= Math.min(fila.cellCount, 15); c++) {
+   238→            const val = parseNumberFromCell(fila.getCell(c).value);
+   239→            if (val !== 0) {
+   240→              monto = val;
+   241→              break;
+   242→            }
+   243→          }
+   244→        }
+   245→
+   246→        if (monto === 0) continue;
+   247→
+   248→        movimientos.push({ fecha, concepto, monto });
+   249→      } catch {
+   250→        continue;
+   251→      }
+   252→    }
+   253→  }
+   254→
+   255→  return movimientos;
+   256→}
+   257→
+   258→function parseNumberFromCell(value: any): number {
+   259→  if (value === null || value === undefined || value === '' || value === '-') return 0;
+   260→  if (typeof value === 'number') return value;
+   261→  if (typeof value === 'string') {
+   262→    // Limpiar: quitar $, comas, espacios, signos de moneda
+   263→    const cleaned = value.replace(/[$,\s]/g, '').replace(/[^0-9.-]/g, '');
+   264→    return parseFloat(cleaned) || 0;
+   265→  }
+   266→  if (typeof value === 'object' && 'result' in value) {
+   267→    return parseFloat(String(value.result)) || 0;
+   268→  }
+   269→  return 0;
+   270→}
+   271→
+   272→// ===== Parser de texto extraído de PDF =====
+   273→
+   274→/**
+   275→ * Extrae texto de un PDF sin usar librerías externas (compatible con Vercel serverless).
+   276→ * 
+   277→ * Funciona buscando texto en los content streams del PDF:
+   278→ * 1. Busca streams entre "stream" y "endstream"
+   279→ * 2. Intenta descomprimir con zlib si están comprimidos con FlateDecode
+   280→ * 3. Extrae texto de operadores Tj y TJ dentro de bloques BT/ET
+   281→ */
+   282→function extraerTextoPDF(buffer: Buffer): string {
+   283→  const zlib = require('zlib');
+   284→  const textoCompleto: string[] = [];
+   285→
+   286→  // Convertir buffer a string latin1 para preservar bytes
+   287→  const pdfStr = buffer.toString('latin1');
+   288→
+   289→  // Buscar todos los streams en el PDF
+   290→  const streamRegex = /stream\r?\n([\s\S]*?)endstream/g;
+   291→  let streamMatch;
+   292→
+   293→  while ((streamMatch = streamRegex.exec(pdfStr)) !== null) {
+   294→    const streamData = streamMatch[1];
+   295→
+   296→    try {
+   297→      // Intentar descomprimir con FlateDecode (zlib)
+   298→      let decompressed: string;
+   299→      try {
+   300→        const compressed = Buffer.from(streamData, 'latin1');
+   301→        const decompressedBuffer = zlib.inflateSync(compressed);
+   302→        decompressed = decompressedBuffer.toString('latin1');
+   303→      } catch {
+   304→        // Si no se puede descomprimir, usar el texto tal cual
+   305→        decompressed = streamData;
+   306→      }
+   307→
+   308→      // Extraer texto de operadores Tj: (texto) Tj
+   309→      const tjRegex = /\(([^)]{1,200})\)\s*Tj/g;
+   310→      let tjMatch;
+   311→      while ((tjMatch = tjRegex.exec(decompressed)) !== null) {
+   312→        const text = decodePdfString(tjMatch[1]);
+   313→        if (text && text.trim()) {
+   314→          textoCompleto.push(text);
+   315→        }
+   316→      }
+   317→
+   318→      // Extraer texto de operadores TJ: [(texto1) -250 (texto2)] TJ
+   319→      const tjArrayRegex = /\[([^\]]{1,500})\]\s*TJ/g;
+   320→      let tjArrayMatch;
+   321→      while ((tjArrayMatch = tjArrayRegex.exec(decompressed)) !== null) {
+   322→        const arrayContent = tjArrayMatch[1];
+   323→        // Extraer todos los strings entre paréntesis
+   324→        const stringParts: string[] = [];
+   325→        const partRegex = /\(([^)]{1,200})\)/g;
+   326→        let partMatch;
+   327→        while ((partMatch = partRegex.exec(arrayContent)) !== null) {
+   328→          stringParts.push(decodePdfString(partMatch[1]));
+   329→        }
+   330→        if (stringParts.length > 0) {
+   331→          textoCompleto.push(stringParts.join(''));
+   332→        }
+   333→      }
+   334→    } catch {
+   335→      // Saltar streams que no se pueden procesar
+   336→      continue;
+   337→    }
+   338→  }
+   339→
+   340→  // También buscar texto que no esté en streams (algunos PDFs simples)
+   341→  const simpleTextRegex = /\(([\w\s\/\-\.,$:#áéíóúñÁÉÍÓÚÑ]{3,80})\)\s*Tj/g;
+   342→  let simpleMatch;
+   343→  while ((simpleMatch = simpleTextRegex.exec(pdfStr)) !== null) {
+   344→    const text = simpleMatch[1];
+   345→    if (text && text.trim().length > 2) {
+   346→      textoCompleto.push(text);
+   347→    }
+   348→  }
+   349→
+   350→  return textoCompleto.join('\n');
+   351→}
+   352→
+   353→/**
+   354→ * Decodifica un string de PDF (maneja escapes básicos)
+   355→ */
+   356→function decodePdfString(str: string): string {
+   357→  return str
+   358→    .replace(/\\n/g, '\n')
+   359→    .replace(/\\r/g, '\r')
+   360→    .replace(/\\t/g, '\t')
+   361→    .replace(/\\\(/g, '(')
+   362→    .replace(/\\\)/g, ')')
+   363→    .replace(/\\\\/g, '\\')
+   364→    .trim();
+   365→}
+   366→
+   367→// Busca patrones de fecha + descripción + monto en cada línea
+   368→// Soporta formatos:
+   369→//   - DD/MM/YYYY, DD-MM-YYYY (fechas numéricas)
+   370→//   - DD-ENE-26 (fechas con mes abreviado en español — formato Banorte)
+   371→function parsePDFTexto(texto: string): MovimientoImportado[] {
+   372→  // Llamar a la versión nueva que detecta múltiples cuentas
+   373→  const resultado = parsePDFTextoMultiCuenta(texto);
+   374→  return resultado.movimientos;
+   375→}
+   376→
+   377→/**
+   378→ * Versión mejorada del parser que detecta MÚLTIPLES cuentas en el mismo PDF.
+   379→ * 
+   380→ * SOPORTA:
+   381→ * 1. Banorte: 2 secciones (ENLACE NEGOCIOS AVANZADA + INVERSION ENLACE NEGOCIOS)
+   382→ * 2. Santander: 2 secciones (Detalle de movimientos cuenta de cheques + Detalles de movimientos Dinero Creciente)
+   383→ * 
+   384→ * MEJORAS v2.4:
+   385→ * - Detección explícita de secciones por headers (no por contexto difuso)
+   386→ * - Extracción ESTRICTA de montos (NN,NNN.NN con 2 decimales obligatorios)
+   387→ * - No confunde folios (7113421), CLABEs (014180655090853560), ni referencias con montos
+   388→ * - Captura correctamente "SALDO FINAL DEL PERIODO ANTERIOR" como saldo inicial
+   389→ * - Maneja movimientos multi-línea (descripción + varias líneas + monto+saldo)
+   390→ * - Detecta fin de sección por línea "TOTAL" o "SALDO FINAL DEL PERIODO"
+   391→ */
+   392→function parsePDFTextoMultiCuenta(texto: string): {
+   393→  movimientos: MovimientoImportado[];
+   394→  seccionesDetectadas: Array<{ tipo: string; cuentaNumero: string; count: number; saldoInicial: number | null }>;
+   395→} {
+   396→  const lineas = texto.split(/\r?\n/);
+   397→
+   398→  // Mapeo de meses abreviados en español (formato Banorte: 08-ENE-26, Santander: 04-MAY-2026)
+   399→  const MESES_ES: Record<string, number> = {
+   400→    'ENE': 0, 'FEB': 1, 'MAR': 2, 'ABR': 3, 'MAY': 4, 'JUN': 5,
+   401→    'JUL': 6, 'AGO': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DIC': 11,
+   402→    'ENERO': 0, 'FEBRERO': 1, 'MARZO': 2, 'ABRIL': 3, 'MAYO': 4, 'JUNIO': 5,
+   403→    'JULIO': 6, 'AGOSTO': 7, 'SEPTIEMBRE': 8, 'OCTUBRE': 9, 'NOVIEMBRE': 10, 'DICIEMBRE': 11,
+   404→  };
+   405→
+   406→  // Patrones de fecha
+   407→  const patronFechaBanorte = /(\d{1,2})-([A-Z]{3,9})-(\d{2,4})/;
+   408→  const patronFechaNum = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
+   409→
+   410→  // ===== EXTRACCIÓN ESTRICTA DE MONTOS =====
+   411→  // Solo captura números con EXACTAMENTE 2 decimales (NN,NNN.NN o NNN.NN)
+   412→  // No captura números pegados a letras ni números sin decimales
+   413→  function extraerMontosLinea(linea: string): number[] {
+   414→    const montos: number[] = [];
+   415→    const regex = /(?:^|\s)(\d{1,3}(?:,\d{3})*\.\d{2})(?:\s|$)/g;
+   416→    let match;
+   417→    while ((match = regex.exec(linea)) !== null) {
+   418→      const valor = parseFloat(match[1].replace(/,/g, ''));
+   419→      if (!isNaN(valor) && valor > 0.5) {
+   420→        montos.push(valor);
+   421→      }
+   422→    }
+   423→    return montos;
+   424→  }
+   425→
+   426→  function quitarMontos(texto: string): string {
+   427→    return texto.replace(/(?:^|\s)\d{1,3}(?:,\d{3})*\.\d{2}(?:\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
+   428→  }
+   429→
+   430→  // ===== FASE 1: DETECTAR SECCIONES =====
+   431→  // Buscar headers de secciones conocidos:
+   432→  // - Santander: "Detalle de movimientos cuenta de cheques." + "Detalles de movimientos Dinero Creciente"
+   433→  // - Banorte: "ENLACE NEGOCIOS AVANZADA" + "INVERSION ENLACE NEGOCIOS"
+   434→  interface Seccion {
+   435→    tipo: 'operaciones' | 'inversion';
+   436→    cuentaNum: string;
+   437→    lineaInicio: number;
+   438→    lineaFin: number | null;
+   439→    saldoInicial: number | null;
+   440→    banco: 'santander' | 'banorte' | 'desconocido';
+   441→  }
+   442→  
+   443→  const secciones: Seccion[] = [];
+   444→  let seccionActual: Seccion | null = null;
+   445→
+   446→  function cerrarSeccion(lineaFin: number) {
+   447→    if (seccionActual) {
+   448→      seccionActual.lineaFin = lineaFin;
+   449→      secciones.push(seccionActual);
+   450→      seccionActual = null;
+   451→    }
+   452→  }
+   453→
+   454→  function iniciarSeccion(tipo: 'operaciones' | 'inversion', banco: 'santander' | 'banorte', lineaInicio: number) {
+   455→    // Buscar número de cuenta en las siguientes 3 líneas
+   456→    let cuentaNum = '';
+   457→    for (let j = lineaInicio; j < Math.min(lineaInicio + 4, lineas.length); j++) {
+   458→      // Santander: 65-50908535-6 (DD-NNNNNNNN-D)
+   459→      let match = lineas[j].match(/(\d{2}-\d{8}-\d)/);
+   460→      if (match) { cuentaNum = match[1]; break; }
+   461→      // Banorte: 1282396470 (10 dígitos)
+   462→      match = lineas[j].match(/No\.?\s*de\s*Cuenta:?\s*(\d{6,})/i);
+   463→      if (match) { cuentaNum = match[1]; break; }
+   464→    }
+   465→    
+   466→    // Buscar saldo inicial
+   467→    let saldoInicial: number | null = null;
+   468→    for (let j = lineaInicio; j < Math.min(lineaInicio + 6, lineas.length); j++) {
+   469→      // "SALDO FINAL DEL PERIODO ANTERIOR:   $82,075.16" (Santander)
+   470→      const matchSaldo = lineas[j].match(/SALDO.*?ANTERIOR:?\s*\$?([\d,]+\.\d{2})/i);
+   471→      if (matchSaldo) {
+   472→        saldoInicial = parseFloat(matchSaldo[1].replace(/[$,]/g, ''));
+   473→        break;
+   474→      }
+   475→      // "SALDO ANTERIOR: $119,827.38" (Banorte)
+   476→      const matchSaldoBn = lineas[j].match(/SALDO\s+ANTERIOR\s*:?\s*\$?([\d,]+\.\d{2})/i);
+   477→      if (matchSaldoBn) {
+   478→        saldoInicial = parseFloat(matchSaldoBn[1].replace(/[$,]/g, ''));
+   479→        break;
+   480→      }
+   481→    }
+   482→    
+   483→    seccionActual = { tipo, cuentaNum, lineaInicio, lineaFin: null, saldoInicial, banco };
+   484→  }
+   485→
+   486→  for (let i = 0; i < lineas.length; i++) {
+   487→    const linea = lineas[i];
+   488→    const lineaUpper = linea.toUpperCase();
+   489→    
+   490→    // ===== DETECCIÓN SANTANDER =====
+   491→    // "Detalle de movimientos cuenta de cheques."
+   492→    if (lineaUpper.includes('DETALLE DE MOVIMIENTOS CUENTA DE CHEQUES') ||
+   493→        (lineaUpper.includes('DETALLE DE MOVIMIENTOS') && !lineaUpper.includes('DINERO'))) {
+   494→      cerrarSeccion(i - 1);
+   495→      iniciarSeccion('operaciones', 'santander', i);
+   496→    }
+   497→    // "Detalles de movimientos Dinero Creciente Santander." (sección de inversión)
+   498→    if (lineaUpper.includes('DETALLES DE MOVIMIENTOS DINERO') || 
+   499→        (lineaUpper.includes('DETALLE DE MOVIMIENTOS') && lineaUpper.includes('DINERO'))) {
+   500→      cerrarSeccion(i - 1);
+   501→      iniciarSeccion('inversion', 'santander', i);
+   502→    }
+   503→    
+   504→    // ===== DETECCIÓN BANORTE =====
+   505→    if (lineaUpper.includes('INVERSION') && lineaUpper.includes('ENLACE NEGOCIOS')) {
+   506→      cerrarSeccion(i - 1);
+   507→      iniciarSeccion('inversion', 'banorte', i);
+   508→    }
+   509→    if (lineaUpper.includes('ENLACE NEGOCIOS AVANZADA') || 
+   510→        (lineaUpper.includes('ENLACE NEGOCIOS') && !lineaUpper.includes('INVERSION'))) {
+   511→      cerrarSeccion(i - 1);
+   512→      iniciarSeccion('operaciones', 'banorte', i);
+   513→    }
+   514→    
+   515→    // ===== FIN DE SECCIÓN =====
+   516→    // "TOTAL   797,935.76   371,869.72" o "SALDO FINAL DEL PERIODO:"
+   517→    if (seccionActual && seccionActual.lineaFin === null) {
+   518→      if (lineaUpper.match(/^TOTAL\s+\d/) || 
+   519→          (lineaUpper.includes('SALDO FINAL DEL PERIODO') && !lineaUpper.includes('ANTERIOR')) ||
+   520→          lineaUpper.includes('INFORMACION FISCAL') ||
+   521→          lineaUpper.includes('INFORMACIÓN FISCAL')) {
+   522→        cerrarSeccion(i);
+   523→      }
+   524→    }
+   525→  }
+   526→  // Cerrar última sección
+   527→  cerrarSeccion(lineas.length - 1);
+   528→
+   529→  // ===== FASE 2: PARSEAR MOVIMIENTOS DE CADA SECCIÓN =====
+   530→  function parsearSeccion(seccion: Seccion): MovimientoImportado[] {
+   531→    const movimientos: MovimientoImportado[] = [];
+   532→    let saldoAnterior = seccion.saldoInicial;
+   533→    
+   534→    let i = seccion.lineaInicio;
+   535→    while (i <= (seccion.lineaFin ?? lineas.length - 1)) {
+   536→      const linea = lineas[i];
+   537→      if (!linea || !linea.trim()) { i++; continue; }
+   538→      
+   539→      // Buscar fecha al inicio de la línea (puede ser Banorte DD-ENE-26 o Santander DD-MAY-2026)
+   540→      const matchFecha = linea.match(patronFechaBanorte) || linea.match(patronFechaNum);
+   541→      if (!matchFecha) { i++; continue; }
+   542→      
+   543→      // Saltar headers
+   544→      const lineaUpper = linea.toUpperCase();
+   545→      if (lineaUpper.includes('FECHA') && lineaUpper.includes('FOLIO')) { i++; continue; }
+   546→      if (lineaUpper.match(/^TOTAL\s/) || lineaUpper.includes('SALDO FINAL DEL PERIODO')) { i++; continue; }
+   547→      
+   548→      const dia = parseInt(matchFecha[1]);
+   549→      let mes: number | undefined;
+   550→      let mesStr = '';
+   551→      
+   552→      if (matchFecha[2] && isNaN(parseInt(matchFecha[2]))) {
+   553→        // Es mes en texto (ENE, FEB, etc.)
+   554→        mesStr = matchFecha[2].toUpperCase();
+   555→        mes = MESES_ES[mesStr];
+   556→      } else {
+   557→        // Es mes numérico (01, 02, etc.)
+   558→        mes = parseInt(matchFecha[2]) - 1;
+   559→      }
+   560→      
+   561→      let anio = parseInt(matchFecha[3]);
+   562→      if (anio < 100) anio = anio < 30 ? 2000 + anio : 1900 + anio;
+   563→      
+   564→      if (mes === undefined || mes < 0 || mes > 11 || dia < 1 || dia > 31) { i++; continue; }
+   565→      
+   566→      const fecha = new Date(anio, mes, dia, 12, 0, 0);
+   567→      const restoLinea = linea.substring(matchFecha.index! + matchFecha[0].length).trim();
+   568→      
+   569→      // Acumular descripción y buscar monto+saldo
+   570→      let concepto = restoLinea;
+   571→      let montoEncontrado: number | null = null;
+   572→      let saldoEncontrado: number | null = null;
+   573→      let lineaMontoIdx = -1;
+   574→      
+   575→      // Buscar montos en la línea actual (caso simple: fecha + descripción + monto + saldo en una línea)
+   576→      // Pero tambien considerar que el saldo puede ser 0.00 (que el filtro > 0.5 descarta)
+   577→      // Por eso, extraemos TODOS los números con formato monetario (incluso 0.00)
+   578→      function extraerMontosLineaInclusivo(linea: string): number[] {
+   579→        const montos: number[] = [];
+   580→        const regex = /(?:^|\s)(\d{1,3}(?:,\d{3})*\.\d{2})(?:\s|$)/g;
+   581→        let match;
+   582→        while ((match = regex.exec(linea)) !== null) {
+   583→          const valor = parseFloat(match[1].replace(/,/g, ''));
+   584→          if (!isNaN(valor)) {
+   585→            montos.push(valor);
+   586→          }
+   587→        }
+   588→        return montos;
+   589→      }
+   590→      
+   591→      const montosAqui = extraerMontosLinea(linea);
+   592→      const montosAquiInclusivo = extraerMontosLineaInclusivo(linea);
+   593→      
+   594→      if (montosAquiInclusivo.length >= 2) {
+   595→        // Hay al menos 2 montos: el primero es el monto del movimiento, el segundo es el saldo
+   596→        montoEncontrado = montosAquiInclusivo[0];
+   597→        saldoEncontrado = montosAquiInclusivo[1];
+   598→        // Solo aceptar si el monto es > 0.5 (el saldo puede ser 0)
+   599→        if (Math.abs(montoEncontrado) < 0.5) {
+   600→          montoEncontrado = null;
+   601→          saldoEncontrado = null;
+   602→        } else {
+   603→          concepto = quitarMontos(restoLinea);
+   604→          lineaMontoIdx = i;
+   605→        }
+   606→      } else if (montosAqui.length === 1 && restoLinea.length < 50) {
+   607→        // Solo 1 monto y descripción corta — puede ser movimiento simple sin saldo
+   608→        montoEncontrado = montosAqui[0];
+   609→        concepto = quitarMontos(restoLinea);
+   610→        lineaMontoIdx = i;
+   611→      }
+   612→      
+   613→      // Si no, buscar en líneas siguientes (movimientos multi-línea)
+   614→      if (montoEncontrado === null) {
+   615→        let j = i + 1;
+   616→        const limiteBusqueda = Math.min((seccion.lineaFin ?? lineas.length - 1) + 1, i + 20);
+   617→        while (j < limiteBusqueda) {
+   618→          const lineaSiguiente = lineas[j];
+   619→          if (!lineaSiguiente || !lineaSiguiente.trim()) { j++; continue; }
+   620→          
+   621→          // Si encontramos otra fecha al inicio, ya no hay montos
+   622→          const matchFechaSgte = lineaSiguiente.match(patronFechaBanorte) || lineaSiguiente.match(patronFechaNum);
+   623→          if (matchFechaSgte && matchFechaSgte.index === 0) break;
+   624→          
+   625→          const lUpper = lineaSiguiente.toUpperCase();
+   626→          if (lUpper.match(/^TOTAL\s/) || lUpper.includes('SALDO FINAL DEL PERIODO')) break;
+   627→          
+   628→          const montosSgte = extraerMontosLinea(lineaSiguiente);
+   629→          if (montosSgte.length >= 2) {
+   630→            montoEncontrado = montosSgte[0];
+   631→            saldoEncontrado = montosSgte[1];
+   632→            lineaMontoIdx = j;
+   633→            break;
+   634→          } else if (montosSgte.length === 1 && j > i + 1) {
+   635→            montoEncontrado = montosSgte[0];
+   636→            saldoEncontrado = null;
+   637→            lineaMontoIdx = j;
+   638→            break;
+   639→          }
+   640→          
+   641→          concepto += ' ' + lineaSiguiente.trim();
+   642→          j++;
+   643→        }
+   644→      }
+   645→      
+   646→      if (montoEncontrado === null || Math.abs(montoEncontrado) < 0.5) { i++; continue; }
+   647→      
+   648→      // Limpiar concepto: quitar folio al inicio (7 dígitos) y montos
+   649→      concepto = concepto.replace(/^\s*\d{7}\s*/, '');
+   650→      concepto = quitarMontos(concepto).replace(/\s+/g, ' ').trim().slice(0, 300);
+   651→      if (!concepto) concepto = 'Movimiento bancario';
+   652→      
+   653→      // Determinar signo
+   654→      let montoFinal = montoEncontrado;
+   655→      if (saldoEncontrado !== null && saldoAnterior !== null) {
+   656→        const diferencia = saldoEncontrado - saldoAnterior;
+   657→        if (Math.abs(Math.abs(diferencia) - montoEncontrado) < montoEncontrado * 0.02) {
+   658→          montoFinal = diferencia;
+   659→        } else if (diferencia < 0) {
+   660→          montoFinal = -Math.abs(montoEncontrado);
+   661→        } else {
+   662→          montoFinal = Math.abs(montoEncontrado);
+   663→        }
+   664→      } else {
+   665→        // Fallback por keywords
+   666→        const conceptoUpper = concepto.toUpperCase();
+   667→        const esRetiro = ['COMPRA', 'PAGO', 'RETIRO', 'CARGO', 'TRASPASO', 'COMISION', 'COMISIÓN', 
+   668→                          'TRANSFERENCIA', 'INTERESES EXENTO', 'PAGO DE CAPITAL', 'PAGO DE CREDITO', 
+   669→                          'ADMINISTRACION', 'CGO', 'CARGO CAPITAL', 'CARGO POR', 'CGO INTERESES',
+   670→                          'I V A POR COMISION', 'PAGO PRIMA SEGURO', 'I.V.A.'].some(k => conceptoUpper.includes(k));
+   671→        const esDeposito = ['DISPOSICION', 'RECIBIDO', 'DEPOSITO DE CUENTA', 'DEV. DEPOSITO', 
+   672→                            'DEVOLUCION', 'ABONO', 'APORT LINEA CAPTURA'].some(k => conceptoUpper.includes(k));
+   673→        if (esRetiro) montoFinal = -Math.abs(montoEncontrado);
+   674→        else if (esDeposito) montoFinal = Math.abs(montoEncontrado);
+   675→      }
+   676→      
+   677→      if (saldoEncontrado !== null) saldoAnterior = saldoEncontrado;
+   678→      
+   679→      movimientos.push({
+   680→        fecha,
+   681→        concepto,
+   682→        monto: montoFinal,
+   683→        ...(seccion.tipo === 'inversion' ? { esInversion: true } : {}),
+   684→      } as any);
+   685→      
+   686→      i = lineaMontoIdx > 0 ? lineaMontoIdx + 1 : i + 1;
+   687→    }
+   688→    
+   689→    return movimientos;
+   690→  }
+   691→
+   692→  // ===== FASE 3: PROCESAR TODAS LAS SECCIONES =====
+   693→  const todosMovimientos: MovimientoImportado[] = [];
+   694→  const seccionesDetectadas: Array<{ tipo: string; cuentaNumero: string; count: number; saldoInicial: number | null }> = [];
+   695→  
+   696→  for (const seccion of secciones) {
+   697→    const movs = parsearSeccion(seccion);
+   698→    todosMovimientos.push(...movs);
+   699→    seccionesDetectadas.push({
+   700→      tipo: seccion.tipo,
+   701→      cuentaNumero: seccion.cuentaNum,
+   702→      count: movs.length,
+   703→      saldoInicial: seccion.saldoInicial,
+   704→    });
+   705→  }
+   706→
+   707→  return { movimientos: todosMovimientos, seccionesDetectadas };
+   708→}
+   709→
+   710→// Extrae montos numéricos de una línea (formato: 80,000.00 o $1,234.56)
+   711→function extraerMontos(linea: string): number[] {
+   712→  const montos: number[] = [];
+   713→  const regex = /-?\$?\s?[\d,]+\.\d{2}/g;
+   714→  let match;
+   715→  while ((match = regex.exec(linea)) !== null) {
+   716→    const valor = parseFloat(match[0].replace(/[$,\s]/g, ''));
+   717→    if (!isNaN(valor) && Math.abs(valor) > 0.5) {
+   718→      montos.push(valor);
+   719→    }
+   720→  }
+   721→  return montos;
+   722→}
+   723→
+   724→// Quita los montos de un texto para dejar solo la descripción
+   725→function quitarMontos(texto: string): string {
+   726→  return texto.replace(/-?\$?\s?[\d,]+\.\d{2}/g, '').trim();
+   727→}
+   728→
+   729→export async function POST(req: NextRequest) {
+   730→  try {
+   731→    const formData = await req.formData();
+   732→    const file = formData.get('file') as File;
+   733→    const cuentaId = formData.get('cuentaId') as string;
+   734→    const mes = parseInt(formData.get('mes') as string);
+   735→    const anio = parseInt(formData.get('anio') as string);
+   736→
+   737→    if (!file) {
+   738→      return NextResponse.json({ error: 'No se recibió archivo' }, { status: 400 });
+   739→    }
+   740→    if (!cuentaId) {
+   741→      return NextResponse.json({ error: 'Falta cuentaId' }, { status: 400 });
+   742→    }
+   743→
+   744→    // Verificar que existe la cuenta
+   745→    const cuenta = await db.cuentaBancaria.findUnique({ where: { id: cuentaId } });
+   746→    if (!cuenta) {
+   747→      return NextResponse.json({ error: 'Cuenta bancaria no encontrada' }, { status: 404 });
+   748→    }
+   749→
+   750→    // Guardar el archivo
+   751→    const isVercel = !!process.env.VERCEL;
+   752→    const uploadBase = isVercel ? '/tmp' : process.cwd();
+   753→    const uploadDir = path.join(uploadBase, 'uploads', 'estados-cuenta');
+   754→    if (!existsSync(uploadDir)) {
+   755→      await mkdir(uploadDir, { recursive: true });
+   756→    }
+   757→
+   758→    const ext = file.name.split('.').pop()?.toLowerCase() || 'bin';
+   759→    const fileName = `estado_${cuentaId}_${anio}_${String(mes).padStart(2, '0')}.${ext}`;
+   760→    const filePath = path.join(uploadDir, fileName);
+   761→
+   762→    const bytes = await file.arrayBuffer();
+   763→    const buffer = Buffer.from(bytes);
+   764→    await writeFile(filePath, buffer);
+   765→
+   766→    // ===== AUTO-DETECCIÓN DE BANCO DESDE EL PDF =====
+   767→    // Si el PDF es de un banco distinto al de la cuenta seleccionada, 
+   768→    // buscar o crear la cuenta correcta automáticamente.
+   769→    if (ext === 'pdf') {
+   770→      try {
+   771→        // Polyfills
+   772→        if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+   773→          (globalThis as any).DOMMatrix = class DOMMatrix {
+   774→            private _a = 1; private _b = 0; private _c = 0; private _d = 1; private _e = 0; private _f = 0;
+   775→            constructor(init?: any) {
+   776→              if (Array.isArray(init)) {
+   777→                this._a = init[0] || 1; this._b = init[1] || 0;
+   778→                this._c = init[2] || 0; this._d = init[3] || 1;
+   779→                this._e = init[4] || 0; this._f = init[5] || 0;
+   780→              }
+   781→            }
+   782→            get a() { return this._a; } get b() { return this._b; }
+   783→            get c() { return this._c; } get d() { return this._d; }
+   784→            get e() { return this._e; } get f() { return this._f; }
+   785→            multiply() { return this; } translate() { return this; } scale() { return this; }
+   786→          };
+   787→        }
+   788→        if (typeof (globalThis as any).Path2D === 'undefined') {
+   789→          (globalThis as any).Path2D = class Path2D {
+   790→            constructor() {} moveTo() {} lineTo() {} closePath() {} arc() {} rect() {} ellipse() {}
+   791→          };
+   792→        }
+   793→        const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.js');
+   794→        const data = new Uint8Array(buffer);
+   795→        const pdfDoc = await pdfjsLib.getDocument({ data, useSystemFonts: true, disableFontFace: true, isEvalSupported: false }).promise;
+   796→        let textoPreview = '';
+   797→        for (let i = 1; i <= Math.min(pdfDoc.numPages, 3); i++) {
+   798→          const page = await pdfDoc.getPage(i);
+   799→          const content = await page.getTextContent();
+   800→          let lineaActual = '';
+   801→          let yAnterior: number | null = null;
+   802→          for (const item of content.items) {
+   803→            const y = item.transform ? item.transform[5] : 0;
+   804→            if (yAnterior !== null && Math.abs(y - yAnterior) > 2) {
+   805→              textoPreview += lineaActual.trim() + '\n';
+   806→              lineaActual = '';
+   807→            }
+   808→            lineaActual += (item.str || '') + ' ';
+   809→            yAnterior = y;
+   810→          }
+   811→          if (lineaActual.trim()) textoPreview += lineaActual.trim() + '\n';
+   812→        }
+   813→        
+   814→        const textoUpper = textoPreview.toUpperCase();
+   815→        const esSantander = textoUpper.includes('SANTANDER') || textoUpper.includes('BANCO SANTANDER');
+   816→        const esBanorte = textoUpper.includes('BANORTE') || textoUpper.includes('BANCO MERCANTIL DEL NORTE');
+   817→        
+   818→        // Buscar número de cuenta en el texto
+   819→        // Santander: "CUENTA SANTANDER PYME   65-50908535-6" o "NUMERO DE CUENTA 65-50908535-6"
+   820→        // Banorte: "No. de Cuenta: 1282396470"
+   821→        let cuentaNumDetectada = '';
+   822→        let bancoDetectado = cuenta.banco;
+   823→        let tipoCuentaDetectado = cuenta.tipo;
+   824→        
+   825→        if (esSantander) {
+   826→          bancoDetectado = 'SANTANDER';
+   827→          // Patrones: "65-50908535-6" o "014180655090853560" (CLABE)
+   828→          const matchCuenta = textoPreview.match(/(\d{2}-\d{8}-\d)/);
+   829→          if (matchCuenta) cuentaNumDetectada = matchCuenta[1];
+   830→          // Detectar si es inversión (INVERSION CRECIENTE)
+   831→          if (textoUpper.includes('INVERSION')) tipoCuentaDetectado = 'inversion';
+   832→        } else if (esBanorte) {
+   833→          bancoDetectado = 'BANORTE';
+   834→          const matchCuenta = textoPreview.match(/No\.?\s*de\s*Cuenta:?\s*(\d{6,})/i);
+   835→          if (matchCuenta) cuentaNumDetectada = matchCuenta[1];
+   836→          if (textoUpper.includes('INVERSION')) tipoCuentaDetectado = 'inversion';
+   837→        }
+   838→        
+   839→        // Si el banco detectado no coincide con la cuenta seleccionada, buscar/crear cuenta correcta
+   840→        if (bancoDetectado && cuentaNumDetectada && 
+   841→            (cuenta.banco.toUpperCase() !== bancoDetectado || 
+   842→             !cuenta.cuenta.includes(cuentaNumDetectada))) {
+   843→          
+   844→          // Buscar cuenta existente con ese número
+   845→          let cuentaCorrecta = await db.cuentaBancaria.findFirst({
+   846→            where: { 
+   847→              empresaId: cuenta.empresaId,
+   848→              cuenta: { contains: cuentaNumDetectada },
+   849→            },
+   850→          });
+   851→          
+   852→          if (!cuentaCorrecta) {
+   853→            // Crear la cuenta automáticamente
+   854→            cuentaCorrecta = await db.cuentaBancaria.create({
+   855→              data: {
+   856→                banco: bancoDetectado,
+   857→                cuenta: cuentaNumDetectada,
+   858→                saldo: 0,
+   859→                tipo: tipoCuentaDetectado,
+   860→                empresaId: cuenta.empresaId,
+   861→              },
+   862→            });
+   863→            console.log(`✅ Cuenta creada automáticamente: ${bancoDetectado} ${cuentaNumDetectada}`);
+   864→          }
+   865→          
+   866→          // Actualizar cuentaId para usar la cuenta correcta
+   867→          if (cuentaCorrecta.id !== cuentaId) {
+   868→            console.log(`🔄 Cuenta cambiada de ${cuenta.banco} ${cuenta.cuenta} → ${cuentaCorrecta.banco} ${cuentaCorrecta.cuenta}`);
+   869→            // Reemplazar en los siguientes pasos usando la nueva cuenta
+   870→            // (re-asignamos la variable cuenta para que el resto del flujo use la correcta)
+   871→            (cuenta as any).id = cuentaCorrecta.id;
+   872→            (cuenta as any).banco = cuentaCorrecta.banco;
+   873→            (cuenta as any).cuenta = cuentaCorrecta.cuenta;
+   874→            (cuenta as any).tipo = cuentaCorrecta.tipo;
+   875→            (cuenta as any).empresaId = cuentaCorrecta.empresaId;
+   876→            // Reasignar cuentaId
+   877→            (formData as any).cuentaId = cuentaCorrecta.id;
+   878→            // El código abajo usa cuentaId variable, así que necesitamos actualizarla
+   879→            // Pero como es const, usamos una variable mutable
+   880→          }
+   881→        }
+   882→      } catch (e) {
+   883→        console.error('Error en auto-detección de banco:', e);
+   884→        // Si falla, continuar con la cuenta original
+   885→      }
+   886→    }
+   887→
+   888→    // Re-leer cuentaId por si cambió por auto-detección
+   889→    let cuentaIdFinal: string = (formData as any).cuentaId || cuentaId;
+   890→
+   891→    // Parsear según formato
+   892→    let movimientos: MovimientoImportado[] = [];
+   893→    let formatoDetectado = 'desconocido';
+   894→
+   895→    if (ext === 'csv') {
+   896→      formatoDetectado = 'CSV';
+   897→      const text = buffer.toString('utf-8');
+   898→      movimientos = parseCSV(text);
+   899→    } else if (ext === 'xlsx' || ext === 'xls') {
+   900→      formatoDetectado = 'Excel';
+   901→      try {
+   902→        movimientos = await parseExcel(buffer);
+   903→      } catch (e: any) {
+   904→        return NextResponse.json({
+   905→          error: `Error leyendo Excel: ${e.message}. Verifica que sea un .xlsx válido.`,
+   906→        }, { status: 400 });
+   907→      }
+   908→    } else if (ext === 'pdf') {
+   909→      formatoDetectado = 'PDF';
+   910→      // Extraer texto del PDF usando pdfjs-dist legacy con polyfills para Vercel serverless
+   911→      try {
+   912→        // Polyfill de DOMMatrix para Vercel serverless (pdfjs-dist lo necesita)
+   913→        if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+   914→          (globalThis as any).DOMMatrix = class DOMMatrix {
+   915→            private _a: number; private _b: number; private _c: number; private _d: number;
+   916→            private _e: number; private _f: number;
+   917→            constructor(init?: any) {
+   918→              if (Array.isArray(init)) {
+   919→                this._a = init[0] || 1; this._b = init[1] || 0;
+   920→                this._c = init[2] || 0; this._d = init[3] || 1;
+   921→                this._e = init[4] || 0; this._f = init[5] || 0;
+   922→              } else {
+   923→                this._a = 1; this._b = 0; this._c = 0; this._d = 1; this._e = 0; this._f = 0;
+   924→              }
+   925→            }
+   926→            get a() { return this._a; }
+   927→            get b() { return this._b; }
+   928→            get c() { return this._c; }
+   929→            get d() { return this._d; }
+   930→            get e() { return this._e; }
+   931→            get f() { return this._f; }
+   932→            multiply(other: any) { return this; }
+   933→            translate(x: number, y: number) { return this; }
+   934→            scale(s: number) { return this; }
+   935→          };
+   936→        }
+   937→
+   938→        // Polyfill de Path2D
+   939→        if (typeof (globalThis as any).Path2D === 'undefined') {
+   940→          (globalThis as any).Path2D = class Path2D {
+   941→            constructor() {}
+   942→            moveTo() {} lineTo() {} closePath() {} arc() {} rect() {} ellipse() {}
+   943→          };
+   944→        }
+   945→
+   946→        const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.js');
+   947→        const data = new Uint8Array(buffer);
+   948→        const loadingTask = pdfjsLib.getDocument({
+   949→          data,
+   950→          useSystemFonts: true,
+   951→          disableFontFace: true,
+   952→          isEvalSupported: false,
+   953→        });
+   954→        const pdfDoc = await loadingTask.promise;
+   955→
+   956→        let textoPDF = '';
+   957→        for (let i = 1; i <= pdfDoc.numPages; i++) {
+   958→          const page = await pdfDoc.getPage(i);
+   959→          const content = await page.getTextContent();
+   960→          // Unir items de texto en líneas basándose en coordenada Y
+   961→          let lineaActual = '';
+   962→          let yAnterior: number | null = null;
+   963→          for (const item of content.items) {
+   964→            const y = item.transform ? item.transform[5] : 0;
+   965→            if (yAnterior !== null && Math.abs(y - yAnterior) > 2) {
+   966→              textoPDF += lineaActual.trim() + '\n';
+   967→              lineaActual = '';
+   968→            }
+   969→            lineaActual += (item.str || '') + ' ';
+   970→            yAnterior = y;
+   971→          }
+   972→          if (lineaActual.trim()) textoPDF += lineaActual.trim() + '\n';
+   973→        }
+   974→
+   975→        if (!textoPDF || textoPDF.trim().length < 20) {
+   976→          return NextResponse.json({
+   977→            success: true,
+   978→            fileName,
+   979→            fileSize: file.size,
+   980→            formato: formatoDetectado,
+   981→            movimientosCreados: 0,
+   982→            movimientosTotales: 0,
+   983→            message: `📄 PDF guardado pero no se pudo extraer texto. Usa Excel/CSV.`,
+   984→          });
+   985→        }
+   986→
+   987→        // Parsear movimientos desde el texto extraído (con detección multi-cuenta)
+   988→        const { movimientos: movsPDF, seccionesDetectadas } = parsePDFTextoMultiCuenta(textoPDF);
+   989→        movimientos = movsPDF;
+   990→
+   991→        // ===== PROCESAR MÚLTIPLES SECCIONES =====
+   992→        // Cada sección tiene su propio tipo y número de cuenta.
+   993→        // Vamos a:
+   994→        // 1. Para cada sección detectada, buscar/crear la cuenta correspondiente
+   995→        // 2. Insertar los movimientos en la cuenta correcta (no solo en la cuentaId original)
+   996→        if (seccionesDetectadas.length > 0) {
+   997→          console.log(`📊 Secciones detectadas: ${seccionesDetectadas.length}`);
+   998→          seccionesDetectadas.forEach(s => {
+   999→            console.log(`  - ${s.tipo} (${s.cuentaNumero}): ${s.count} movs`);
+  1000→          });
+  1001→          
+  1002→          // Separar movimientos por sección usando el flag esInversion
+  1003→          const movsOperaciones = movimientos.filter((m: any) => !m.esInversion);
+  1004→          const movsInversion = movimientos.filter((m: any) => (m as any).esInversion);
+  1005→          
+  1006→          // Quitar el flag esInversion
+  1007→          for (const m of movsOperaciones) { delete (m as any).esInversion; }
+  1008→          for (const m of movsInversion) { delete (m as any).esInversion; }
+  1009→          
+  1010→          // Buscar la sección de operaciones para saber el número de cuenta
+  1011→          const secOperaciones = seccionesDetectadas.find(s => s.tipo === 'operaciones');
+  1012→          const secInversion = seccionesDetectadas.find(s => s.tipo === 'inversion');
+  1013→          
+  1014→          // Determinar el banco desde las secciones
+  1015→          let bancoDetectado = cuenta.banco;
+  1016→          if (secOperaciones?.cuentaNumero.match(/^\d{2}-\d{8}-\d$/)) {
+  1017→            bancoDetectado = 'SANTANDER';
+  1018→          } else if (secOperaciones?.cuentaNumero.match(/^\d{10}$/)) {
+  1019→            bancoDetectado = 'BANORTE';
+  1020→          }
+  1021→          
+  1022→          // ===== CUENTA DE OPERACIONES =====
+  1023→          // Si la cuenta seleccionada no coincide con la detectada, buscar/crear la correcta
+  1024→          let cuentaOperacionesId = cuentaIdFinal;
+  1025→          if (secOperaciones?.cuentaNumero && 
+  1026→              !cuenta.cuenta.includes(secOperaciones.cuentaNumero)) {
+  1027→            let cuentaOp = await db.cuentaBancaria.findFirst({
+  1028→              where: { 
+  1029→                empresaId: cuenta.empresaId,
+  1030→                cuenta: { contains: secOperaciones.cuentaNumero },
+  1031→              },
+  1032→            });
+  1033→            if (!cuentaOp) {
+  1034→              cuentaOp = await db.cuentaBancaria.create({
+  1035→                data: {
+  1036→                  banco: bancoDetectado,
+  1037→                  cuenta: secOperaciones.cuentaNumero,
+  1038→                  saldo: 0,
+  1039→                  tipo: 'operaciones',
+  1040→                  empresaId: cuenta.empresaId,
+  1041→                },
+  1042→              });
+  1043→              console.log(`✅ Cuenta operaciones creada: ${bancoDetectado} ${secOperaciones.cuentaNumero}`);
+  1044→            }
+  1045→            cuentaOperacionesId = cuentaOp.id;
+  1046→            // Actualizar cuentaIdFinal para que el resto del flujo use esta cuenta
+  1047→            (formData as any).cuentaId = cuentaOp.id;
+  1048→            cuentaIdFinal = cuentaOp.id;
+  1049→          }
+  1050→          
+  1051→          // ===== CUENTA DE INVERSIÓN =====
+  1052→          let cuentaInversionId: string | null = null;
+  1053→          if (secInversion?.cuentaNumero && movsInversion.length > 0) {
+  1054→            let cuentaInv = await db.cuentaBancaria.findFirst({
+  1055→              where: { 
+  1056→                empresaId: cuenta.empresaId,
+  1057→                cuenta: { contains: secInversion.cuentaNumero },
+  1058→              },
+  1059→            });
+  1060→            if (!cuentaInv) {
+  1061→              cuentaInv = await db.cuentaBancaria.create({
+  1062→                data: {
+  1063→                  banco: bancoDetectado + ' Inversión',
+  1064→                  cuenta: secInversion.cuentaNumero,
+  1065→                  saldo: 0,
+  1066→                  tipo: 'inversion',
+  1067→                  empresaId: cuenta.empresaId,
+  1068→                },
+  1069→              });
+  1070→              console.log(`✅ Cuenta inversión creada: ${bancoDetectado} Inversión ${secInversion.cuentaNumero}`);
+  1071→            }
+  1072→            cuentaInversionId = cuentaInv.id;
+  1073→            
+  1074→            // Insertar movimientos de inversión directamente
+  1075→            let invCreados = 0;
+  1076→            let invDuplicados = 0;
+  1077→            for (const mov of movsInversion) {
+  1078→              const yearMov = mov.fecha.getFullYear();
+  1079→              if (yearMov < 2020 || yearMov > new Date().getFullYear() + 1) continue;
+  1080→              
+  1081→              const existente = await db.movimientoBanco.findFirst({
+  1082→                where: {
+  1083→                  cuentaId: cuentaInversionId,
+  1084→                  fecha: mov.fecha,
+  1085→                  concepto: mov.concepto,
+  1086→                  monto: mov.monto,
+  1087→                },
+  1088→              });
+  1089→              if (existente) { invDuplicados++; continue; }
+  1090→              
+  1091→              await db.movimientoBanco.create({
+  1092→                data: {
+  1093→                  fecha: mov.fecha,
+  1094→                  concepto: mov.concepto,
+  1095→                  monto: mov.monto,
+  1096→                  tipo: mov.monto > 0 ? 'ingreso' : 'egreso',
+  1097→                  estado: 'conciliado',
+  1098→                  cuentaId: cuentaInversionId,
+  1099→                },
+  1100→              });
+  1101→              invCreados++;
+  1102→            }
+  1103→            
+  1104→            // Actualizar saldo de cuenta de inversión
+  1105→            if (invCreados > 0) {
+  1106→              const todosInv = await db.movimientoBanco.findMany({
+  1107→                where: { cuentaId: cuentaInversionId },
+  1108→                select: { monto: true },
+  1109→              });
+  1110→              const saldoInv = todosInv.reduce((s, m) => s + m.monto, 0);
+  1111→              await db.cuentaBancaria.update({
+  1112→                where: { id: cuentaInversionId },
+  1113→                data: { saldo: saldoInv },
+  1114→              });
+  1115→            }
+  1116→            
+  1117→            console.log(`📊 Inversión: ${movsInversion.length} movs (${invCreados} nuevos, ${invDuplicados} duplicados)`);
+  1118→          }
+  1119→          
+  1120→          // Mantener solo los movimientos de operaciones para el flujo principal
+  1121→          movimientos = movsOperaciones;
+  1122→          
+  1123→          console.log(`📊 Operaciones: ${movsOperaciones.length} movs para cuenta ${cuentaOperacionesId}`);
+  1124→        }
+  1125→
+  1126→        if (movimientos.length === 0 && seccionesDetectadas.length === 0) {
+  1127→          return NextResponse.json({
+  1128→            success: true,
+  1129→            fileName,
+  1130→            fileSize: file.size,
+  1131→            formato: formatoDetectado,
+  1132→            textoExtraido: textoPDF.slice(0, 500) + '...',
+  1133→            movimientosCreados: 0,
+  1134→            movimientosTotales: 0,
+  1135→            message: `📄 PDF procesado (${textoPDF.length} chars) pero no se detectaron movimientos. Intenta con Excel/CSV.`,
+  1136→          });
+  1137→        }
+  1138→      } catch (pdfError: any) {
+  1139→        console.error('Error procesando PDF:', pdfError);
+  1140→        return NextResponse.json({
+  1141→          success: true,
+  1142→          fileName,
+  1143→          fileSize: file.size,
+  1144→          formato: formatoDetectado,
+  1145→          movimientosCreados: 0,
+  1146→          movimientosTotales: 0,
+  1147→          message: `📄 PDF guardado. Error: ${pdfError.message}. Usa Excel/CSV.`,
+  1148→        });
+  1149→      }
+  1150→    } else {
+  1151→      return NextResponse.json({
+  1152→        error: `Formato .${ext} no soportado. Usa .xlsx, .csv o .pdf`,
+  1153→      }, { status: 400 });
+  1154→    }
+  1155→
+  1156→    // Insertar movimientos (dedupe por fecha+concepto+monto)
+  1157→    // IMPORTANTE: Procesa TODOS los movimientos del archivo, no solo del mes seleccionado.
+  1158→    // Esto permite subir un Excel con varios meses (ej. ene-jun) y se importan todos.
+  1159→    let movimientosCreados = 0;
+  1160→    let movimientosDuplicados = 0;
+  1161→    let movimientosFueraRango = 0;
+  1162→    const mesesAfectados = new Set<string>();
+  1163→
+  1164→    // ===== MOVIMIENTO DE APERTURA =====
+  1165→    // Si es un PDF (con secciones detectadas) y la cuenta está vacía,
+  1166→    // agregar el saldo inicial como movimiento de apertura para que el saldo de la cuenta
+  1167→    // cuadre con el saldo final del PDF del último mes
+  1168→    if (ext === 'pdf' && seccionesDetectadas.length > 0) {
+  1169→      const secOp = seccionesDetectadas.find(s => s.tipo === 'operaciones');
+  1170→      if (secOp && secOp.saldoInicial !== null && secOp.saldoInicial > 0) {
+  1171→        // Verificar que la cuenta destino esté vacía
+  1172→        const movsExistentes = await db.movimientoBanco.count({ where: { cuentaId: cuentaIdFinal } });
+  1173→        if (movsExistentes === 0) {
+  1174→          // Crear movimiento de apertura con el saldo inicial
+  1175→          const fechaApertura = new Date(anio, mes - 1, 1, 12, 0, 0);
+  1176→          await db.movimientoBanco.create({
+  1177→            data: {
+  1178→              fecha: fechaApertura,
+  1179→              concepto: 'SALDO INICIAL DE APERTURA (saldo final del periodo anterior según PDF)',
+  1180→              monto: secOp.saldoInicial,
+  1181→              tipo: 'ingreso',
+  1182→              estado: 'conciliado',
+  1183→              cuentaId: cuentaIdFinal,
+  1184→            },
+  1185→          });
+  1186→          movimientosCreados++;
+  1187→          console.log(`💰 Movimiento de apertura creado: $${secOp.saldoInicial}`);
+  1188→        }
+  1189→      }
+  1190→    }
+  1191→
+  1192→    for (const mov of movimientos) {
+  1193→      // Si la fecha es inválida o muy antigua/futura, saltar
+  1194→      const yearMov = mov.fecha.getFullYear();
+  1195→      if (yearMov < 2020 || yearMov > new Date().getFullYear() + 1) {
+  1196→        movimientosFueraRango++;
+  1197→        continue;
+  1198→      }
+  1199→
+  1200→      mesesAfectados.add(`${mov.fecha.getFullYear()}-${String(mov.fecha.getMonth() + 1).padStart(2, '0')}`);
+  1201→
+  1202→      // Dedupe (usar cuentaIdFinal por si cambió por auto-detección)
+  1203→      const existente = await db.movimientoBanco.findFirst({
+  1204→        where: {
+  1205→          cuentaId: cuentaIdFinal,
+  1206→          fecha: mov.fecha,
+  1207→          concepto: mov.concepto,
+  1208→          monto: mov.monto,
+  1209→        },
+  1210→      });
+  1211→      if (existente) {
+  1212→        movimientosDuplicados++;
+  1213→        continue;
+  1214→      }
+  1215→
+  1216→      await db.movimientoBanco.create({
+  1217→        data: {
+  1218→          fecha: mov.fecha,
+  1219→          concepto: mov.concepto,
+  1220→          monto: mov.monto,
+  1221→          tipo: mov.monto > 0 ? 'ingreso' : 'egreso',
+  1222→          estado: 'conciliado',
+  1223→          cuentaId: cuentaIdFinal,
+  1224→        },
+  1225→      });
+  1226→      movimientosCreados++;
+  1227→    }
+  1228→
+  1229→    // Calcular totales del mes seleccionado
+  1230→    const inicioMes = new Date(anio, mes - 1, 1);
+  1231→    const finMes = new Date(anio, mes, 0, 23, 59, 59);
+  1232→    const movimientosMes = await db.movimientoBanco.findMany({
+  1233→      where: { cuentaId: cuentaIdFinal, fecha: { gte: inicioMes, lte: finMes } },
+  1234→    });
+  1235→    const saldoCalculado = movimientosMes.reduce((s, m) => s + m.monto, 0);
+  1236→
+  1237→    // Total de TODOS los movimientos de la cuenta (todos los meses)
+  1238→    const totalCuenta = await db.movimientoBanco.count({ where: { cuentaId: cuentaIdFinal } });
+  1239→
+  1240→    // Actualizar el saldo de la cuenta con la suma de TODOS los movimientos
+  1241→    const todosMovimientos = await db.movimientoBanco.findMany({
+  1242→      where: { cuentaId: cuentaIdFinal },
+  1243→      select: { monto: true },
+  1244→    });
+  1245→    const saldoTotalCalculado = todosMovimientos.reduce((s, m) => s + m.monto, 0);
+  1246→
+  1247→    // Actualizar el saldo en la cuenta bancaria
+  1248→    await db.cuentaBancaria.update({
+  1249→      where: { id: cuentaIdFinal },
+  1250→      data: { saldo: saldoTotalCalculado },
+  1251→    });
+  1252→
+  1253→    const mesesArray = Array.from(mesesAfectados).sort();
+  1254→    const messageMonths = mesesArray.length > 1
+  1255→      ? ` Meses afectados: ${mesesArray.join(', ')}.`
+  1256→      : '';
+  1257→
+  1258→    return NextResponse.json({
+  1259→      success: true,
+  1260→      fileName,
+  1261→      fileSize: file.size,
+  1262→      formato: formatoDetectado,
+  1263→      movimientosDetectados: movimientos.length,
+  1264→      movimientosCreados,
+  1265→      movimientosDuplicados,
+  1266→      movimientosFueraRango,
+  1267→      movimientosTotales: movimientosMes.length,
+  1268→      movimientosTotalesCuenta: totalCuenta,
+  1269→      mesesAfectados: mesesArray,
+  1270→      saldoDelMes: saldoCalculado,
+  1271→      cuentaId: cuentaIdFinal,
+  1272→      cuentaBanco: cuenta.banco,
+  1273→      cuentaNumero: cuenta.cuenta,
+  1274→      message: `✅ ${formatoDetectado} procesado: ${movimientosCreados} nuevos, ${movimientosDuplicados} duplicados de ${movimientos.length} detectados.${messageMonths} Total en la cuenta: ${totalCuenta} movimientos.`,
+  1275→    });
+  1276→  } catch (e: any) {
+  1277→    console.error('Error en upload-estado-cuenta:', e);
+  1278→    return NextResponse.json({ error: e.message }, { status: 500 });
+  1279→  }
+  1280→}
+  1281→
+  1282→/** GET /api/upload-estado-cuenta — lista estados de cuenta guardados */
+  1283→export async function GET() {
+  1284→  const isVercel = !!process.env.VERCEL;
+  1285→  const uploadBase = isVercel ? '/tmp' : process.cwd();
+  1286→  const uploadDir = path.join(uploadBase, 'uploads', 'estados-cuenta');
+  1287→  if (!existsSync(uploadDir)) {
+  1288→    return NextResponse.json({ archivos: [] });
+  1289→  }
+  1290→  const files = await readdir(uploadDir);
+  1291→  const archivos = files.map(name => {
+  1292→    const match = name.match(/estado_(.+)_(\d{4})_(\d{2})\.(.+)/);
+  1293→    return {
+  1294→      name,
+  1295→      cuentaId: match?.[1] || '',
+  1296→      anio: match?.[2] || '',
+  1297→      mes: match?.[3] || '',
+  1298→      ext: match?.[4] || '',
+  1299→    };
+  1300→  });
+  1301→  return NextResponse.json({ archivos });
+  1302→}
+  1303→
+  1304→/** DELETE /api/upload-estado-cuenta?cuentaId=xxx&mes=7&anio=2026
+  1305→ *  Elimina TODOS los movimientos de una cuenta en un mes específico.
+  1306→ *  Útil cuando quieres reemplazar el estado de cuenta por uno nuevo.
+  1307→ */
+  1308→export async function DELETE(req: NextRequest) {
+  1309→  try {
+  1310→    const { searchParams } = new URL(req.url);
+  1311→    const cuentaId = searchParams.get('cuentaId');
+  1312→    const mes = parseInt(searchParams.get('mes') || '0');
+  1313→    const anio = parseInt(searchParams.get('anio') || '0');
+  1314→
+  1315→    if (!cuentaId) {
+  1316→      return NextResponse.json({ error: 'Falta cuentaId' }, { status: 400 });
+  1317→    }
+  1318→    if (!mes || !anio) {
+  1319→      return NextResponse.json({ error: 'Falta mes o anio' }, { status: 400 });
+  1320→    }
+  1321→
+  1322→    const inicio = new Date(anio, mes - 1, 1);
+  1323→    const fin = new Date(anio, mes, 0, 23, 59, 59);
+  1324→
+  1325→    const resultado = await db.movimientoBanco.deleteMany({
+  1326→      where: {
+  1327→        cuentaId,
+  1328→        fecha: { gte: inicio, lte: fin },
+  1329→      },
+  1330→    });
+  1331→
+  1332→    // Eliminar también el archivo guardado
+  1333→    const isVercel = !!process.env.VERCEL;
+  1334→    const uploadBase = isVercel ? '/tmp' : process.cwd();
+  1335→    const fileName = `estado_${cuentaId}_${anio}_${String(mes).padStart(2, '0')}`;
+  1336→    const uploadDir = path.join(uploadBase, 'uploads', 'estados-cuenta');
+  1337→    if (existsSync(uploadDir)) {
+  1338→      const { unlink } = await import('fs/promises');
+  1339→      const archivos = await readdir(uploadDir);
+  1340→      for (const a of archivos) {
+  1341→        if (a.startsWith(fileName)) {
+  1342→          try { await unlink(path.join(uploadDir, a)); } catch {}
+  1343→        }
+  1344→      }
+  1345→    }
+  1346→
+  1347→    return NextResponse.json({
+  1348→      success: true,
+  1349→      eliminados: resultado.count,
+  1350→      message: `✅ ${resultado.count} movimiento(s) eliminado(s) de la cuenta en ${mes}/${anio}`,
+  1351→    });
+  1352→  } catch (e: any) {
+  1353→    return NextResponse.json({ error: e.message }, { status: 500 });
+  1354→  }
+  1355→}
+  1356→

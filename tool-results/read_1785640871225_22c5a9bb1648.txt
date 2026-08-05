@@ -1,0 +1,656 @@
+     1→import { NextRequest, NextResponse } from 'next/server';
+     2→import { db } from '@/lib/db';
+     3→import ExcelJS from 'exceljs';
+     4→
+     5→/**
+     6→ * GET /api/export/concentrado?empresaId=xxx&anio=2026
+     7→ *
+     8→ * Genera un Excel que replica EXACTAMENTE la estructura del concentrado
+     9→ * mensual del usuario:
+    10→ *
+    11→ * Hojas:
+    12→ *   - Ene, Feb, Mar, ..., Dic  (una por mes con CFDIs del mes)
+    13→ *   - Concentrado (tabla pivote con totales Emitidas/Recibidas/Nómina por mes)
+    14→ *   - NOMINA (CFDIs tipo Nómina separados)
+    15→ *
+    16→ * Cada hoja mensual tiene las columnas:
+    17→ *   XML | Rfc Emisor | Nombre Emisor | LugarExp | Régimen Fiscal |
+    18→ *   Rfc Receptor | Nombre Receptor | Tipo | Serie | Folio | Fecha |
+    19→ *   Sub Total | Descuento | Total impuesto Trasladado | Nombre Impuesto |
+    20→ *   Total impuesto Retenido | Nombre Impuesto | Total | UUID |
+    21→ *   Método de Pago | Forma de Pago | Moneda | Tipo de Cambio |
+    22→ *   Versión | Uso CFDI | Régimen Fiscal | Estado | Estatus |
+    23→ *
+    24→ * Filtros:
+    25→ *   - Excluye CFDIs cancelados
+    26→ *   - Excluye CFDIs tipo "P" (Pago) — van en su propio reporte
+    27→ *   - Incluye tipo "I" (Ingreso) y "E" (Nota de crédito)
+    28→ *   - Nómina (tipo "N") va en hoja separada
+    29→ */
+    30→export const runtime = 'nodejs';
+    31→export const dynamic = 'force-dynamic';
+    32→
+    33→const MESES = ['Ene', 'FEB', 'MAR', 'ABRIL', 'MAYO', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    34→const MESES_LARGO = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    35→
+    36→const COLUMNAS = [
+    37→  'XML', 'Rfc Emisor', 'Nombre Emisor', 'LugarExp', 'Régimen Fiscal',
+    38→  'Rfc Receptor', 'Nombre Receptor', 'Tipo', 'Serie', 'Folio', 'Fecha',
+    39→  'Sub Total', 'Descuento', 'Total impuesto Trasladado', 'Nombre Impuesto',
+    40→  'Total impuesto Retenido', 'Nombre Impuesto', 'Total', 'UUID',
+    41→  'Método de Pago', 'Forma de Pago', 'Moneda', 'Tipo de Cambio',
+    42→  'Versión', 'Uso CFDI', 'Régimen Fiscal', 'Estado', 'Estatus',
+    43→  'Validación EFOS', 'Fecha Consulta',
+    44→];
+    45→
+    46→const COLORES = {
+    47→  header: 'FF7C3AED',  // violet
+    48→  ingreso: 'FF10B981', // emerald
+    49→  egreso: 'FFF97316',  // orange
+    50→  nomina: 'FF3B82F6',  // blue
+    51→  total: 'FFEDE9FE',   // violet light
+    52→  concentrado: 'FF6366F1', // indigo
+    53→};
+    54→
+    55→// Borde delgado para todas las celdas del Concentrado
+    56→function thinBorder() {
+    57→  return {
+    58→    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    59→    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    60→    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    61→    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    62→  };
+    63→}
+    64→
+    65→export async function GET(req: NextRequest) {
+    66→  try {
+    67→    const { searchParams } = new URL(req.url);
+    68→    const hoy = new Date();
+    69→    const anio = parseInt(searchParams.get('anio') ?? String(hoy.getFullYear()));
+    70→    const empresaId = searchParams.get('empresaId') || undefined;
+    71→
+    72→    // ===== Obtener empresa =====
+    73→    const empresa = empresaId ? await db.empresa.findUnique({ where: { id: empresaId } }) : null;
+    74→
+    75→    // ===== Obtener TODAS las facturas del año (excluyendo canceladas y tipo P=Pago) =====
+    76→    const inicioAnio = new Date(anio, 0, 1);
+    77→    const finAnio = new Date(anio, 11, 31, 23, 59, 59);
+    78→
+    79→    const facturas = await db.factura.findMany({
+    80→      where: {
+    81→        ...(empresaId ? { empresaId } : {}),
+    82→        fecha: { gte: inicioAnio, lte: finAnio },
+    83→        estado: { not: 'cancelada' },
+    84→        tipoComprobante: { in: ['I', 'E'] }, // Ingreso y Nota de crédito (NO Pago, NO Nómina)
+    85→      },
+    86→      orderBy: { fecha: 'asc' },
+    87→    });
+    88→
+    89→    // ===== Obtener nómina del año =====
+    90→    const nominas = await db.reciboNomina.findMany({
+    91→      where: {
+    92→        ...(empresaId ? { empresaId } : {}),
+    93→        fecha: { gte: inicioAnio, lte: finAnio },
+    94→      },
+    95→      include: { empleado: true },
+    96→      orderBy: { fecha: 'asc' },
+    97→    });
+    98→
+    99→    // ===== Crear workbook =====
+   100→    const wb = new ExcelJS.Workbook();
+   101→    wb.creator = 'Sistema Fiscal IA';
+   102→    wb.created = new Date();
+   103→    wb.company = empresa?.nombre || 'Empresa';
+   104→
+   105→    // ===== Hojas mensuales =====
+   106→    const totalesPorMes: Array<{
+   107→      mes: number;
+   108→      emitidas: { subtotal: number; descuento: number; impuesto: number; retenido: number; total: number; count: number };
+   109→      recibidas: { subtotal: number; descuento: number; impuesto: number; retenido: number; total: number; count: number };
+   110→      nomina: { total: number; count: number };
+   111→    }> = [];
+   112→
+   113→    for (let mes = 0; mes < 12; mes++) {
+   114→      const facturasMes = facturas.filter(f => new Date(f.fecha).getMonth() === mes);
+   115→      const nominasMes = nominas.filter(n => new Date(n.fecha).getMonth() === mes);
+   116→
+   117→      // ===== SEPARAR INGRESOS (I) DE NOTAS DE CRÉDITO (E) =====
+   118→      // Los Ingresos (I) se SUMAN a los totales
+   119→      // Las Notas de Crédito (E) se RESTAN de los totales (son devoluciones)
+   120→      const ingresosEmitidos = facturasMes.filter(f => f.direccion === 'emitida' && f.tipoComprobante === 'I');
+   121→      const notasCreditoEmitidas = facturasMes.filter(f => f.direccion === 'emitida' && f.tipoComprobante === 'E');
+   122→      const ingresosRecibidos = facturasMes.filter(f => f.direccion === 'recibida' && f.tipoComprobante === 'I');
+   123→      const notasCreditoRecibidas = facturasMes.filter(f => f.direccion === 'recibida' && f.tipoComprobante === 'E');
+   124→
+   125→      // ===== TOTALES: Ingresos - Notas de Crédito =====
+   126→      const totalesEmitidas = {
+   127→        subtotal: ingresosEmitidos.reduce((s, f) => s + f.subtotal, 0) - notasCreditoEmitidas.reduce((s, f) => s + f.subtotal, 0),
+   128→        descuento: ingresosEmitidos.reduce((s, f) => s + (f.descuento || 0), 0) + notasCreditoEmitidas.reduce((s, f) => s + (f.descuento || 0), 0),
+   129→        impuesto: ingresosEmitidos.reduce((s, f) => s + f.totalImpuestos, 0) - notasCreditoEmitidas.reduce((s, f) => s + f.totalImpuestos, 0),
+   130→        retenido: ingresosEmitidos.reduce((s, f) => s + (f.impuestoRetenido || 0), 0) - notasCreditoEmitidas.reduce((s, f) => s + (f.impuestoRetenido || 0), 0),
+   131→        total: ingresosEmitidos.reduce((s, f) => s + f.total, 0) - notasCreditoEmitidas.reduce((s, f) => s + f.total, 0),
+   132→        count: ingresosEmitidos.length + notasCreditoEmitidas.length,
+   133→      };
+   134→      const totalesRecibidas = {
+   135→        subtotal: ingresosRecibidos.reduce((s, f) => s + f.subtotal, 0) - notasCreditoRecibidas.reduce((s, f) => s + f.subtotal, 0),
+   136→        descuento: ingresosRecibidos.reduce((s, f) => s + (f.descuento || 0), 0) + notasCreditoRecibidas.reduce((s, f) => s + (f.descuento || 0), 0),
+   137→        impuesto: ingresosRecibidos.reduce((s, f) => s + f.totalImpuestos, 0) - notasCreditoRecibidas.reduce((s, f) => s + f.totalImpuestos, 0),
+   138→        retenido: ingresosRecibidos.reduce((s, f) => s + (f.impuestoRetenido || 0), 0) - notasCreditoRecibidas.reduce((s, f) => s + (f.impuestoRetenido || 0), 0),
+   139→        total: ingresosRecibidos.reduce((s, f) => s + f.total, 0) - notasCreditoRecibidas.reduce((s, f) => s + f.total, 0),
+   140→        count: ingresosRecibidos.length + notasCreditoRecibidas.length,
+   141→      };
+   142→      const totalesNomina = {
+   143→        total: nominasMes.reduce((s, n) => s + n.totalPercepciones, 0),
+   144→        count: nominasMes.length,
+   145→      };
+   146→
+   147→      totalesPorMes.push({
+   148→        mes: mes + 1,
+   149→        emitidas: totalesEmitidas,
+   150→        recibidas: totalesRecibidas,
+   151→        nomina: totalesNomina,
+   152→      });
+   153→
+   154→      // Crear hoja mensual
+   155→      const ws = wb.addWorksheet(MESES[mes], {
+   156→        views: [{ showGridLines: false }],
+   157→      });
+   158→
+   159→      // Definir columnas
+   160→      ws.columns = COLUMNAS.map((col, i) => ({
+   161→        header: col,
+   162→        key: col.toLowerCase().replace(/\s+/g, '_'),
+   163→        width: i === 1 ? 18 : i === 6 ? 30 : i === 17 ? 14 : i === 18 ? 38 : 12,
+   164→      }));
+   165→
+   166→      // Estilo header
+   167→      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+   168→      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.header } };
+   169→      ws.getRow(1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+   170→      ws.getRow(1).height = 30;
+   171→
+   172→      // Mapear facturas del mes a filas
+   173→      const filasMes: any[] = [];
+   174→      // Emitidas primero (ingreso)
+   175→      // ===== FILAS: Ingresos primero (positivos), luego Notas de Crédito (NEGATIVOS) =====
+   176→      // Ingresos Emitidos (positivos)
+   177→      for (const f of ingresosEmitidos) {
+   178→        filasMes.push({
+   179→          xml: f.uuid || '',
+   180→          rfc_emisor: f.emisorRfc || empresa?.rfc || '',
+   181→          nombre_emisor: f.emisorNombre || empresa?.nombre || '',
+   182→          lugarexp: '',
+   183→          regimen_fiscal: empresa?.regimenFiscal || '',
+   184→          rfc_receptor: f.receptorRfc || '',
+   185→          nombre_receptor: f.receptorNombre || '',
+   186→          tipo: 'ingreso',
+   187→          serie: f.serie || '',
+   188→          folio: f.folio || '',
+   189→          fecha: new Date(f.fecha),
+   190→          sub_total: f.subtotal,
+   191→          descuento: f.descuento || 0,
+   192→          total_impuesto_trasladado: f.totalImpuestos,
+   193→          nombre_impuesto: '002 - IVA',
+   194→          total_impuesto_retenido: f.impuestoRetenido || 0,
+   195→          nombre_impuesto_2: f.impuestoRetenido ? '001 - ISR' : '',
+   196→          total: f.total,
+   197→          uuid: f.uuid || '',
+   198→          metodo_de_pago: f.metodoPago || '',
+   199→          forma_de_pago: f.formaPago || '',
+   200→          moneda: f.moneda || 'MXN',
+   201→          tipo_de_cambio: '',
+   202→          version: '4.0',
+   203→          uso_cfdi: '',
+   204→          regimen_fiscal_2: '',
+   205→          estado: f.estado || 'timbrada',
+   206→          estatus: 'Vigente',
+   207→          validacion_efos: '',
+   208→          fecha_consulta: new Date(),
+   209→        });
+   210→      }
+   211→      // Notas de Crédito Emitidas (montos NEGATIVOS para que se resten en el total)
+   212→      for (const f of notasCreditoEmitidas) {
+   213→        filasMes.push({
+   214→          xml: f.uuid || '',
+   215→          rfc_emisor: f.emisorRfc || empresa?.rfc || '',
+   216→          nombre_emisor: f.emisorNombre || empresa?.nombre || '',
+   217→          lugarexp: '',
+   218→          regimen_fiscal: empresa?.regimenFiscal || '',
+   219→          rfc_receptor: f.receptorRfc || '',
+   220→          nombre_receptor: f.receptorNombre || '',
+   221→          tipo: 'nota de crédito',
+   222→          serie: f.serie || '',
+   223→          folio: f.folio || '',
+   224→          fecha: new Date(f.fecha),
+   225→          sub_total: -f.subtotal,  // NEGATIVO
+   226→          descuento: f.descuento || 0,
+   227→          total_impuesto_trasladado: -f.totalImpuestos,  // NEGATIVO
+   228→          nombre_impuesto: '002 - IVA',
+   229→          total_impuesto_retenido: -(f.impuestoRetenido || 0),  // NEGATIVO
+   230→          nombre_impuesto_2: f.impuestoRetenido ? '001 - ISR' : '',
+   231→          total: -f.total,  // NEGATIVO
+   232→          uuid: f.uuid || '',
+   233→          metodo_de_pago: f.metodoPago || '',
+   234→          forma_de_pago: f.formaPago || '',
+   235→          moneda: f.moneda || 'MXN',
+   236→          tipo_de_cambio: '',
+   237→          version: '4.0',
+   238→          uso_cfdi: '',
+   239→          regimen_fiscal_2: '',
+   240→          estado: f.estado || 'timbrada',
+   241→          estatus: 'Vigente',
+   242→          validacion_efos: '',
+   243→          fecha_consulta: new Date(),
+   244→        });
+   245→      }
+   246→      // Ingresos Recibidos (positivos)
+   247→      for (const f of ingresosRecibidos) {
+   248→        filasMes.push({
+   249→          xml: f.uuid || '',
+   250→          rfc_emisor: f.emisorRfc || '',
+   251→          nombre_emisor: f.emisorNombre || '',
+   252→          lugarexp: '',
+   253→          regimen_fiscal: '',
+   254→          rfc_receptor: f.receptorRfc || empresa?.rfc || '',
+   255→          nombre_receptor: f.receptorNombre || empresa?.nombre || '',
+   256→          tipo: 'egreso',
+   257→          serie: f.serie || '',
+   258→          folio: f.folio || '',
+   259→          fecha: new Date(f.fecha),
+   260→          sub_total: f.subtotal,
+   261→          descuento: f.descuento || 0,
+   262→          total_impuesto_trasladado: f.totalImpuestos,
+   263→          nombre_impuesto: '002 - IVA',
+   264→          total_impuesto_retenido: f.impuestoRetenido || 0,
+   265→          nombre_impuesto_2: f.impuestoRetenido ? '001 - ISR' : '',
+   266→          total: f.total,
+   267→          uuid: f.uuid || '',
+   268→          metodo_de_pago: f.metodoPago || '',
+   269→          forma_de_pago: f.formaPago || '',
+   270→          moneda: f.moneda || 'MXN',
+   271→          tipo_de_cambio: '',
+   272→          version: '4.0',
+   273→          uso_cfdi: '',
+   274→          regimen_fiscal_2: '',
+   275→          estado: f.estado || 'timbrada',
+   276→          estatus: 'Vigente',
+   277→          validacion_efos: '',
+   278→          fecha_consulta: new Date(),
+   279→        });
+   280→      }
+   281→      // Notas de Crédito Recibidas (montos NEGATIVOS)
+   282→      for (const f of notasCreditoRecibidas) {
+   283→        filasMes.push({
+   284→          xml: f.uuid || '',
+   285→          rfc_emisor: f.emisorRfc || '',
+   286→          nombre_emisor: f.emisorNombre || '',
+   287→          lugarexp: '',
+   288→          regimen_fiscal: '',
+   289→          rfc_receptor: f.receptorRfc || empresa?.rfc || '',
+   290→          nombre_receptor: f.receptorNombre || empresa?.nombre || '',
+   291→          tipo: 'nota de crédito',
+   292→          serie: f.serie || '',
+   293→          folio: f.folio || '',
+   294→          fecha: new Date(f.fecha),
+   295→          sub_total: -f.subtotal,  // NEGATIVO
+   296→          descuento: f.descuento || 0,
+   297→          total_impuesto_trasladado: -f.totalImpuestos,  // NEGATIVO
+   298→          nombre_impuesto: '002 - IVA',
+   299→          total_impuesto_retenido: -(f.impuestoRetenido || 0),  // NEGATIVO
+   300→          nombre_impuesto_2: f.impuestoRetenido ? '001 - ISR' : '',
+   301→          total: -f.total,  // NEGATIVO
+   302→          uuid: f.uuid || '',
+   303→          metodo_de_pago: f.metodoPago || '',
+   304→          forma_de_pago: f.formaPago || '',
+   305→          moneda: f.moneda || 'MXN',
+   306→          tipo_de_cambio: '',
+   307→          version: '4.0',
+   308→          uso_cfdi: '',
+   309→          regimen_fiscal_2: '',
+   310→          estado: f.estado || 'timbrada',
+   311→          estatus: 'Vigente',
+   312→          validacion_efos: '',
+   313→          fecha_consulta: new Date(),
+   314→        });
+   315→      }
+   316→
+   317→      // Agregar filas
+   318→      filasMes.forEach((fila, idx) => {
+   319→        const row = ws.addRow(fila);
+   320→        // Color por tipo
+   321→        const tipoCell = row.getCell(8); // Tipo
+   322→        if (fila.tipo === 'ingreso') {
+   323→          tipoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+   324→          tipoCell.font = { color: { argb: 'FF065F46' }, bold: true };
+   325→        } else if (fila.tipo === 'nota de crédito') {
+   326→          tipoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+   327→          tipoCell.font = { color: { argb: 'FF92400E' }, bold: true };
+   328→        } else {
+   329→          tipoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
+   330→          tipoCell.font = { color: { argb: 'FF9A3412' }, bold: true };
+   331→        }
+   332→        // Formato fecha
+   333→        row.getCell(11).numFmt = 'DD/MM/YYYY';
+   334→        // Formato moneda
+   335→        [12, 13, 14, 16, 18].forEach(col => {
+   336→          row.getCell(col).numFmt = '"$"#,##0.00';
+   337→        });
+   338→        // UUID en monoespacio
+   339→        row.getCell(19).font = { name: 'Consolas', size: 9 };
+   340→        row.height = 18;
+   341→      });
+   342→
+   343→      // Fila de totales al final (suma de TODAS las filas, incluyendo NC negativas)
+   344→      const filaTotales = ws.addRow({
+   345→        xml: '',
+   346→        rfc_emisor: '',
+   347→        nombre_emisor: '',
+   348→        lugarexp: '',
+   349→        regimen_fiscal: '',
+   350→        rfc_receptor: '',
+   351→        nombre_receptor: 'TOTALES DEL MES:',
+   352→        tipo: '',
+   353→        serie: '',
+   354→        folio: '',
+   355→        fecha: '',
+   356→        sub_total: totalesEmitidas.subtotal + totalesRecibidas.subtotal,
+   357→        descuento: totalesEmitidas.descuento + totalesRecibidas.descuento,
+   358→        total_impuesto_trasladado: totalesEmitidas.impuesto + totalesRecibidas.impuesto,
+   359→        nombre_impuesto: '',
+   360→        total_impuesto_retenido: totalesEmitidas.retenido + totalesRecibidas.retenido,
+   361→        nombre_impuesto_2: '',
+   362→        total: totalesEmitidas.total + totalesRecibidas.total,
+   363→        uuid: '',
+   364→        metodo_de_pago: '',
+   365→        forma_de_pago: '',
+   366→        moneda: '',
+   367→        tipo_de_cambio: '',
+   368→        version: '',
+   369→        uso_cfdi: '',
+   370→        regimen_fiscal_2: '',
+   371→        estado: '',
+   372→        estatus: '',
+   373→        validacion_efos: '',
+   374→        fecha_consulta: '',
+   375→      });
+   376→      filaTotales.font = { bold: true, color: { argb: 'FF7C3AED' } };
+   377→      filaTotales.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.total } };
+   378→      [12, 13, 14, 16, 18].forEach(col => {
+   379→        filaTotales.getCell(col).numFmt = '"$"#,##0.00';
+   380→      });
+   381→
+   382→      // Freeze panes (primera fila + primeras 2 columnas)
+   383→      ws.views = [{ freeze: 'C2', showGridLines: false }];
+   384→    }
+   385→
+   386→    // ===== Hoja Concentrado =====
+   387→    const wsConc = wb.addWorksheet('Concentrado', { views: [{ showGridLines: false }] });
+   388→
+   389→    // Definir columnas A-N (Mes + 5 Emitidas + 5 Recibidas + 1 Nómina + 1 Count opcional)
+   390→    wsConc.columns = [
+   391→      { width: 14 },  // A - Mes
+   392→      { width: 16 },  // B - Emitidas Sub Total
+   393→      { width: 14 },  // C - Emitidas Descuentos
+   394→      { width: 14 },  // D - Emitidas Impuesto
+   395→      { width: 14 },  // E - Emitidas Imp. Retenido
+   396→      { width: 18 },  // F - Emitidas Total
+   397→      { width: 16 },  // G - Recibidas Sub Total
+   398→      { width: 14 },  // H - Recibidas Descuentos
+   399→      { width: 14 },  // I - Recibidas Impuesto
+   400→      { width: 14 },  // J - Recibidas Imp. Retenido
+   401→      { width: 18 },  // K - Recibidas Total
+   402→      { width: 16 },  // L - Nómina Total
+   403→    ];
+   404→
+   405→    // Fila 1: Título grande
+   406→    wsConc.mergeCells('A1:L1');
+   407→    const cellTitulo = wsConc.getCell('A1');
+   408→    cellTitulo.value = `${empresa?.nombre || 'EMPRESA'}    Facturacion ${anio}`;
+   409→    cellTitulo.font = { bold: true, size: 14, color: { argb: 'FF4B0082' } };
+   410→    cellTitulo.alignment = { horizontal: 'left', vertical: 'middle' };
+   411→    wsConc.getRow(1).height = 24;
+   412→
+   413→    // Fila 3: Encabezados principales (Mes | Facturas Emitidas | Facturas Recibidas | Nómina)
+   414→    // A3:A4 merged "Mes/2026"
+   415→    wsConc.mergeCells('A3:A4');
+   416→    const cellMes = wsConc.getCell('A3');
+   417→    cellMes.value = `Mes/${anio}`;
+   418→    cellMes.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+   419→    cellMes.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.concentrado } };
+   420→    cellMes.alignment = { horizontal: 'center', vertical: 'middle' };
+   421→    cellMes.border = thinBorder();
+   422→
+   423→    // B3:F3 merged "Facturas Emitidas"
+   424→    wsConc.mergeCells('B3:F3');
+   425→    const cellEmitidas = wsConc.getCell('B3');
+   426→    cellEmitidas.value = 'Facturas Emitidas';
+   427→    cellEmitidas.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+   428→    cellEmitidas.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.ingreso } };
+   429→    cellEmitidas.alignment = { horizontal: 'center', vertical: 'middle' };
+   430→    cellEmitidas.border = thinBorder();
+   431→
+   432→    // G3:K3 merged "Facturas Recibidas"
+   433→    wsConc.mergeCells('G3:K3');
+   434→    const cellRecibidas = wsConc.getCell('G3');
+   435→    cellRecibidas.value = 'Facturas Recibidas';
+   436→    cellRecibidas.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+   437→    cellRecibidas.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.egreso } };
+   438→    cellRecibidas.alignment = { horizontal: 'center', vertical: 'middle' };
+   439→    cellRecibidas.border = thinBorder();
+   440→
+   441→    // L3:L4 merged "NOMINA"
+   442→    wsConc.mergeCells('L3:L4');
+   443→    const cellNomina = wsConc.getCell('L3');
+   444→    cellNomina.value = 'NOMINA';
+   445→    cellNomina.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+   446→    cellNomina.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.nomina } };
+   447→    cellNomina.alignment = { horizontal: 'center', vertical: 'middle' };
+   448→    cellNomina.border = thinBorder();
+   449→
+   450→    // Fila 4: Sub-encabezados (Sub Total | Descuentos | Impuesto | Imp. Retenido | Total × 2 + Total Nómina)
+   451→    const subHeaders = [
+   452→      { col: 'B', label: 'Sub Total' },
+   453→      { col: 'C', label: 'Descuentos' },
+   454→      { col: 'D', label: 'Impuesto' },
+   455→      { col: 'E', label: 'Imp. Retenido' },
+   456→      { col: 'F', label: 'Total' },
+   457→      { col: 'G', label: 'Sub Total' },
+   458→      { col: 'H', label: 'Descuentos' },
+   459→      { col: 'I', label: 'Impuesto' },
+   460→      { col: 'J', label: 'Imp. Retenido' },
+   461→      { col: 'K', label: 'Total' },
+   462→    ];
+   463→    subHeaders.forEach(({ col, label }) => {
+   464→      const cell = wsConc.getCell(`${col}4`);
+   465→      cell.value = label;
+   466→      cell.font = { bold: true, size: 10 };
+   467→      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+   468→      cell.border = thinBorder();
+   469→      if (['B', 'C', 'D', 'E', 'F'].includes(col)) {
+   470→        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // verde claro
+   471→      } else {
+   472→        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } }; // naranja claro
+   473→      }
+   474→    });
+   475→
+   476→    wsConc.getRow(3).height = 22;
+   477→    wsConc.getRow(4).height = 22;
+   478→
+   479→    // Filas 5-16: Un mes por fila
+   480→    let rowIdx = 5;
+   481→    let granTotalEmitidas = { subtotal: 0, descuento: 0, impuesto: 0, retenido: 0, total: 0, count: 0 };
+   482→    let granTotalRecibidas = { subtotal: 0, descuento: 0, impuesto: 0, retenido: 0, total: 0, count: 0 };
+   483→    let granTotalNomina = { total: 0, count: 0 };
+   484→
+   485→    totalesPorMes.forEach((tm) => {
+   486→      wsConc.getCell(`A${rowIdx}`).value = MESES_LARGO[tm.mes - 1];
+   487→      wsConc.getCell(`A${rowIdx}`).font = { bold: true };
+   488→      wsConc.getCell(`A${rowIdx}`).border = thinBorder();
+   489→
+   490→      wsConc.getCell(`B${rowIdx}`).value = tm.emitidas.subtotal;
+   491→      wsConc.getCell(`C${rowIdx}`).value = tm.emitidas.descuento;
+   492→      wsConc.getCell(`D${rowIdx}`).value = tm.emitidas.impuesto;
+   493→      wsConc.getCell(`E${rowIdx}`).value = tm.emitidas.retenido;
+   494→      wsConc.getCell(`F${rowIdx}`).value = tm.emitidas.total;
+   495→
+   496→      wsConc.getCell(`G${rowIdx}`).value = tm.recibidas.subtotal;
+   497→      wsConc.getCell(`H${rowIdx}`).value = tm.recibidas.descuento;
+   498→      wsConc.getCell(`I${rowIdx}`).value = tm.recibidas.impuesto;
+   499→      wsConc.getCell(`J${rowIdx}`).value = tm.recibidas.retenido;
+   500→      wsConc.getCell(`K${rowIdx}`).value = tm.recibidas.total;
+   501→
+   502→      wsConc.getCell(`L${rowIdx}`).value = tm.nomina.total;
+   503→
+   504→      // Formato moneda en todas las columnas numéricas
+   505→      ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].forEach(col => {
+   506→        const cell = wsConc.getCell(`${col}${rowIdx}`);
+   507→        cell.numFmt = '"$"#,##0.00';
+   508→        cell.border = thinBorder();
+   509→      });
+   510→
+   511→      granTotalEmitidas.subtotal += tm.emitidas.subtotal;
+   512→      granTotalEmitidas.descuento += tm.emitidas.descuento;
+   513→      granTotalEmitidas.impuesto += tm.emitidas.impuesto;
+   514→      granTotalEmitidas.retenido += tm.emitidas.retenido;
+   515→      granTotalEmitidas.total += tm.emitidas.total;
+   516→      granTotalEmitidas.count += tm.emitidas.count;
+   517→
+   518→      granTotalRecibidas.subtotal += tm.recibidas.subtotal;
+   519→      granTotalRecibidas.descuento += tm.recibidas.descuento;
+   520→      granTotalRecibidas.impuesto += tm.recibidas.impuesto;
+   521→      granTotalRecibidas.retenido += tm.recibidas.retenido;
+   522→      granTotalRecibidas.total += tm.recibidas.total;
+   523→      granTotalRecibidas.count += tm.recibidas.count;
+   524→
+   525→      granTotalNomina.total += tm.nomina.total;
+   526→      granTotalNomina.count += tm.nomina.count;
+   527→
+   528→      rowIdx++;
+   529→    });
+   530→
+   531→    // Fila 17: TOTAL ANUAL
+   532→    wsConc.getCell(`A${rowIdx}`).value = '';
+   533→    wsConc.getCell(`B${rowIdx}`).value = granTotalEmitidas.subtotal;
+   534→    wsConc.getCell(`C${rowIdx}`).value = granTotalEmitidas.descuento;
+   535→    wsConc.getCell(`D${rowIdx}`).value = granTotalEmitidas.impuesto;
+   536→    wsConc.getCell(`E${rowIdx}`).value = granTotalEmitidas.retenido;
+   537→    wsConc.getCell(`F${rowIdx}`).value = granTotalEmitidas.total;
+   538→    wsConc.getCell(`G${rowIdx}`).value = granTotalRecibidas.subtotal;
+   539→    wsConc.getCell(`H${rowIdx}`).value = granTotalRecibidas.descuento;
+   540→    wsConc.getCell(`I${rowIdx}`).value = granTotalRecibidas.impuesto;
+   541→    wsConc.getCell(`J${rowIdx}`).value = granTotalRecibidas.retenido;
+   542→    wsConc.getCell(`K${rowIdx}`).value = granTotalRecibidas.total;
+   543→    wsConc.getCell(`L${rowIdx}`).value = granTotalNomina.total;
+   544→
+   545→    for (let c = 1; c <= 12; c++) {
+   546→      const cell = wsConc.getCell(rowIdx, c);
+   547→      cell.font = { bold: true, color: { argb: 'FF7C3AED' } };
+   548→      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.total } };
+   549→      cell.border = thinBorder();
+   550→    }
+   551→    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].forEach(col => {
+   552→      wsConc.getCell(`${col}${rowIdx}`).numFmt = '"$"#,##0.00';
+   553→    });
+   554→
+   555→    // ===== Hoja NOMINA =====
+   556→    const wsNom = wb.addWorksheet('NOMINA', { views: [{ showGridLines: false }] });
+   557→    wsNom.columns = [
+   558→      { header: 'XML', key: 'uuid', width: 38 },
+   559→      { header: 'RFC Emisor', key: 'rfc_emisor', width: 18 },
+   560→      { header: 'Nombre Emisor', key: 'nombre_emisor', width: 30 },
+   561→      { header: 'RFC Receptor', key: 'rfc_receptor', width: 18 },
+   562→      { header: 'Nombre Receptor', key: 'nombre_receptor', width: 30 },
+   563→      { header: 'Tipo', key: 'tipo', width: 14 },
+   564→      { header: 'Serie', key: 'serie', width: 10 },
+   565→      { header: 'Folio', key: 'folio', width: 10 },
+   566→      { header: 'Fecha', key: 'fecha', width: 12 },
+   567→      { header: 'Sub Total', key: 'subtotal', width: 14 },
+   568→      { header: 'Descuento', key: 'descuento', width: 12 },
+   569→      { header: 'Total Percepciones', key: 'percepciones', width: 16 },
+   570→      { header: 'Total Deducciones', key: 'deducciones', width: 16 },
+   571→      { header: 'ISR', key: 'isr', width: 12 },
+   572→      { header: 'IMSS', key: 'imss', width: 12 },
+   573→      { header: 'Neto', key: 'neto', width: 14 },
+   574→      { header: 'UUID', key: 'uuid2', width: 38 },
+   575→      { header: 'Estado', key: 'estado', width: 12 },
+   576→    ];
+   577→
+   578→    wsNom.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+   579→    wsNom.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORES.nomina } };
+   580→    wsNom.getRow(1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+   581→    wsNom.getRow(1).height = 28;
+   582→
+   583→    for (const n of nominas) {
+   584→      const row = wsNom.addRow({
+   585→        uuid: n.uuid || '',
+   586→        rfc_emisor: empresa?.rfc || '',
+   587→        nombre_emisor: empresa?.nombre || '',
+   588→        rfc_receptor: n.empleado?.rfc || '',
+   589→        nombre_receptor: n.empleado?.nombre || '',
+   590→        tipo: 'Nómina 4.0',
+   591→        serie: '',
+   592→        folio: n.folio,
+   593→        fecha: new Date(n.fecha),
+   594→        subtotal: n.totalPercepciones,
+   595→        descuento: n.totalDeducciones,
+   596→        percepciones: n.totalPercepciones,
+   597→        deducciones: n.totalDeducciones,
+   598→        isr: n.isr,
+   599→        imss: n.imss,
+   600→        neto: n.neto,
+   601→        uuid2: n.uuid || '',
+   602→        estado: n.estado || 'timbrado',
+   603→      });
+   604→      row.getCell(9).numFmt = 'DD/MM/YYYY';
+   605→      [10, 11, 12, 13, 14, 15, 16].forEach(col => {
+   606→        row.getCell(col).numFmt = '"$"#,##0.00';
+   607→      });
+   608→      row.getCell(1).font = { name: 'Consolas', size: 9 };
+   609→      row.getCell(17).font = { name: 'Consolas', size: 9 };
+   610→    }
+   611→
+   612→    // Total nómina
+   613→    const filaTotalNom = wsNom.addRow({
+   614→      uuid: '',
+   615→      rfc_emisor: '',
+   616→      nombre_emisor: '',
+   617→      rfc_receptor: '',
+   618→      nombre_receptor: 'TOTALES NÓMINA:',
+   619→      tipo: '',
+   620→      serie: '',
+   621→      folio: '',
+   622→      fecha: '',
+   623→      subtotal: nominas.reduce((s, n) => s + n.totalPercepciones, 0),
+   624→      descuento: nominas.reduce((s, n) => s + n.totalDeducciones, 0),
+   625→      percepciones: nominas.reduce((s, n) => s + n.totalPercepciones, 0),
+   626→      deducciones: nominas.reduce((s, n) => s + n.totalDeducciones, 0),
+   627→      isr: nominas.reduce((s, n) => s + n.isr, 0),
+   628→      imss: nominas.reduce((s, n) => s + n.imss, 0),
+   629→      neto: nominas.reduce((s, n) => s + n.neto, 0),
+   630→      uuid2: '',
+   631→      estado: '',
+   632→    });
+   633→    filaTotalNom.font = { bold: true, color: { argb: COLORES.nomina } };
+   634→    filaTotalNom.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+   635→    [10, 11, 12, 13, 14, 15, 16].forEach(col => {
+   636→      filaTotalNom.getCell(col).numFmt = '"$"#,##0.00';
+   637→    });
+   638→
+   639→    wsNom.views = [{ freeze: 'A2', showGridLines: false }];
+   640→
+   641→    // ===== Generar buffer =====
+   642→    const buffer = await wb.xlsx.writeBuffer();
+   643→    const fileName = `Concentrado_${empresa?.rfc || 'empresa'}_${anio}.xlsx`;
+   644→
+   645→    return new Response(buffer, {
+   646→      headers: {
+   647→        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+   648→        'Content-Disposition': `attachment; filename="${fileName}"`,
+   649→      },
+   650→    });
+   651→  } catch (e: any) {
+   652→    console.error('Error en /api/export/concentrado:', e);
+   653→    return NextResponse.json({ error: e.message }, { status: 500 });
+   654→  }
+   655→}
+   656→
