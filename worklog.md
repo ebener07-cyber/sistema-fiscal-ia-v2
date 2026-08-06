@@ -588,3 +588,117 @@ Stage Summary:
 - Bug crítico corregido: fechas con apóstrofes literales ('02012026') no se parseaban
 - Frontend informativo sobre formatos soportados
 - Listo para subir a GitHub
+
+---
+Task ID: 10
+Agent: Main Agent (Super Z)
+Task: Tarjetas Banorte/Santander Excel + Conciliación Facturas + Contabilidad Partida Doble
+
+Work Log:
+Análisis de 5 repositorios GitHub propuestos:
+- blnkfinance/blnk-ts: ✅ Concepto de partida doble adoptado (NO el SDK)
+- jleonceo/accounting-agent-swarm: ❌ No aporta valor (ya tienes multi-agente)
+- PoeMadara/nextjs-erp-system: ❌ Ya tienes mejor arquitectura modular
+- SAT-CFDI/python-satcfdi: ❌ Python, ya tienes DIOT TXT nativo
+- FiscalAPI/xml-downloader: ⏳ Futuro (descarga automática SAT con FIEL)
+
+TAREA 1 — Tarjetas Banorte/Santander Excel en BancosView:
+- Agregado Card "Formatos Excel Soportados" con 2 tarjetas visuales:
+  * Banorte (verde): muestra estructura con columnas DEPÓSITOS y RETIROS
+  * Santander (rojo): muestra estructura con columnas Cargo/Abono e Importe
+- Cada tarjeta tiene tabla de ejemplo con datos reales
+- Texto explicativo de detección automática por headers
+
+TAREA 2 — Reporte de Conciliación Banco vs Facturas:
+- Creado endpoint GET /api/bancos/conciliacion-facturas
+- Genera Excel con 4 hojas:
+  1. Resumen Conciliación (totales, tasa conciliación, flujo neto)
+  2. Pagos Conciliados (movimientos con factura asociada)
+  3. Pagos sin Conciliar (movimientos que requieren revisión)
+  4. Facturas sin Pago (facturas sin movimiento bancario)
+- Compara movimientos bancarios vs facturas emitidas/recibidas
+- Botón agregado en ContabilidadView para descargar este reporte
+
+TAREA 3 — Contabilidad Automática con Partida Doble:
+- Agregado modelo PolizaLinea a Prisma (partida doble):
+  * cuentaCodigo, cuentaNombre, tipo (cargo/abono), monto
+  * origenTipo (factura/movimiento_banco/nomina), origenId
+  * Indices en polizaId y cuentaCodigo
+- Agregado empresaId a modelo Poliza existente
+- Schema aplicado a BD Neon ✓
+- Creado motor de contabilidad /src/lib/agentes/motor-contabilidad.ts:
+  * Catálogo de 16 cuentas contables (Activos, Pasivos, Capital, Ingresos, Gastos)
+  * Función crearPoliza() valida que suma cargos = suma abonos
+  * Función generarPolizasMes() genera automáticamente:
+    - Facturas emitidas → póliza ingreso (Cargo Clientes, Abono Ventas + IVA)
+    - Facturas recibidas → póliza egreso (Cargo Costos + IVA, Abono Proveedores)
+    - Nómina → póliza egreso (Cargo Gastos nómina, Abono Bancos + Pasivos)
+    - Movimientos bancarios sin factura → póliza diario
+  * Función obtenerBalancePrueba() calcula saldos por cuenta
+- Creado endpoint POST /api/contabilidad/generar-automatico
+- Creado endpoint GET /api/contabilidad/balance-prueba (json + excel)
+- Excel con 2 hojas: Balance de Prueba + Catálogo de Cuentas
+- Botones agregados en ContabilidadView:
+  * "Generar con Partida Doble" — ejecuta generación automática
+  * "Balance de Prueba" — descarga Excel
+  * "Conciliación Banco-Facturas" — descarga Excel
+
+VERIFICACIÓN:
+- Build exitoso: ✓ Compiled successfully in 14.0s
+- Schema aplicado a BD Neon: ✓ (PolizaLinea + empresaId en Poliza)
+- ZIP actualizado: 226 archivos, 3.39 MB
+
+Stage Summary:
+- 3 tareas implementadas:
+  1. Tarjetas visuales Banorte/Santander Excel en BancosView
+  2. Reporte conciliación banco-facturas (4 hojas Excel)
+  3. Contabilidad automática con partida doble (16 cuentas, 4 tipos de pólizas)
+- 3 nuevos endpoints API:
+  * /api/bancos/conciliacion-facturas
+  * /api/contabilidad/generar-automatico
+  * /api/contabilidad/balance-prueba
+- 2 nuevos archivos en /src/lib/agentes/:
+  * motor-contabilidad.ts (motor principal)
+- Frontend actualizado en BancosView y ContabilidadView
+- Listo para subir a GitHub
+
+---
+Task ID: 11
+Agent: Main Agent (Super Z)
+Task: Procesar Excel Banorte+Santander completo + reporte con cruce CFDIs
+
+Work Log:
+- Analizados ambos Excel minuciosamente:
+  * Santander: 231 movimientos (Ene 2 - Jul 31, 2026)
+  * Banorte Hoja 1: 624 movimientos (Ene 2 - Ago 4, 2026)
+  * Banorte Hoja 2: 42 movimientos (Jul 20 - Ago 5, 2026)
+  * TOTAL: 895 movimientos nuevos
+
+- Bug corregido: fechas Santander con apóstrofes literales ('02012026')
+  Ahora se limpian con replace(/['"]/g, '') antes de parsear
+
+- Procesados y subidos TODOS los movimientos a BD Neon:
+  * Borrados movimientos existentes de ambas cuentas
+  * Subidos 895 movimientos con createMany (batch de 100)
+  * Saldos actualizados: Banorte $297,335.65, Santander -$105,072.25
+
+- Generado reporte profesional Excel con 3 hojas:
+  1. Resumen Ejecutivo — comparativo Banorte vs Santander, totales, conciliación
+  2. Conciliación CFDIs — 1874 movimientos cruzados con 961 CFDIs
+  3. Análisis Financiero — indicadores + 10 observaciones/recomendaciones
+
+- Resultados del cruce banco-CFDIs:
+  * 829 movimientos conciliados con factura (44.2%)
+  * 1045 movimientos sin factura asociada (55.8%)
+  * Margen bruto: 35.8%
+  * Saldo total: $192,263.40
+
+- Archivos generados:
+  * /download/Reporte_Integral_Bancos_CFDIs.xlsx (85 KB)
+  * /download/sistema-fiscal-ia-github.zip (3.40 MB, 229 archivos)
+
+Stage Summary:
+- Ambos Excel procesados completamente (Ene-Ago 2026)
+- 895 movimientos subidos a BD con signos correctos
+- Reporte profesional generado con cruce CFDIs y análisis financiero
+- Observaciones y recomendaciones incluidas

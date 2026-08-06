@@ -9,7 +9,7 @@
 - **Repo GitHub:** https://github.com/ebener07-cyber/sistema-fiscal-ia-v2
 - **Deploy:** https://sistema-fiscal-ia-v2.vercel.app
 - **BD:** Neon PostgreSQL (ep-red-smoke-atnx331h-pooler.c-9.us-east-1.aws.neon.tech)
-- **Versión actual:** v3.3 (reportes SAT + botones frontend)
+- **Versión actual:** v3.4 (contabilidad partida doble + conciliación)
 - **Fecha última actualización:** 3 agosto 2026
 
 ---

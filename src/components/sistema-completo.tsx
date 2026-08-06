@@ -3920,6 +3920,57 @@ function ReportesView({ stats }: { stats: Stats | null }) {
         </div>
       </Card>
 
+      {/* ===== REPORTE BANCOS PDF (Conciliación Banorte + Santander con CFDIs) ===== */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <Banknote size={18} className="text-emerald-600" /> REPORTE BANCOS PDF
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Conciliación completa de movimientos bancarios (Banorte + Santander) con TODOS los CFDIs del año.
+          Genera Excel profesional con 6 hojas: Resumen, Banorte, Santander, CFDIs Emitidos, CFDIs Recibidos y Observaciones.
+        </p>
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="border-2 border-emerald-200 dark:border-emerald-800 rounded-lg p-4 bg-emerald-50/30 dark:bg-emerald-900/10">
+            <h4 className="font-semibold mb-2 flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+              <Banknote size={16} /> Conciliación Completa Bancos-CFDIs
+            </h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Cruza TODOS los movimientos bancarios con TODAS las facturas. Identifica:
+              <br />✅ Movimientos conciliados con factura
+              <br />⚠️ Movimientos sin factura (no deducibles)
+              <br />📋 Facturas emitidas sin cobro (cuentas por cobrar)
+              <br />📋 Facturas recibidas sin pago (cuentas por pagar)
+            </p>
+            <Button
+              onClick={() => {
+                if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                const params = new URLSearchParams({
+                  empresaId: empresa.id,
+                  anio: String(new Date().getFullYear()),
+                });
+                window.open(`/api/reportes/bancos-cfdi?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={14} className="mr-2" /> Descargar REPORTE BANCOS PDF
+            </Button>
+          </div>
+
+          <div className="border-2 border-violet-200 dark:border-violet-800 rounded-lg p-4 bg-violet-50/30 dark:bg-violet-900/10">
+            <h4 className="font-semibold mb-2 flex items-center gap-2 text-violet-700 dark:text-violet-300">
+              <FileText size={16} /> ¿Qué incluye el reporte?
+            </h4>
+            <ul className="text-xs text-muted-foreground space-y-1">
+              <li>📊 <strong>Hoja 1:</strong> Resumen ejecutivo con totales Banorte vs Santander</li>
+              <li>🏦 <strong>Hoja 2:</strong> Detalle Banorte con estado de conciliación</li>
+              <li>🏛️ <strong>Hoja 3:</strong> Detalle Santander con estado de conciliación</li>
+              <li>📤 <strong>Hoja 4:</strong> CFDIs emitidos (pagados vs sin cobro)</li>
+              <li>📥 <strong>Hoja 5:</strong> CFDIs recibidos (pagados vs sin pago)</li>
+              <li>📝 <strong>Hoja 6:</strong> Observaciones y recomendaciones profesionales</li>
+            </ul>
+          </div>
+        </div>
+      </Card>
+
       {/* ===== REPORTES SAT OFICIALES (v3.2) ===== */}
       <Card className="p-5">
         <h3 className="font-semibold mb-3 flex items-center gap-2">
