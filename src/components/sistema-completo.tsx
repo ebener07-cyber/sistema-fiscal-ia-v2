@@ -2377,10 +2377,70 @@ function BancosView({ empresaId }: { empresaId?: string }) {
           <span className="text-xs text-muted-foreground mt-1">
             Formatos: <strong>Excel (.xlsx)</strong> · <strong>CSV</strong> · <strong>PDF</strong> · Mes destino: <strong>{selMes === 0 ? mesesLargo[hoy.getMonth()] : mesesLargo[selMes - 1]} {anioSel}</strong>
           </span>
+          <span className="text-[10px] text-muted-foreground mt-1">
+            ✅ Soporta Excel de Banorte (DEPÓSITOS/RETIROS), Santander (Cargo/Abono+Importe) y PDF de ambos bancos
+          </span>
           <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={handleUpload} disabled={uploading || cuentas.length === 0} className="hidden" />
         </label>
         {cuentas.length === 0 && <p className="text-xs text-amber-600 mt-2">⚠️ Primero crea una cuenta bancaria</p>}
         {uploadMsg && <div className={cn('mt-3 p-3 rounded-lg text-sm', uploadMsg.startsWith('✅') ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300')}>{uploadMsg}</div>}
+      </Card>
+
+      {/* ===== FORMATOS EXCEL SOPORTADOS (Ejemplos) ===== */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <FileSpreadsheet size={18} className="text-emerald-600" /> Formatos Excel Soportados
+        </h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          El sistema detecta automáticamente el formato de tu Excel. Sube el archivo en cualquiera de estos formatos:
+        </p>
+        <div className="grid md:grid-cols-2 gap-4">
+          {/* Banorte Excel */}
+          <div className="border-2 border-emerald-200 dark:border-emerald-800 rounded-lg p-4 bg-emerald-50/30 dark:bg-emerald-900/10">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 rounded bg-emerald-600 flex items-center justify-center text-white font-bold text-xs">B</div>
+              <div>
+                <div className="font-semibold text-sm text-emerald-700 dark:text-emerald-300">Banorte (Excel)</div>
+                <div className="text-[10px] text-muted-foreground">Columnas: DEPÓSITOS y RETIROS separados</div>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded border p-2 text-[10px] font-mono overflow-x-auto">
+              <div className="grid grid-cols-4 gap-1 text-muted-foreground border-b pb-1 mb-1">
+                <span>FECHA</span><span>DESCRIPCIÓN</span><span className="text-right">DEPÓSITOS</span><span className="text-right">RETIROS</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <span>2/1/2026</span><span className="truncate">DISPOSICIÓN CRÉDITO</span><span className="text-right text-emerald-600">178,537</span><span className="text-right">-</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <span>2/1/2026</span><span className="truncate">COMPRA SPEI</span><span className="text-right">-</span><span className="text-right text-red-600">171,590</span>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">✅ Detección automática por headers "DEPÓSITOS" y "RETIROS"</p>
+          </div>
+
+          {/* Santander Excel */}
+          <div className="border-2 border-red-200 dark:border-red-800 rounded-lg p-4 bg-red-50/30 dark:bg-red-900/10">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 rounded bg-red-600 flex items-center justify-center text-white font-bold text-xs">S</div>
+              <div>
+                <div className="font-semibold text-sm text-red-700 dark:text-red-300">Santander (Excel)</div>
+                <div className="text-[10px] text-muted-foreground">Columnas: Cargo/Abono (+/-) e Importe</div>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded border p-2 text-[10px] font-mono overflow-x-auto">
+              <div className="grid grid-cols-4 gap-1 text-muted-foreground border-b pb-1 mb-1">
+                <span>FECHA</span><span>DESCRIPCIÓN</span><span className="text-center">CARGO/ABONO</span><span className="text-right">IMPORTE</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <span>02012026</span><span className="truncate">PAGO TRANSFERENCIA</span><span className="text-center text-red-600">-</span><span className="text-right">25,000</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <span>06012026</span><span className="truncate">ABONO TRANSFERENCIA</span><span className="text-center text-emerald-600">+</span><span className="text-right">20,000</span>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">✅ Detección por header "Cargo/Abono" + signo +/- determina tipo</p>
+          </div>
+        </div>
       </Card>
 
       {/* Tabla de movimientos del periodo */}
@@ -2512,13 +2572,78 @@ function ContabilidadView() {
         </Card>
       </div>
 
-      {/* Botón generar */}
-      <div className="flex justify-end">
+      {/* Botones de contabilidad automática */}
+      <div className="flex justify-end gap-2 flex-wrap">
+        <Button
+          variant="outline"
+          onClick={async () => {
+            if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+            const hoy = new Date();
+            const r = await fetch('/api/contabilidad/generar-automatico', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ empresaId: empresa.id, mes: hoy.getMonth() + 1, anio: hoy.getFullYear() }),
+            });
+            const d = await r.json();
+            if (d.success) {
+              toast.success('Contabilidad generada', `${d.polizasCreadas} pólizas con partida doble creadas`);
+              refresh();
+            } else {
+              toast.error('Error', d.error || 'No se pudo generar');
+            }
+          }}
+        >
+          <Sparkles size={14} className="mr-2" /> Generar con Partida Doble
+        </Button>
         <Button onClick={generarPolizas} disabled={generando}>
           {generando ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Sparkles size={14} className="mr-2" />}
           Generar pólizas de {MESES_NOMBRE[hoy.getMonth()]} {hoy.getFullYear()}
         </Button>
       </div>
+
+      {/* Botones de reportes contables */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h4 className="font-semibold text-sm flex items-center gap-2">
+            <FileSpreadsheet size={16} className="text-violet-600" /> Reportes Contables
+          </h4>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                const hoy = new Date();
+                const params = new URLSearchParams({
+                  mes: String(hoy.getMonth() + 1),
+                  anio: String(hoy.getFullYear()),
+                  empresaId: empresa.id,
+                  formato: 'excel',
+                });
+                window.open(`/api/contabilidad/balance-prueba?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={14} className="mr-1" /> Balance de Prueba
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                const hoy = new Date();
+                const params = new URLSearchParams({
+                  mes: String(hoy.getMonth() + 1),
+                  anio: String(hoy.getFullYear()),
+                  empresaId: empresa.id,
+                });
+                window.open(`/api/bancos/conciliacion-facturas?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={14} className="mr-1" /> Conciliación Banco-Facturas
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       {/* Tabla */}
       {polizas.length === 0 ? (

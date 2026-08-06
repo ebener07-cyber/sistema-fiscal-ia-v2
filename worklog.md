@@ -517,3 +517,74 @@ Stage Summary:
 - NO se clonó ningún repo externo (todos eran Python o no encajaban)
 - Toda la información se calcula de la BD real (Factura, ReciboNomina, MovimientoBanco, Empleado)
 - Listo para subir a GitHub: /download/sistema-fiscal-ia-github.zip
+
+---
+Task ID: 8
+Agent: Main Agent (Super Z)
+Task: Agregar botones en frontend para los 5 reportes SAT
+
+Work Log:
+- Agregado Card "Reportes SAT Oficiales" en ReportesView (sistema-completo.tsx)
+- 5 tarjetas con botones funcionales, cada una con color distintivo:
+  1. DIOT (TXT para SAT) — botón TXT + botón Excel, color azul
+  2. Cuestionario INEGI — botón Excel, color esmeralda
+  3. Impuesto sobre Nómina — botón Excel (Ene-Jun), color ámbar
+  4. Reporte Financiero Mensual — botón Excel (3 hojas), color violeta
+  5. CFDI Mensual Consolidado — botón Excel (5 hojas), color fucsia
+- Todos los botones validan empresa seleccionada antes de abrir
+- Usan window.open() para descargar directamente del endpoint
+- Importado icono Landmark de lucide-react
+- Build exitoso: ✓ Compiled successfully in 12.8s
+- ZIP actualizado: 220 archivos, 3.37 MB
+
+Stage Summary:
+- Frontend actualizado con los 5 reportes accesibles desde ReportesView
+- Botones descargan directamente los archivos listos para SAT
+- Listo para subir a GitHub
+
+---
+Task ID: 9
+Agent: Main Agent (Super Z)
+Task: Soporte Excel Banorte y Santander en upload-estado-cuenta
+
+Work Log:
+- Analizados 2 archivos Excel de saldos reales:
+  * SALDO SANTANDER $14,755.13.xlsx — formato: Cuenta|Fecha|Hora|Sucursal|Descripcion|Cargo/Abono|Importe|Saldo|Referencia|Concepto
+  * SALDO BANORTE $53,756.17.xlsx — formato: CUENTA|FECHA DE OPERACIÓN|FECHA|REFERENCIA|DESCRIPCIÓN|COD. TRANSAC|SUCURSAL|DEPÓSITOS|RETIROS|SALDO
+
+- Mejoras al parser Excel en /api/upload-estado-cuenta/route.ts:
+  1. Detección de columnas "Cargo/Abono" e "Importe" (formato Santander)
+     - Si detecta ambas, usa el signo (+/-) de Cargo/Abono para determinar depósito/retiro
+  2. Exclusión de "Cargo/Abono" en detección de Depósitos/Retiros
+     - Antes: "Cargo/Abono" matcheaba como "cargo" (retiro) y "abono" (depósito)
+     - Ahora: excluye explícitamente "cargo/abono" del patrón de depósito/retiro
+  3. Limpieza de apóstrofes y comillas en fechas
+     - Santander guarda fechas como '02012026' (con comillas literales)
+     - Ahora: replace(/['"]/g, '') limpia todas las comillas antes de parsear
+  4. Soporte para formato de fecha DDMMYYYY (8 dígitos sin separadores)
+     - Santander usa este formato
+
+- Resultados de prueba:
+  * Santander: 10 movimientos detectados correctamente
+    - Ingresos: $36,100.00 (2 depósitos)
+    - Egresos: $155,754.67 (8 retiros)
+    - Neto: -$119,654.67
+  * Banorte: 20 movimientos (10 hoja 1 + 10 hoja 2)
+    - Ingresos: $610,537.46
+    - Egresos: $449,623.05
+    - Neto: +$160,914.41
+
+- Frontend actualizado en BancosView:
+  * Agregado texto informativo: "✅ Soporta Excel de Banorte (DEPÓSITOS/RETIROS), Santander (Cargo/Abono+Importe) y PDF de ambos bancos"
+  * El botón de subir ya aceptaba .xlsx, .xls, .csv, .pdf (no requería cambios)
+
+- Build exitoso: ✓ Compiled successfully in 13.3s
+- ZIP actualizado: 222 archivos, 3.38 MB
+
+Stage Summary:
+- Parser Excel ahora soporta oficialmente 2 formatos adicionales:
+  1. Banorte: columnas DEPÓSITOS y RETIROS separadas
+  2. Santander: columnas Cargo/Abono (+/-) + Importe
+- Bug crítico corregido: fechas con apóstrofes literales ('02012026') no se parseaban
+- Frontend informativo sobre formatos soportados
+- Listo para subir a GitHub

@@ -142,26 +142,61 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
     let colFecha = 1, colConcepto = 2, colDeposito = 0, colRetiro = 0, colMonto = 0;
     let colDescripcionDetallada = 0;
     let colReferencia = 0;
+    let colCargoAbono = 0; // Para formato Santander: "+" o "-"
+    let colImporte = 0;     // Para formato Santander: importe sin signo
 
     for (let c = 1; c <= Math.max(headers.length, 20); c++) {
       const h = headers[c] || '';
-      if (h.includes('fecha') && !h.includes('opera')) colFecha = c;
-      else if (h.includes('fecha')) colFecha = c; // "FECHA DE OPERACIÓN" también cuenta
-      if (h === 'descripción' || h === 'descripcion' || h.includes('descrip') || h.includes('concepto') || h.includes('detalle')) {
-        if (!colConcepto || colConcepto === 2) colConcepto = c;
+      // === FORMATO SANTANDER ===
+      // Cuenta | Fecha | Hora | Sucursal | Descripcion | Cargo/Abono | Importe | Saldo | Referencia | Concepto
+      if (h === 'fecha') colFecha = c;
+      else if (h.includes('fecha de operaci') || h.includes('fecha operacion')) colFecha = c;
+      else if (h.includes('fecha')) colFecha = c;
+
+      // Columna "Descripcion" (Santander) — es la descripción corta del movimiento
+      if (h === 'descripcion' || h === 'descripción') {
+        colConcepto = c;
       }
-      if (h.includes('descripción detallada') || h.includes('descripcion detallada')) colDescripcionDetallada = c;
-      if (h.includes('referencia')) colReferencia = c;
+      // Columna "Concepto" (Santander) — descripción detallada adicional
+      else if (h === 'concepto') {
+        colDescripcionDetallada = c;
+      }
+      // "DESCRIPCIÓN" (Banorte) — descripción del movimiento
+      else if (h.includes('descrip') && !colConcepto) {
+        colConcepto = c;
+      }
+      else if (h.includes('detalle') || h.includes('descripción detallada') || h.includes('descripcion detallada')) {
+        colDescripcionDetallada = c;
+      }
+
+      // Cargo/Abono (Santander) — indica "+" (depósito) o "-" (retiro)
+      if (h.includes('cargo/abono') || h.includes('cargo abono') || h === 'cargo/abono') {
+        colCargoAbono = c;
+      }
+
+      // Importe (Santander) — monto sin signo (el signo viene en Cargo/Abono)
+      if (h === 'importe') {
+        colImporte = c;
+      }
+
+      // Referencia
+      if (h.includes('referencia') && !h.includes('descripcion')) colReferencia = c;
+
+      // === FORMATO BANORTE ===
       // Depósitos / Abonos / Créditos
-      if (h.includes('depósito') || h.includes('deposito') || h.includes('abono') || h.includes('crédito') || h.includes('credito') || h.includes('ingreso')) {
+      // IMPORTANTE: excluir "Cargo/Abono" (formato Santander) para que no se confunda
+      if ((h.includes('depósito') || h.includes('deposito') || h.includes('abono') || h.includes('crédito') || h.includes('credito') || h.includes('ingreso'))
+          && !h.includes('cargo/abono') && !h.includes('cargo abono')) {
         colDeposito = c;
       }
       // Retiros / Cargos / Débitos
-      if (h.includes('retiro') || h.includes('cargo') || h.includes('débito') || h.includes('debito') || h.includes('egreso')) {
+      // IMPORTANTE: excluir "Cargo/Abono" (formato Santander) para que no se confunda
+      if ((h.includes('retiro') || h.includes('cargo') || h.includes('débito') || h.includes('debito') || h.includes('egreso'))
+          && !h.includes('cargo/abono') && !h.includes('cargo abono')) {
         colRetiro = c;
       }
       // Monto único (con signo)
-      if (h.includes('monto') || h.includes('importe') || h.includes('amount') || h.includes('movimiento')) {
+      if (h.includes('monto') || h.includes('amount') || h.includes('movimiento')) {
         colMonto = c;
       }
     }
@@ -184,14 +219,31 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
           // Excel serial date
           fecha = new Date(Date.UTC(1899, 11, 30) + cellFecha * 24 * 60 * 60 * 1000);
         } else if (typeof cellFecha === 'string') {
-          if (cellFecha.match(/^\d{4}-\d{2}-\d{2}/)) {
-            fecha = new Date(cellFecha);
-          } else if (cellFecha.match(/^\d{1,2}\/\d{1,2}\/\d{4}/)) {
-            const [dia, mes, anio] = cellFecha.split('/');
-            fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
-          } else if (cellFecha.match(/^\d{1,2}-\d{1,2}-\d{4}/)) {
-            const [dia, mes, anio] = cellFecha.split('-');
-            fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
+          // Limpiar apóstrofes y comillas (Excel a veces guarda '02012026' como texto literal con comillas)
+          const fechaLimpia = cellFecha.replace(/['"]/g, '').trim();
+          // Formato DDMMYYYY (Santander: '02012026' → 02012026)
+          if (fechaLimpia.match(/^\d{8}$/)) {
+            const dia = parseInt(fechaLimpia.slice(0, 2));
+            const mes = parseInt(fechaLimpia.slice(2, 4));
+            const anio = parseInt(fechaLimpia.slice(4, 8));
+            fecha = new Date(anio, mes - 1, dia, 12, 0, 0);
+          }
+          // Formato YYYY-MM-DD
+          else if (fechaLimpia.match(/^\d{4}-\d{2}-\d{2}/)) {
+            fecha = new Date(fechaLimpia);
+          }
+          // Formato DD/MM/YYYY
+          else if (fechaLimpia.match(/^\d{1,2}\/\d{1,2}\/\d{4}/)) {
+            const partes = fechaLimpia.split('/');
+            const p1 = parseInt(partes[0]), p2 = parseInt(partes[1]), anio = parseInt(partes[2]);
+            if (p1 > 12) fecha = new Date(anio, p2 - 1, p1, 12, 0, 0);
+            else if (p2 > 12) fecha = new Date(anio, p1 - 1, p2, 12, 0, 0);
+            else fecha = new Date(anio, p2 - 1, p1, 12, 0, 0); // Asumir DD/MM/YYYY
+          }
+          // Formato DD-MM-YYYY
+          else if (fechaLimpia.match(/^\d{1,2}-\d{1,2}-\d{4}/)) {
+            const [dia, mes, anio] = fechaLimpia.split('-');
+            fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia), 12, 0, 0);
           }
         }
         if (!fecha || isNaN(fecha.getTime())) continue;
@@ -207,7 +259,7 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
         }
         if (colReferencia) {
           const ref = String(fila.getCell(colReferencia).value || '').trim();
-          if (ref && ref !== '-') {
+          if (ref && ref !== '-' && ref !== '0') {
             concepto = `Ref: ${ref} · ${concepto}`.slice(0, 500);
           }
         }
@@ -215,8 +267,16 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
         // Calcular monto según el formato detectado
         let monto = 0;
 
-        // Caso 1: Banorte-style — columnas separadas Depósito/Retiro
-        if (colDeposito || colRetiro) {
+        // === FORMATO SANTANDER (Cargo/Abono + Importe) ===
+        if (colCargoAbono && colImporte) {
+          const signo = String(fila.getCell(colCargoAbono).value || '').trim();
+          const importe = parseNumberFromCell(fila.getCell(colImporte).value);
+          if (signo === '+') monto = Math.abs(importe);
+          else if (signo === '-') monto = -Math.abs(importe);
+          else monto = importe; // Si no hay signo, asumir positivo
+        }
+        // Caso Banorte — columnas separadas Depósito/Retiro
+        else if (colDeposito || colRetiro) {
           let deposito = 0, retiro = 0;
           if (colDeposito) {
             const val = parseNumberFromCell(fila.getCell(colDeposito).value);
@@ -228,11 +288,11 @@ async function parseExcel(buffer: Buffer): Promise<MovimientoImportado[]> {
           }
           monto = deposito - retiro;
         }
-        // Caso 2: Monto único con signo
+        // Caso Monto único con signo
         else if (colMonto) {
           monto = parseNumberFromCell(fila.getCell(colMonto).value);
         }
-        // Caso 3: Fallback — buscar cualquier número en la fila después de la columna concepto
+        // Fallback — buscar cualquier número en la fila después de la columna concepto
         else {
           for (let c = colConcepto + 1; c <= Math.min(fila.cellCount, 15); c++) {
             const val = parseNumberFromCell(fila.getCell(c).value);

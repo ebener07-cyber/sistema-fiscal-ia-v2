@@ -310,10 +310,40 @@ model Poliza {
   cargo       Float    @default(0)
   abono       Float    @default(0)
   estado      String   @default("conciliada")
+  empresaId   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Partidas individuales (partida doble)
+  lineas      PolizaLinea[]
+
   @@index([fecha])
+  @@index([empresaId])
+  @@index([tipo])
+}
+
+// ============================================================================
+// PARTIDA DOBLE — Cada póliza tiene líneas individuales (cargo y abono)
+// Estilo blnk-ts: cada transacción afecta al menos 2 cuentas
+// ============================================================================
+model PolizaLinea {
+  id          String   @id @default(cuid())
+  polizaId    String
+  poliza      Poliza   @relation(fields: [polizaId], references: [id], onDelete: Cascade)
+  // Cuenta contable (catálogo)
+  cuentaCodigo String  // ej: "1000", "1100", "4000", "5000"
+  cuentaNombre String  // ej: "Bancos", "Clientes", "Ventas", "Costos"
+  // Tipo: cargo (débito) o abono (crédito)
+  tipo        String   // "cargo" | "abono"
+  monto       Float
+  // Referencia al origen (factura, movimiento banco, recibo nómina)
+  origenTipo  String?  // "factura" | "movimiento_banco" | "nomina" | "manual"
+  origenId    String?  // ID del registro de origen
+  descripcion String?
+  createdAt   DateTime @default(now())
+
+  @@index([polizaId])
+  @@index([cuentaCodigo])
 }
 
 // ============================================================================
