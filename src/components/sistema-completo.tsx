@@ -2506,6 +2506,12 @@ function ContabilidadView() {
   const { data, loading, refresh } = useApiData<{ polizas: any[] }>('/api/polizas', empresa?.id);
   const [generando, setGenerando] = useState(false);
   const hoy = new Date();
+  const [uploadingCfdi, setUploadingCfdi] = useState(false);
+  const [uploadMsgCfdi, setUploadMsgCfdi] = useState('');
+  const [uploadResultados, setUploadResultados] = useState<any[]>([]);
+  const [cfdiTab, setCfdiTab] = useState<'recibidas' | 'emitidas'>('recibidas');
+  const [forzarCfdi, setForzarCfdi] = useState(false);
+  const [conciliando, setConciliando] = useState(false);
 
   const generarPolizas = async () => {
     if (!empresa?.id) {
@@ -2539,6 +2545,65 @@ function ContabilidadView() {
 
   if (loading) return <LoadingView message="Cargando pólizas..." />;
 
+  // Función para subir CFDIs desde Contabilidad
+  const handleUploadCfdi = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+    setUploadingCfdi(true);
+    setUploadMsgCfdi('');
+    setUploadResultados([]);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
+      formData.append('direccion', cfdiTab === 'recibidas' ? 'recibida' : 'emitida');
+      formData.append('empresaId', empresa.id);
+      if (forzarCfdi) formData.append('force', 'true');
+
+      const r = await fetch('/api/upload-cfdi', { method: 'POST', body: formData });
+      const d = await r.json();
+      if (d.success) {
+        setUploadMsgCfdi(`✅ ${d.message}`);
+        setUploadResultados(d.detalles || []);
+        toast.success('CFDIs cargados', d.message);
+      } else {
+        setUploadMsgCfdi(`❌ ${d.error || 'Error al subir'}`);
+        toast.error('Error', d.error || 'No se pudo subir');
+      }
+    } catch (e: any) {
+      setUploadMsgCfdi(`❌ ${e.message}`);
+      toast.error('Error', e.message);
+    } finally {
+      setUploadingCfdi(false);
+      e.target.value = '';
+    }
+  };
+
+  // Función para ejecutar conciliación automática
+  const ejecutarConciliacion = async () => {
+    if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+    setConciliando(true);
+    try {
+      const r = await fetch('/api/agentes/conciliador-banco', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresaId: empresa.id, opciones: { limite: 2000, forzarReconciliar: true } }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast.success('Conciliación completada', `${d.conciliados} conciliados, ${d.noRequiereFactura} no requieren factura, ${d.sinMatch} sin match de ${d.totalProcesados}`);
+      } else {
+        toast.error('Error', d.error || 'No se pudo conciliar');
+      }
+    } catch (e: any) {
+      toast.error('Error', e.message);
+    } finally {
+      setConciliando(false);
+    }
+  };
+
   // Calcular totales
   const polizas = data?.polizas || [];
   const totalCargos = polizas.reduce((s: number, p: any) => s + (p.cargo || 0), 0);
@@ -2571,6 +2636,123 @@ function ContabilidadView() {
           </div>
         </Card>
       </div>
+
+      {/* ===== CFDI UPLOAD + CONCILIACIÓN ===== */}
+      <Card className="p-5">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <Upload size={18} className="text-violet-600" /> Cargar CFDIs del SAT + Conciliación Automática
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Sube TODOS tus CFDIs del SAT (facturas, complementos de pago, canceladas) para que el sistema
+          los concilie automáticamente con los movimientos bancarios. Después de subir, ejecuta la conciliación.
+        </p>
+
+        {/* Tabs Recibidas/Emitidas */}
+        <div className="flex gap-2 border-b mb-3">
+          <button
+            onClick={() => setCfdiTab('recibidas')}
+            className={cn('px-4 py-2 font-medium text-sm border-b-2 transition-colors',
+              cfdiTab === 'recibidas' ? 'border-violet-600 text-violet-600' : 'border-transparent text-muted-foreground hover:text-foreground')}
+          >
+            📥 CFDIs Recibidos (compras)
+          </button>
+          <button
+            onClick={() => setCfdiTab('emitidas')}
+            className={cn('px-4 py-2 font-medium text-sm border-b-2 transition-colors',
+              cfdiTab === 'emitidas' ? 'border-violet-600 text-violet-600' : 'border-transparent text-muted-foreground hover:text-foreground')}
+          >
+            📤 CFDIs Emitidos (ventas)
+          </button>
+        </div>
+
+        {/* Checkbox forzar actualización */}
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <label className="flex items-center gap-2 text-xs cursor-pointer bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition">
+            <input
+              type="checkbox"
+              checked={forzarCfdi}
+              onChange={e => setForzarCfdi(e.target.checked)}
+              className="w-4 h-4 accent-amber-600"
+            />
+            <span className="font-medium text-amber-700 dark:text-amber-300">
+              🔄 Forzar actualización
+            </span>
+          </label>
+        </div>
+
+        {/* Upload zone */}
+        <label className="border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
+          <Upload size={32} className="text-muted-foreground mb-2" />
+          <span className="text-sm font-medium">
+            {uploadingCfdi ? 'Procesando...' : 'Haz clic o arrastra tus archivos XML/ZIP aquí'}
+          </span>
+          <span className="text-xs text-muted-foreground mt-1">
+            Formatos: <strong>.xml</strong> (parsea) · <strong>.zip</strong> (descomprime) · <strong>.pdf</strong> (guarda)
+            <br />
+            ✅ Acepta: Facturas (I) · Notas de crédito (E) · <strong>Complementos de pago (P)</strong> · <strong>Canceladas</strong>
+          </span>
+          <input type="file" accept=".xml,.pdf,.zip" multiple onChange={handleUploadCfdi} disabled={uploadingCfdi || !empresa?.id} className="hidden" />
+        </label>
+
+        {!empresa?.id && <p className="text-xs text-amber-600 mt-2">⚠️ Selecciona una empresa primero</p>}
+
+        {/* Upload message */}
+        {uploadMsgCfdi && (
+          <div className={cn('mt-3 p-3 rounded-lg text-sm', uploadMsgCfdi.startsWith('✅') ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300')}>
+            {uploadMsgCfdi}
+          </div>
+        )}
+
+        {/* Upload results */}
+        {uploadResultados.length > 0 && (
+          <div className="mt-3 max-h-48 overflow-y-auto border rounded-lg">
+            {uploadResultados.map((r, i) => (
+              <div key={i} className={cn('text-xs px-3 py-1.5 border-b last:border-0',
+                r.estado === 'error' ? 'bg-red-50 dark:bg-red-900/20' :
+                r.estado === 'duplicado' ? 'bg-yellow-50 dark:bg-yellow-900/20' :
+                r.estado === 'pago_guardado' ? 'bg-blue-50 dark:bg-blue-900/20' :
+                r.estado === 'cancelada_guardada' || r.estado === 'cancelada_actualizada' ? 'bg-orange-50 dark:bg-orange-900/20' :
+                'bg-emerald-50 dark:bg-emerald-900/20'
+              )}>
+                <strong>{r.archivo}</strong>: {r.mensaje}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Botón conciliación automática */}
+        <div className="mt-4 flex gap-2 flex-wrap">
+          <Button
+            onClick={ejecutarConciliacion}
+            disabled={conciliando || !empresa?.id}
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            {conciliando ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Banknote size={14} className="mr-2" />}
+            🔗 Ejecutar Conciliación Automática
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+              const params = new URLSearchParams({
+                empresaId: empresa.id,
+                anio: String(new Date().getFullYear()),
+              });
+              window.open(`/api/reportes/bancos-cfdi?${params}`, '_blank');
+            }}
+          >
+            <FileSpreadsheet size={14} className="mr-2" /> Descargar REPORTE BANCOS PDF
+          </Button>
+        </div>
+
+        {/* Leyenda de estados */}
+        <div className="mt-3 flex gap-4 flex-wrap text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> CONCILIADO</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500"></span> NO_REQUIERE_FACTURA</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> SIN_FACTURA</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500"></span> MULTIPLES_MATCHES</span>
+        </div>
+      </Card>
 
       {/* Botones de contabilidad automática */}
       <div className="flex justify-end gap-2 flex-wrap">
@@ -5897,6 +6079,51 @@ function ProyectosView() {
         </Card>
       )}
 
+      {/* ===== SUBIR CONTRATO PDF ===== */}
+      <Card className="p-5 border-2 border-violet-200 dark:border-violet-800 bg-violet-50/30 dark:bg-violet-900/10">
+        <h3 className="font-semibold mb-2 flex items-center gap-2">
+          <Upload size={18} className="text-violet-600" /> Subir Contrato PDF
+        </h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Sube el PDF del contrato y el sistema extrae automáticamente: monto, cliente, RFC, fecha, ubicación, tipo de obra, plazo y anticipo.
+          Se crea un proyecto con todos los datos y se asocian las facturas correspondientes.
+        </p>
+        <label className="border-2 border-dashed border-violet-300 dark:border-violet-700 rounded-lg p-5 flex flex-col items-center justify-center cursor-pointer hover:border-violet-500 hover:bg-violet-100 dark:hover:bg-violet-900/20 transition-colors">
+          <Upload size={24} className="text-violet-500 mb-2" />
+          <span className="text-sm font-medium">Subir contrato en PDF</span>
+          <span className="text-xs text-muted-foreground mt-1">El sistema lee el contrato y crea el proyecto automáticamente</span>
+          <input
+            type="file"
+            accept=".pdf"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file || !empresa?.id) return;
+              toast.info('Procesando contrato...', 'Extrayendo datos del PDF');
+              try {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('empresaId', empresa.id);
+                const r = await fetch('/api/proyectos/upload-contrato', { method: 'POST', body: formData });
+                const d = await r.json();
+                if (d.success) {
+                  toast.success('Contrato procesado', d.message);
+                  if (d.datosExtraidos?.monto) {
+                    toast.info('Datos extraídos', `Monto: $${d.datosExtraidos.monto?.toFixed(2)} | Cliente: ${d.datosExtraidos.clienteNombre || 'N/A'} | RFC: ${d.datosExtraidos.clienteRfc || 'N/A'}`);
+                  }
+                  refresh();
+                } else {
+                  toast.error('Error', d.error || 'No se pudo procesar');
+                }
+              } catch (err: any) {
+                toast.error('Error', err.message);
+              }
+              e.target.value = '';
+            }}
+            className="hidden"
+          />
+        </label>
+      </Card>
+
       {/* Lista de proyectos */}
       {proyectos.length === 0 ? (
         <Card className="p-10 text-center text-muted-foreground">
@@ -5925,6 +6152,50 @@ function ProyectosView() {
                   )}
                   {p.descripcion && (
                     <p className="text-xs text-muted-foreground mt-1">{p.descripcion}</p>
+                  )}
+                  {/* Datos del contrato */}
+                  {p.contratoMonto && (
+                    <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
+                      {p.contratoMonto && (
+                        <div className="bg-violet-50 dark:bg-violet-900/20 rounded p-1.5">
+                          <span className="text-muted-foreground">Contrato:</span>
+                          <span className="font-bold text-violet-700 dark:text-violet-300 ml-1">{fmt(p.contratoMonto)}</span>
+                        </div>
+                      )}
+                      {p.clienteRfc && (
+                        <div className="bg-blue-50 dark:bg-blue-900/20 rounded p-1.5">
+                          <span className="text-muted-foreground">RFC:</span>
+                          <span className="font-mono ml-1">{p.clienteRfc}</span>
+                        </div>
+                      )}
+                      {p.ubicacion && (
+                        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded p-1.5">
+                          <span className="text-muted-foreground">Ubicación:</span>
+                          <span className="ml-1">{p.ubicacion.slice(0, 30)}</span>
+                        </div>
+                      )}
+                      {p.plazoDias && (
+                        <div className="bg-amber-50 dark:bg-amber-900/20 rounded p-1.5">
+                          <span className="text-muted-foreground">Plazo:</span>
+                          <span className="font-bold ml-1">{p.plazoDias} días</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* Barra de avance del contrato */}
+                  {p.contratoMonto && p.montoFacturado !== undefined && (
+                    <div className="mt-2">
+                      <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                        <span>Avance: {fmt(p.montoFacturado || 0)} / {fmt(p.contratoMonto)}</span>
+                        <span className="font-bold">{p.porcentajeAvance || 0}%</span>
+                      </div>
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all"
+                          style={{ width: `${Math.min(100, p.porcentajeAvance || 0)}%` }}
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
                 <div className="text-right text-xs">

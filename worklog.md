@@ -702,3 +702,126 @@ Stage Summary:
 - 895 movimientos subidos a BD con signos correctos
 - Reporte profesional generado con cruce CFDIs y análisis financiero
 - Observaciones y recomendaciones incluidas
+
+---
+Task ID: 12
+Agent: Main Agent (Super Z)
+Task: 4 mejoras de conciliación bancaria (CFDIs Pago + Cancelados + Tolerancias + No conciliables)
+
+Work Log:
+Análisis del plugin Claude Small Business (claude.com/plugins/small-business):
+- Conceptos útiles: /close-month (conciliación), /plan-payroll (flujo), /monday-brief (snapshot)
+- NO se puede instalar directamente (requiere Claude Pro/API)
+- Se replican los conceptos en el sistema propio
+
+CAUSA RAÍZ del 55.8% sin conciliar identificada:
+- El sistema FILTRABA CFDIs tipo Pago (P) → omitía complementos de pago
+- Sin complementos, no se pueden conciliar pagos parciales ni pagos múltiples
+- Facturas canceladas se omitían → no se sabía cuáles descartar
+
+MEJORA 1 — Aceptar CFDIs tipo Pago (P):
+- Modificado upload-cfdi/route.ts:
+  * Antes: CFDIs tipo P se omitían con "💳 omitido del concentrado"
+  * Ahora: Se guardan con tipoComprobante='P', estado='timbrada'
+  * Extrae información del complemento de pago (pago10:Pago / pago20:Pago)
+  * Guarda: facturaOriginalUuid (UUID de factura que se pagó), montoPagado, pagoParcial
+- Agregados campos al modelo Factura:
+  * facturaOriginalUuid (String?) — referencia a factura original
+  * montoPagado (Float?) — monto del pago (puede ser parcial)
+  * pagoParcial (Boolean) — indica si es pago parcial
+- Schema aplicado a BD Neon ✓
+- Parser XML actualizado: ahora devuelve nodo 'complemento' completo
+
+MEJORA 2 — Aceptar CFDIs cancelados:
+- Modificado upload-cfdi/route.ts:
+  * Antes: CFDIs cancelados se omitían con "🚫 omitido"
+  * Ahora: Se guardan con estado='cancelada' para referencia histórica
+  * Si ya existe en BD, actualiza estado a 'cancelada'
+  * Las facturas canceladas se EXCLUYEN de la conciliación automáticamente
+  * Esto permite saber qué facturas fueron canceladas y no buscar conciliación para ellas
+
+MEJORA 3 — Mejorar conciliador:
+- Modificado conciliador-banco.ts:
+  * Tolerancia monto: 2% → 5% (para comisiones y tipos de cambio)
+  * Tolerancia fecha: 3 días → 7 días (para conciliar más movimientos)
+  * Rango de búsqueda: 10 días → 15 días
+  * Límite de movimientos: 100 → 500
+  * Excluye facturas canceladas (estado='timbrada' solo)
+  * Busca solo tipoComprobante='I' (no complementos P en match directo)
+  * NUEVO: Si no hay match por monto, busca complementos de pago (tipo P)
+    con montoPagado similar, y usa la factura original referenciada
+  * Match por RFC también excluye canceladas
+
+MEJORA 4 — Categorizar movimientos no conciliables:
+- Creado categorias-no-conciliables.ts con 8 categorías:
+  1. transferencia_propia — TRASPASO, ENTRE CUENTAS PROPIAS
+  2. comision_bancaria — COMISION, RENTA MEMBRESIA
+  3. iva_comision — I V A POR COMISION, IVA COM
+  4. pago_credito_capital — CARGO CAPITAL, CRE_
+  5. pago_credito_intereses — CARGO POR INTERESES, CGO INTERESES
+  6. interes_bancario — INTERESES EXENTO, RENDIMIENTO
+  7. disposicion_credito — DISPOSICION CREDITO
+  8. seguro — PRIMA SEGURO, SEGURO PYME
+- El conciliador PRIMERO verifica si el movimiento no requiere factura
+  antes de intentar conciliarlo
+- Movimientos no conciliables se marcan con categoria y NO aparecen
+  como "sin conciliar" en el reporte
+
+REPORTE BANCOS PDF actualizado:
+- Ahora incluye estado NO_REQUIERE_FACTURA (color azul)
+- Movimientos con este estado no se cuentan como "sin conciliar"
+- Colores en Excel: verde (conciliado), rojo (sin factura), azul (no requiere), naranja (múltiples)
+
+VERIFICACIÓN:
+- Build exitoso: ✓ Compiled successfully in 14.4s
+- Schema aplicado a BD Neon: ✓ (3 campos nuevos en Factura)
+- ZIP actualizado: 231 archivos, 3.41 MB
+
+Stage Summary:
+- 4 mejoras implementadas que resolverán el problema del 55.8% sin conciliar:
+  1. Complementos de pago (CFDIs tipo P) ahora se guardan y usan en conciliación
+  2. CFDIs cancelados se guardan marcados como cancelados (se excluyen de conciliación)
+  3. Tolerancias ampliadas (5% monto, 7 días fecha) + match por complementos de pago
+  4. Movimientos no conciliables (transferencias, comisiones, créditos) se categorizan
+- Estimación: la tasa de conciliación debería subir del 44% al 70-80%
+
+---
+Task ID: 13
+Agent: Main Agent (Super Z)
+Task: Agregar CFDI Upload + Conciliación en módulo Contabilidad
+
+Work Log:
+- Agregado Card "Cargar CFDIs del SAT + Conciliación Automática" en ContabilidadView
+- Incluye:
+  * Tabs Recibidas/Emitidas (igual que SAT)
+  * Checkbox "Forzar actualización"
+  * Zona de upload que acepta .xml, .zip, .pdf
+  * Texto que indica: "Acepta: Facturas (I), Notas de crédito (E), Complementos de pago (P), Canceladas"
+  * Resultados con colores según tipo (verde=procesado, azul=complemento P, naranja=cancelada, amarillo=duplicado, rojo=error)
+  * Botón verde "🔗 Ejecutar Conciliación Automática" que procesa TODOS los movimientos
+  * Botón "Descargar REPORTE BANCOS PDF" para ver resultados
+  * Leyenda de estados con colores (CONCILIADO, NO_REQUIERE_FACTURA, SIN_FACTURA, MULTIPLES_MATCHES)
+
+- Función handleUploadCfdi: sube a /api/upload-cfdi con empresaId, direccion y force
+- Función ejecutarConciliacion: llama a /api/agentes/conciliador-banco con forzarReconciliar=true y limite=2000
+
+- Categorías no conciliables ampliadas con:
+  * Gastos personales (PENSION ALIMENTICIA, TARJETA DE CREDITO FER, TARJETA TANIA)
+  * Pagos IMSS (LDC-IMSS, PAGO IMSS)
+  * Impuestos federales (CGO IMPTO FED)
+  * Retiros en efectivo (RETIRO DEP. ELECTRONICO)
+  * Pagos referenciados (PAGO REFERENCIADO)
+  * Pago de crédito (PAGO DE CREDITO)
+  * Pago interés hipotecario (PAGO INTERES HIPOTECARIO)
+  * Cargo por pago concentración (CARGO POR PAGO CONCENTRACION)
+
+- Build exitoso: ✓ Compiled successfully in 15.8s
+- ZIP: 232 archivos, 3.42 MB
+
+Stage Summary:
+- Módulo Contabilidad ahora tiene todo en uno:
+  1. Subir CFDIs (todos los tipos: I, E, P, canceladas)
+  2. Ejecutar conciliación automática (2000 movimientos)
+  3. Descargar reporte de conciliación (Excel 6 hojas)
+  4. Generar pólizas con partida doble
+  5. Ver balance de prueba

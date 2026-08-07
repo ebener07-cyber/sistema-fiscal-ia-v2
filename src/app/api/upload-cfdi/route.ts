@@ -133,8 +133,9 @@ function parseCFDIXML(xmlContent: string) {
       receptorUsoCfdi,
       lugarExpedicion,
       estado,
-      conceptoTexto, // ← NUEVO: descripciones concatenadas
-      descripcionesConceptos, // ← NUEVO: array de descripciones individuales
+      conceptoTexto,
+      descripcionesConceptos,
+      complemento, // ← NUEVO: nodo completo del complemento (para pagos)
     };
   } catch (e) {
     console.error('Error parseando CFDI:', e);
@@ -372,15 +373,147 @@ export async function POST(req: NextRequest) {
           const esPago = cfdi.tipoComprobante === 'P';
           const esTraslado = cfdi.tipoComprobante === 'T';
 
-          // Saltar CFDIs cancelados — solo procesamos activos
+          // ===== CFDIs CANCELADOS: guardar marcados como cancelados (para referencia histórica) =====
+          // Antes se omitían, ahora se guardan con estado='cancelada' para poder identificar
+          // qué facturas fueron canceladas y NO deben conciliarse
           if (esCancelada) {
-            detalles.push({ archivo: file.name, estado: 'cancelada', mensaje: '🚫 CFDI cancelado — omitido' });
+            // Verificar duplicado por UUID
+            if (cfdi.uuid) {
+              const existenteCancelada = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
+              if (existenteCancelada) {
+                // Si ya existe, actualizar estado a cancelada
+                await db.factura.update({
+                  where: { id: existenteCancelada.id },
+                  data: { estado: 'cancelada' },
+                });
+                duplicados++;
+                detalles.push({ archivo: file.name, estado: 'cancelada_actualizada', mensaje: `🚫 CFDI cancelado — estado actualizado en BD` });
+                continue;
+              }
+            }
+
+            // Guardar como cancelada para referencia
+            let clienteIdCancelada: string | null = null;
+            let proveedorIdCancelada: string | null = null;
+            if (direccion === 'emitida') {
+              clienteIdCancelada = await obtenerOcrearCliente(cfdi.receptorRfc, cfdi.receptorNombre, empId);
+            } else {
+              proveedorIdCancelada = await obtenerOcrearProveedor(cfdi.emisorRfc, cfdi.emisorNombre, empId);
+            }
+
+            await db.factura.create({
+              data: {
+                folio: cfdi.folio, serie: cfdi.serie, fecha: cfdi.fecha,
+                subtotal: cfdi.subtotal, descuento: cfdi.descuento || 0,
+                totalImpuestos: cfdi.totalImpuestos, impuestoRetenido: cfdi.impuestoRetenido || 0,
+                total: cfdi.total, moneda: cfdi.moneda,
+                tipoComprobante: cfdi.tipoComprobante,
+                metodoPago: cfdi.metodoPago, formaPago: cfdi.formaPago,
+                uuid: cfdi.uuid || `${file.name}-${Date.now()}`,
+                direccion, estado: 'cancelada',
+                empresaId: empId, clienteId: clienteIdCancelada, proveedorId: proveedorIdCancelada,
+                emisorRfc: cfdi.emisorRfc, emisorNombre: cfdi.emisorNombre,
+                receptorRfc: cfdi.receptorRfc, receptorNombre: cfdi.receptorNombre,
+                concepto: cfdi.conceptoTexto || null,
+              },
+            });
+            detalles.push({ archivo: file.name, estado: 'cancelada_guardada', mensaje: `🚫 CFDI cancelado guardado para referencia (no se usará en conciliación)` });
             continue;
           }
 
-          // Saltar CFDIs tipo Pago (P) — van en su propio reporte, no en facturación
+          // ===== CFDIs tipo Pago (P): complementos de pago — NUEVO: ahora se guardan =====
+          // Los complementos de pago registran qué factura se pagó, cuánto y cuándo
+          // Son CRÍTICOS para la conciliación bancaria
           if (esPago) {
-            detalles.push({ archivo: file.name, estado: 'pago', mensaje: '💳 CFDI tipo Pago (P) — omitido del concentrado' });
+            // Extraer información del complemento de pago del XML
+            // El nodo cfdi:Complemento contiene pago10:Pago con los detalles
+            let facturaOriginalUuid = '';
+            let montoPagado = 0;
+            let pagoParcial = false;
+
+            try {
+              const complemento = (cfdi as any).complemento || {};
+              // Buscar el nodo de pago en el XML original
+              // El monto total del CFDI tipo P es $0, pero el monto pagado va en el complemento
+              const pagoNode = complemento['pago10:Pago'] || complemento['pago20:Pago'] || complemento['Pago'] || {};
+
+              if (Array.isArray(pagoNode)) {
+                // Múltiples pagos en un solo complemento
+                for (const p of pagoNode) {
+                  const doctosRelacionados = p['pago10:DoctoRelacionado'] || p['pago20:DoctoRelacionado'] || p['DoctoRelacionado'] || [];
+                  const docs = Array.isArray(doctosRelacionados) ? doctosRelacionados : [doctosRelacionados];
+                  for (const doc of docs) {
+                    const uuidDoc = doc['@_IdDocumento'] || doc['@_UUID'] || '';
+                    const montoDoc = parseFloat(doc['@_ImpPagado'] || doc['@_ImportePagado'] || '0') || 0;
+                    if (uuidDoc) {
+                      facturaOriginalUuid = uuidDoc;
+                      montoPagado += montoDoc;
+                    }
+                  }
+                }
+              } else if (typeof pagoNode === 'object' && pagoNode) {
+                const doctosRelacionados = pagoNode['pago10:DoctoRelacionado'] || pagoNode['pago20:DoctoRelacionado'] || pagoNode['DoctoRelacionado'] || [];
+                const docs = Array.isArray(doctosRelacionados) ? doctosRelacionados : [doctosRelacionados];
+                for (const doc of docs) {
+                  const uuidDoc = doc['@_IdDocumento'] || doc['@_UUID'] || '';
+                  const montoDoc = parseFloat(doc['@_ImpPagado'] || doc['@_ImportePagado'] || '0') || 0;
+                  if (uuidDoc) {
+                    facturaOriginalUuid = uuidDoc;
+                    montoPagado += montoDoc;
+                  }
+                }
+              }
+            } catch (e) {
+              // Si no se puede extraer el complemento, guardar sin relación
+            }
+
+            // Si no se encontró monto pagado, usar el total del CFDI (puede ser 0)
+            if (montoPagado === 0) montoPagado = cfdi.total;
+
+            // Verificar duplicado
+            if (cfdi.uuid) {
+              const existentePago = await db.factura.findUnique({ where: { uuid: cfdi.uuid } });
+              if (existentePago) {
+                duplicados++;
+                detalles.push({ archivo: file.name, estado: 'duplicado', mensaje: `💳 Complemento de pago ${cfdi.uuid.slice(0, 8)} ya existe` });
+                continue;
+              }
+            }
+
+            // Guardar el complemento de pago como una factura con tipoComprobante='P'
+            let clienteIdPago: string | null = null;
+            let proveedorIdPago: string | null = null;
+            if (direccion === 'emitida') {
+              clienteIdPago = await obtenerOcrearCliente(cfdi.receptorRfc, cfdi.receptorNombre, empId);
+            } else {
+              proveedorIdPago = await obtenerOcrearProveedor(cfdi.emisorRfc, cfdi.emisorNombre, empId);
+            }
+
+            await db.factura.create({
+              data: {
+                folio: cfdi.folio, serie: cfdi.serie, fecha: cfdi.fecha,
+                subtotal: cfdi.subtotal, descuento: cfdi.descuento || 0,
+                totalImpuestos: cfdi.totalImpuestos, impuestoRetenido: cfdi.impuestoRetenido || 0,
+                total: cfdi.total, moneda: cfdi.moneda,
+                tipoComprobante: 'P', // Marcar como complemento de pago
+                metodoPago: cfdi.metodoPago, formaPago: cfdi.formaPago,
+                uuid: cfdi.uuid || `${file.name}-${Date.now()}`,
+                direccion, estado: 'timbrada',
+                empresaId: empId, clienteId: clienteIdPago, proveedorId: proveedorIdPago,
+                emisorRfc: cfdi.emisorRfc, emisorNombre: cfdi.emisorNombre,
+                receptorRfc: cfdi.receptorRfc, receptorNombre: cfdi.receptorNombre,
+                concepto: cfdi.conceptoTexto || 'Complemento de pago',
+                facturaOriginalUuid: facturaOriginalUuid || null,
+                montoPagado: montoPagado,
+                pagoParcial: montoPagado > 0 && montoPagado < 1000000, // Heurística simple
+              },
+            });
+            procesados++;
+            detalles.push({
+              archivo: file.name,
+              estado: 'pago_guardado',
+              mensaje: `💳 Complemento de pago guardado — Factura original: ${facturaOriginalUuid.slice(0, 8) || 'N/A'}... — Pagado: $${montoPagado.toFixed(2)}`,
+            });
             continue;
           }
 

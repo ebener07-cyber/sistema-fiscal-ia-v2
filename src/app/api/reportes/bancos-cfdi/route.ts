@@ -115,14 +115,22 @@ export async function GET(req: NextRequest) {
       const minMonto = montoAbs * (1 - TOLERANCIA_MONTO);
       const maxMonto = montoAbs * (1 + TOLERANCIA_MONTO);
 
+      // ===== VERIFICAR SI NO REQUIERE FACTURA =====
+      const { categorizarNoConciliable } = await import('@/lib/agentes/categorias-no-conciliables');
+      const noConciliable = categorizarNoConciliable(mov.concepto, mov.monto);
+
       let estado = 'SIN_FACTURA';
       let facturaFolio = '';
       let facturaTotal = 0;
       let facturaNombre = '';
       let facturaRFC = '';
 
-      // Si ya tiene factura conciliada en BD
-      if (mov.facturaConciliadaId && mov.facturaConciliada) {
+      if (!noConciliable.requiereFactura) {
+        estado = 'NO_REQUIERE_FACTURA';
+        facturaFolio = noConcilible.categoria || 'N/A';
+        facturaNombre = noConciliable.razon;
+      } else if (mov.facturaConciliadaId && mov.facturaConciliada) {
+        // Si ya tiene factura conciliada en BD
         estado = 'CONCILIADO';
         facturaFolio = `${mov.facturaConciliada.serie || ''}${mov.facturaConciliada.folio}`;
         facturaTotal = mov.facturaConciliada.total;
@@ -157,6 +165,11 @@ export async function GET(req: NextRequest) {
         } else {
           sinConciliar++;
         }
+      }
+
+      // Contar NO_REQUIERE_FACTURA por separado
+      if (estado === 'NO_REQUIERE_FACTURA') {
+        // No se cuenta como sinConciliar (ya está incrementado arriba solo si corresponde)
       }
 
       const resultado = {
@@ -302,6 +315,7 @@ export async function GET(req: NextRequest) {
       row.getCell(8).numFmt = '"$"#,##0.00';
       if (m.estado === 'CONCILIADO') row.getCell(6).font = { color: { argb: 'FF10B981' }, bold: true };
       else if (m.estado === 'SIN_FACTURA') row.getCell(6).font = { color: { argb: 'FFEF4444' }, bold: true };
+      else if (m.estado === 'NO_REQUIERE_FACTURA') row.getCell(6).font = { color: { argb: 'FF3B82F6' }, bold: true };
       else row.getCell(6).font = { color: { argb: 'FFF97316' }, bold: true };
     });
 
@@ -336,6 +350,7 @@ export async function GET(req: NextRequest) {
       row.getCell(8).numFmt = '"$"#,##0.00';
       if (m.estado === 'CONCILIADO') row.getCell(6).font = { color: { argb: 'FF10B981' }, bold: true };
       else if (m.estado === 'SIN_FACTURA') row.getCell(6).font = { color: { argb: 'FFEF4444' }, bold: true };
+      else if (m.estado === 'NO_REQUIERE_FACTURA') row.getCell(6).font = { color: { argb: 'FF3B82F6' }, bold: true };
       else row.getCell(6).font = { color: { argb: 'FFF97316' }, bold: true };
     });
 

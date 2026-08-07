@@ -1,25 +1,23 @@
 import { db } from '@/lib/db';
 import { registrarAuditTrail } from '@/lib/audit-trail';
+import { categorizarNoConciliable } from '@/lib/agentes/categorias-no-conciliables';
 
 /**
  * AGENTE CONCILIADOR — Concilia movimientos bancarios con facturas
  *
- * Compara movimientos bancarios con facturas (emitidas/recibidas) usando:
- * 1. Match por monto (tolerancia ±2% para comisiones)
- * 2. Match por fecha (tolerancia ±3 días)
- * 3. Match por RFC (si el concepto del movimiento menciona el RFC del emisor/receptor)
+ * MEJORADO v3.5:
+ * 1. Ampliadas tolerancias: monto ±5%, fecha ±7 días
+ * 2. Match por RFC (si el concepto menciona el RFC)
+ * 3. Match por complementos de pago (CFDIs tipo P)
+ * 4. Categoriza movimientos no conciliables (transferencias, comisiones, créditos)
+ * 5. Excluye facturas canceladas de la conciliación
  *
  * Reglas:
  * - Movimiento positivo (depósito) → busca factura EMITIDA con mismo monto
  * - Movimiento negativo (pago) → busca factura RECIBIDA con mismo monto
+ * - Si el movimiento no requiere factura (transferencia, comisión), se marca como NO_REQUIERE
  * - Solo concilia si hay UN único match (no ambiguo)
  * - Marca el movimiento con facturaConciliadaId y conciliadoEn
- *
- * Estrategia:
- * 1. PRIMERO intenta match exacto por monto + fecha
- * 2. Si no hay, intenta match por monto + ±3 días
- * 3. Si no hay, intenta match por monto + ±7 días (con scoreConfianza menor)
- * 4. Si hay múltiples matches, marca como "pendiente revisión"
  */
 
 interface ResultadoConciliacion {
@@ -27,6 +25,7 @@ interface ResultadoConciliacion {
   conciliados: number;
   pendientesRevision: number;
   sinMatch: number;
+  noRequiereFactura: number; // ← NUEVO: movimientos que no necesitan factura
   detalles: Array<{
     movimientoId: string;
     concepto: string;
@@ -37,12 +36,14 @@ interface ResultadoConciliacion {
     facturaTotal?: number;
     facturaFecha?: string;
     scoreConfianza: number;
-    estado: 'conciliado' | 'pendiente_revision' | 'sin_match';
+    estado: 'conciliado' | 'pendiente_revision' | 'sin_match' | 'no_requiere_factura';
+    categoriaNoConciliable?: string;
+    razonNoConciliable?: string;
   }>;
 }
 
-const TOLERANCIA_MONTO_PCT = 0.02; // 2% de tolerancia (comisiones)
-const TOLERANCIA_FECHA_DIAS = 3; // ±3 días
+const TOLERANCIA_MONTO_PCT = 0.05; // 5% de tolerancia (ampliada para comisiones y tipos de cambio)
+const TOLERANCIA_FECHA_DIAS = 7; // ±7 días (ampliada para conciliar más movimientos)
 
 function calcularScoreConfianza(
   montoMov: number,
@@ -75,26 +76,30 @@ async function buscarFacturasMatch(
   const montoMin = montoAbs * (1 - TOLERANCIA_MONTO_PCT);
   const montoMax = montoAbs * (1 + TOLERANCIA_MONTO_PCT);
 
-  // Buscar facturas en rango de fecha ±10 días
+  // Buscar facturas en rango de fecha ±15 días (ampliado para más matches)
   const fechaMin = new Date(fecha);
-  fechaMin.setDate(fechaMin.getDate() - 10);
+  fechaMin.setDate(fechaMin.getDate() - 15);
   const fechaMax = new Date(fecha);
-  fechaMax.setDate(fechaMax.getDate() + 10);
+  fechaMax.setDate(fechaMax.getDate() + 15);
 
+  // Excluir facturas canceladas y buscar solo tipo I (facturas, no complementos P)
   const facturas = await db.factura.findMany({
     where: {
       empresaId,
       direccion,
+      estado: 'timbrada', // ← Excluir canceladas
+      tipoComprobante: 'I', // ← Solo facturas de ingreso, no complementos P
       total: { gte: montoMin, lte: montoMax },
       fecha: { gte: fechaMin, lte: fechaMax },
     },
     select: {
       id: true, folio: true, serie: true, fecha: true, total: true,
       emisorNombre: true, receptorNombre: true, concepto: true,
+      emisorRfc: true, receptorRfc: true,
     },
   });
 
-  return facturas.map(f => {
+  const matches = facturas.map(f => {
     const dias = Math.abs(f.fecha.getTime() - fecha.getTime()) / (1000 * 60 * 60 * 24);
     return {
       factura: f,
@@ -102,6 +107,50 @@ async function buscarFacturasMatch(
       diasDiferencia: dias,
     };
   }).sort((a, b) => b.score - a.score);
+
+  // Si no hay match por monto, buscar complementos de pago (CFDIs tipo P)
+  // que tengan montoPagado similar al movimiento bancario
+  if (matches.length === 0) {
+    const complementosPago = await db.factura.findMany({
+      where: {
+        empresaId,
+        direccion,
+        estado: 'timbrada',
+        tipoComprobante: 'P', // ← Complementos de pago
+        montoPagado: { gte: montoMin, lte: montoMax },
+        fecha: { gte: fechaMin, lte: fechaMax },
+      },
+      select: {
+        id: true, folio: true, serie: true, fecha: true,
+        total: true, montoPagado: true,
+        emisorNombre: true, receptorNombre: true,
+        emisorRfc: true, receptorRfc: true,
+        facturaOriginalUuid: true,
+      },
+    });
+
+    for (const comp of complementosPago) {
+      const montoPagado = comp.montoPagado || 0;
+      const dias = Math.abs(comp.fecha.getTime() - fecha.getTime()) / (1000 * 60 * 60 * 24);
+      // Si el monto pagado coincide, buscar la factura original para conciliar
+      if (comp.facturaOriginalUuid) {
+        const facturaOriginal = await db.factura.findFirst({
+          where: { uuid: comp.facturaOriginalUuid, empresaId },
+          select: { id: true, folio: true, serie: true, fecha: true, total: true, emisorNombre: true, receptorNombre: true },
+        });
+        if (facturaOriginal) {
+          matches.push({
+            factura: facturaOriginal,
+            score: Math.max(0.5, calcularScoreConfianza(montoAbs, montoPagado, dias) * 0.8),
+            diasDiferencia: dias,
+          });
+        }
+      }
+    }
+    matches.sort((a, b) => b.score - a.score);
+  }
+
+  return matches;
 }
 
 /**
@@ -124,7 +173,7 @@ export async function conciliarMovimientosConFacturas(
   empresaId: string,
   opciones?: { limite?: number; forzarReconciliar?: boolean }
 ): Promise<ResultadoConciliacion> {
-  const limite = opciones?.limite || 100;
+  const limite = opciones?.limite || 500; // Ampliado a 500
 
   // Buscar movimientos no conciliados
   const where: any = { cuenta: { empresaId } };
@@ -142,15 +191,36 @@ export async function conciliarMovimientosConFacturas(
   let conciliados = 0;
   let pendientesRevision = 0;
   let sinMatch = 0;
+  let noRequiereFactura = 0;
   const detalles: any[] = [];
 
   for (const mov of movimientos) {
-    // Determinar dirección de factura a buscar
-    // Movimiento positivo (depósito) → factura EMITIDA (cliente nos pagó)
-    // Movimiento negativo (pago) → factura RECIBIDA (pagamos a proveedor)
+    // ===== PASO 1: Verificar si el movimiento NO requiere factura =====
+    const noConciliable = categorizarNoConciliable(mov.concepto, mov.monto);
+    if (!noConcilible.requiereFactura) {
+      noRequiereFactura++;
+      // Actualizar categoría del movimiento
+      await db.movimientoBanco.update({
+        where: { id: mov.id },
+        data: { categoria: noConcilible.categoria || 'no_requiere_factura' },
+      });
+      detalles.push({
+        movimientoId: mov.id,
+        concepto: mov.concepto.slice(0, 80),
+        monto: mov.monto,
+        fecha: mov.fecha.toISOString().slice(0, 10),
+        estado: 'no_requiere_factura',
+        scoreConfianza: 1.0,
+        categoriaNoConciliable: noConcilible.categoria,
+        razonNoConciliable: noConcilible.razon,
+      });
+      continue;
+    }
+
+    // ===== PASO 2: Buscar factura para conciliar =====
     const direccion: 'emitida' | 'recibida' = mov.monto >= 0 ? 'emitida' : 'recibida';
 
-    // Buscar matches por monto + fecha
+    // Buscar matches por monto + fecha (incluye complementos de pago)
     const matches = await buscarFacturasMatch(empresaId, mov.monto, mov.fecha, direccion);
 
     // Si no hay match por monto+fecha, buscar por RFC en el concepto
@@ -162,6 +232,8 @@ export async function conciliarMovimientosConFacturas(
           where: {
             empresaId,
             direccion,
+            estado: 'timbrada', // ← Excluir canceladas
+            tipoComprobante: 'I',
             OR: [
               { emisorRfc: { contains: rfcEncontrado, mode: 'insensitive' } },
               { receptorRfc: { contains: rfcEncontrado, mode: 'insensitive' } },
@@ -256,7 +328,7 @@ export async function conciliarMovimientosConFacturas(
     },
     scoreConfianza: movimientos.length > 0 ? conciliados / movimientos.length : 0,
     verificado: conciliados > 0,
-    observaciones: `${conciliados} conciliados, ${pendientesRevision} pendientes, ${sinMatch} sin match de ${movimientos.length} total`,
+    observaciones: `${conciliados} conciliados, ${noRequiereFactura} no requieren factura, ${pendientesRevision} pendientes, ${sinMatch} sin match de ${movimientos.length} total`,
     empresaId,
   });
 
@@ -265,6 +337,7 @@ export async function conciliarMovimientosConFacturas(
     conciliados,
     pendientesRevision,
     sinMatch,
+    noRequiereFactura,
     detalles,
   };
 }

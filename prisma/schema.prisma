@@ -146,6 +146,11 @@ model Factura {
   emisorRfc       String?
   emisorNombre    String?
   concepto        String?
+  // ===== Campos para complementos de pago (CFDI tipo P) =====
+  // El complemento de pago referencia la factura original por UUID
+  facturaOriginalUuid String?  // UUID de la factura que se está pagando
+  montoPagado         Float?   // Monto pagado (puede ser parcial)
+  pagoParcial         Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   // Relación inversa con movimientos bancarios conciliados
@@ -167,21 +172,40 @@ model Factura {
 // ============================================================================
 
 model Proyecto {
-  id          String   @id @default(cuid())
-  nombre      String
-  codigo      String?
-  descripcion String?
-  clienteId   String?
-  cliente     Cliente? @relation(fields: [clienteId], references: [id])
-  estado      String   @default("activo") // activo, pausado, finalizado, cancelado
-  presupuesto Float    @default(0)
-  fechaInicio DateTime?
-  fechaFin    DateTime?
-  empresaId   String
-  empresa     Empresa  @relation(fields: [empresaId], references: [id])
-  facturas    Factura[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  nombre          String
+  codigo          String?
+  descripcion     String?
+  clienteId       String?
+  cliente         Cliente? @relation(fields: [clienteId], references: [id])
+  estado          String   @default("activo") // activo, pausado, finalizado, cancelado
+  presupuesto     Float    @default(0)
+  fechaInicio     DateTime?
+  fechaFin        DateTime?
+  empresaId       String
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  facturas        Factura[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // ===== Datos extraídos del contrato (PDF) =====
+  contratoPdf     String?   // Nombre del archivo PDF del contrato
+  contratoMonto   Float?    // Monto total del contrato
+  contratoMoneda  String?   // MXN, USD, etc.
+  contratoFecha   DateTime? // Fecha de firma del contrato
+  contratista     String?   // Quién firma como contratista
+  clienteNombre   String?   // Nombre del cliente en el contrato
+  clienteRfc      String?   // RFC del cliente en el contrato
+  ubicacion       String?   // Ubicación de la obra
+  tipoObra        String?   // Tipo de obra (electrica, construccion, etc.)
+  alcanceTrabajo  String?   // Descripción del alcance
+  plazoDias       Int?      // Plazo en días
+  anticipoPct     Float?    // Porcentaje de anticipo (0-100)
+  // Progreso
+  porcentajeAvance Float   @default(0) // 0-100
+  montoFacturado   Float   @default(0) // Suma de facturas emitidas
+  montoCobrado     Float   @default(0) // Suma de movimientos bancarios conciliados
+  montoPendiente   Float   @default(0) // Presupuesto - Facturado
 
   @@index([empresaId])
   @@index([clienteId])
