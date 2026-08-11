@@ -884,3 +884,56 @@ Stage Summary:
   4. Ver facturas asociadas al expandir proyecto
   5. Ver movimientos bancarios conciliados
   6. Ver resumen financiero (facturado, cobrado, pendiente)
+
+---
+Task ID: 16
+Agent: Main Agent (Super Z)
+Task: Conciliación Maestra Bancos-CFDIs estilo Big 4 + reporte profesional Excel
+
+Work Log:
+- Creado endpoint /api/reportes/conciliacion-maestra que genera Excel profesional con 9 hojas:
+  1. Dashboard Ejecutivo — KPIs con colores + datos para gráfica ingresos vs egresos mensual
+  2. Saldos Bancarios — todas las cuentas con saldo final
+  3. Santander Match — movimientos con UUID, folio, cliente/proveedor, monto factura, estado
+  4. Banorte Match — igual que Santander
+  5. Top 10 Clientes — por monto total y frecuencia
+  6. Top 10 Proveedores — por monto total y frecuencia
+  7. No Conciliables — transferencias, comisiones, créditos, impuestos (azul)
+  8. CFDIs Sin Pago — facturas emitidas sin cobro + recibidas sin pago
+  9. Dictamen — conclusiones + 7 recomendaciones profesionales
+
+- Cruzamiento UUID ↔ Clave de Rastreo SPEI:
+  * Tolerancia monto: ±5%
+  * Tolerancia fecha: ±7 días
+  * Si ya tiene facturaConciliadaId en BD → CONCILIADO
+  * Si match único → CONCILIADO
+  * Si múltiples matches → MULTIPLES
+  * Si no requiere factura (transferencia, comisión, etc.) → NO_REQUIERE
+  * Si no encuentra → SIN_FACTURA
+
+- Colores por estado en Excel:
+  * Verde (CONCILIADO)
+  * Rojo (SIN_FACTURA)
+  * Azul (NO_REQUIERE)
+  * Naranja (MULTIPLES)
+
+- Presentación profesional:
+  * Header morado con nombre de empresa
+  * KPIs con colores corporativos
+  * Tabla de ingresos vs egresos mensual con datos para gráfica
+  * Formato de moneda en todas las columnas
+  * Headers con fondo oscuro
+
+- UI en ReportesView:
+  * Card "CONCILIACIÓN MAESTRA Bancos-CFDIs (Estilo Big 4)"
+  * Panel izquierdo: lista de 9 hojas
+  * Panel derecho: botón de descarga + texto "Big 4"
+
+- Build exitoso: ✓ Compiled successfully in 15.0s
+- ZIP: 238 archivos, 3.45 MB
+
+Stage Summary:
+- Sistema ahora genera reporte de conciliación nivel auditoría profesional
+- 9 hojas Excel con match UUID ↔ SPEI
+- Integrado en ReportesView con presentación corporativa
+- Listo para subir a GitHub

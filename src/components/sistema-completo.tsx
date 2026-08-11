@@ -2732,6 +2732,31 @@ function ContabilidadView() {
           </Button>
           <Button
             variant="outline"
+            className="border-violet-500 text-violet-600 hover:bg-violet-50"
+            onClick={async () => {
+              if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+              toast.info('Procesando...', 'Ejecutando conciliador inteligente v2');
+              try {
+                const r = await fetch('/api/agentes/conciliador-inteligente', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ empresaId: empresa.id }),
+                });
+                const d = await r.json();
+                if (d.success) {
+                  toast.success('Conciliador Inteligente v2', d.message);
+                } else {
+                  toast.error('Error', d.error);
+                }
+              } catch (e: any) {
+                toast.error('Error', e.message);
+              }
+            }}
+          >
+            <Sparkles size={14} className="mr-2" /> 🤖 Conciliador Inteligente v2 (Semáforo)
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => {
               if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
               const params = new URLSearchParams({
