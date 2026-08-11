@@ -4153,6 +4153,55 @@ function ReportesView({ stats }: { stats: Stats | null }) {
         </div>
       </Card>
 
+      {/* ===== CONCILIACIÓN MAESTRA (Big 4 Style) ===== */}
+      <Card className="p-5 border-2 border-violet-300 dark:border-violet-700">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <BarChart3 size={18} className="text-violet-600" /> CONCILIACIÓN MAESTRA Bancos-CFDIs (Estilo Big 4)
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Reporte profesional completo con match UUID ↔ Clave de Rastreo SPEI. Incluye dashboard ejecutivo,
+          gráficas, top clientes/proveedores, partidas no conciliables y dictamen de auditoría.
+        </p>
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="border-2 border-violet-200 dark:border-violet-800 rounded-lg p-4 bg-violet-50/30 dark:bg-violet-900/10">
+            <h4 className="font-semibold mb-2 text-violet-700 dark:text-violet-300">📊 9 Hojas Profesionales</h4>
+            <ul className="text-xs text-muted-foreground space-y-1">
+              <li>📊 <strong>Dashboard:</strong> KPIs + gráfica ingresos vs egresos mensual</li>
+              <li>🏦 <strong>Saldos Bancarios:</strong> Banorte + Santander</li>
+              <li>🏛️ <strong>Santander Match:</strong> UUID ↔ SPEI fila por fila</li>
+              <li>🏦 <strong>Banorte Match:</strong> UUID ↔ SPEI fila por fila</li>
+              <li>👥 <strong>Top 10 Clientes:</strong> por monto y frecuencia</li>
+              <li>🚚 <strong>Top 10 Proveedores:</strong> por monto y frecuencia</li>
+              <li>🔵 <strong>No Conciliables:</strong> transferencias, comisiones, créditos</li>
+              <li>⚠️ <strong>CFDIs Sin Pago:</strong> cuentas por cobrar/pagar</li>
+              <li>📝 <strong>Dictamen:</strong> conclusiones + recomendaciones</li>
+            </ul>
+          </div>
+          <div className="border-2 border-emerald-200 dark:border-emerald-800 rounded-lg p-4 bg-emerald-50/30 dark:bg-emerald-900/10 flex flex-col justify-center gap-3">
+            <div className="text-center">
+              <div className="text-3xl font-bold text-violet-600 mb-1">Big 4</div>
+              <p className="text-xs text-muted-foreground">Presentación nivel auditoría profesional</p>
+            </div>
+            <Button
+              className="w-full"
+              onClick={() => {
+                if (!empresa?.id) { toast.warning('Sin empresa', 'Selecciona una empresa'); return; }
+                const params = new URLSearchParams({
+                  empresaId: empresa.id,
+                  anio: String(new Date().getFullYear()),
+                });
+                window.open(`/api/reportes/conciliacion-maestra?${params}`, '_blank');
+              }}
+            >
+              <FileSpreadsheet size={16} className="mr-2" /> Descargar Conciliación Maestra
+            </Button>
+            <p className="text-[10px] text-muted-foreground text-center">
+              Cross UUID ↔ Clave Rastreo SPEI | Colores por estado | Dictamen incluido
+            </p>
+          </div>
+        </div>
+      </Card>
+
       {/* ===== REPORTES SAT OFICIALES (v3.2) ===== */}
       <Card className="p-5">
         <h3 className="font-semibold mb-3 flex items-center gap-2">

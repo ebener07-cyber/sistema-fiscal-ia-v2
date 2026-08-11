@@ -825,3 +825,62 @@ Stage Summary:
   3. Descargar reporte de conciliación (Excel 6 hojas)
   4. Generar pólizas con partida doble
   5. Ver balance de prueba
+
+---
+Task ID: 14
+Agent: Main Agent (Super Z)
+Task: Upload de Contrato PDF en Proyectos + extracción automática de datos
+
+Work Log:
+- Agregados 14 campos al modelo Proyecto en Prisma:
+  * contratoPdf, contratoMonto, contratoMoneda, contratoFecha
+  * contratista, clienteNombre, clienteRfc
+  * ubicacion, tipoObra, alcanceTrabajo
+  * plazoDias, anticipoPct
+  * porcentajeAvance, montoFacturado, montoCobrado, montoPendiente
+- Schema aplicado a BD Neon ✓
+
+- Creado endpoint POST /api/proyectos/upload-contrato:
+  * Acepta PDF de contrato
+  * Extrae texto con pdfjs-dist (mismo parser que bancos)
+  * Extrae automáticamente con regex:
+    - Monto del contrato (patrones: MONTO TOTAL, IMPORTE, $XXX,XXX.XX)
+    - Moneda (MXN/USD)
+    - RFC del cliente (persona moral 12 chars, física 13 chars)
+    - Fecha del contrato (DD de MES de YYYY, DD/MM/YYYY)
+    - Nombre del cliente (después de "CLIENTE:", "CONTRATANTE:")
+    - Ubicación (después de "UBICACIÓN:", "DOMICILIO:")
+    - Tipo de obra (ELECTRIC, CONSTRUCCION, INSTALACION, etc.)
+    - Plazo en días (PLAZO: XX DÍAS)
+    - Anticipo % (ANTICIPO: XX%)
+    - Contratista (después de "CONTRATISTA:")
+    - Alcance (después de "ALCANCE:", "OBJETO:")
+  * Si encuentra RFC, busca o crea cliente automáticamente
+  * Crea o actualiza proyecto con todos los datos extraídos
+  * Devuelve datosExtraidos + textoExtraido para verificación
+
+- Creado endpoint GET /api/proyectos/detalle?id=xxx:
+  * Devuelve proyecto completo con cliente, facturas y movimientos conciliados
+  * Calcula: totalFacturado, totalCobrado, montoPendiente, porcentajeAvance
+  * Actualiza proyecto con montos calculados automáticamente
+
+- UI agregada en ProyectosView:
+  * Card "Subir Contrato PDF" con zona de upload
+  * Descripción de qué datos extrae automáticamente
+  * Toast con datos extraídos después de subir
+  * Cada tarjeta de proyecto muestra:
+    - Datos del contrato (monto, RFC, ubicación, plazo) en tarjetas pequeñas de colores
+    - Barra de avance del contrato (facturado vs monto total)
+    - % de avance con gradiente violeta-fucsia
+
+- Build exitoso: ✓ Compiled successfully in 14.8s
+- ZIP: 234 archivos, 3.43 MB
+
+Stage Summary:
+- Módulo Proyectos ahora permite:
+  1. Subir contrato PDF → extrae datos automáticamente → crea proyecto
+  2. Ver datos del contrato en cada tarjeta de proyecto
+  3. Ver barra de avance (facturado vs contrato)
+  4. Ver facturas asociadas al expandir proyecto
+  5. Ver movimientos bancarios conciliados
+  6. Ver resumen financiero (facturado, cobrado, pendiente)

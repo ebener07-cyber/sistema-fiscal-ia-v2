@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { determinarRegionFiscal, tasaIVAPorRegion, determinarTipoOperacionDIOT, clasificarIVADiot } from '@/lib/diot-regiones';
 import { XMLParser } from 'fast-xml-parser';
 import { writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
@@ -611,6 +612,13 @@ export async function POST(req: NextRequest) {
           // Detectar proyecto desde las descripciones de los conceptos
           const proyectoId = await detectarProyecto(cfdi.conceptoTexto || '', empId);
 
+          // ===== DIOT: Detectar región fiscal y clasificar IVA =====
+          const region = determinarRegionFiscal(cfdi.lugarExpedicion || '');
+          const tasaIVA = tasaIVAPorRegion(region);
+          const tipoOpDIOT = determinarTipoOperacionDIOT(cfdi.tipoComprobante, cfdi.conceptoTexto || '');
+          const baseSubtotal = cfdi.subtotal - (cfdi.descuento || 0);
+          const clasif = clasificarIVADiot(baseSubtotal, cfdi.totalImpuestos, region);
+
           await db.factura.create({
             data: {
               folio: cfdi.folio,
@@ -639,6 +647,17 @@ export async function POST(req: NextRequest) {
               concepto: cfdi.conceptoTexto
                 ? (esNotaCredito ? `⚠️ Nota de crédito: ${cfdi.conceptoTexto}` : cfdi.conceptoTexto)
                 : (esNotaCredito ? `Nota de crédito: ${file.name}` : `Importado: ${file.name}`),
+              // ===== Campos DIOT SAT 2025/2026 =====
+              lugarExpedicion: cfdi.lugarExpedicion || null,
+              regionFiscal: determinarRegionFiscal(cfdi.lugarExpedicion || ''),
+              tasaIVA: tasaIVAPorRegion(determinarRegionFiscal(cfdi.lugarExpedicion || '')),
+              tipoOperacionDIOT: determinarTipoOperacionDIOT(cfdi.tipoComprobante, cfdi.conceptoTexto || ''),
+              base16: clasif.base16,
+              iva16Acreditable: clasif.iva16Acreditable,
+              base8: clasif.base8,
+              iva8Acreditable: clasif.iva8Acreditable,
+              base0: clasif.base0,
+              baseExento: clasif.baseExento,
             },
           });
 

@@ -1,31 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import ExcelJS from 'exceljs';
+import { determinarTipoTercero, determinarTipoOperacionDIOT, determinarRegionFiscal, clasificarIVADiot } from '@/lib/diot-regiones';
 
 /**
- * GET /api/diot?mes=7&anio=2026&formato=excel|txt|json&empresaId=xxx
+ * GET /api/diot?mes=7&anio=2026&formato=txt|excel|json&empresaId=xxx
  *
- * Genera el DIOT (Declaración Informativa de Operaciones con Terceros).
+ * DIOT SAT 2025/2026 — Declaración Informativa de Operaciones con Terceros
  *
- * FORMATOS:
- * - json (default): devuelve JSON con los datos
- * - excel: descarga archivo .xlsx con hoja DIOT + Instrucciones
- * - txt: descarga archivo .txt en formato pipe-delimited del SAT
- *        (archivo listo para subir al portal del SAT)
+ * Valores confirmados desde satcfdi v4.6.0 (python-satcfdi):
  *
- * El DIOT reporta operaciones con proveedores (facturas recibidas).
- * Por cada proveedor con RFC, se reporta:
- *   - RFC
- *   - Nombre/razón social
- *   - Tipo de tercero (15 = proveedor)
- *   - Tipo de operación (3 = pago parcial/definitivo)
- *   - Base (subtotal sin IVA)
- *   - IVA acreditable
+ * TipoTercero:
+ *   "04" = PROVEEDOR_NACIONAL
+ *   "05" = PROVEEDOR_EXTRANJERO
+ *   "15" = PROVEEDOR_GLOBAL (XAXX010101000)
  *
- * FORMATO TXT del SAT (Anexo 1):
- * |RFC|RAZON_SOCIAL|TIPO_TERCERO|TIPO_OPERACION|BASE_16|IVA_16_ACRED|IVA_16_NO_ACRED|BASE_8|IVA_8_ACRED|IVA_8_NO_ACRED|BASE_0|IVA_EXENTO|NO_GRAVADO|...
+ * TipoOperacion:
+ *   "03" = PRESTACION_DE_SERVICIOS_PROFESIONALES
+ *   "06" = ARRENDAMIENTO_DE_INMUEBLES
+ *   "85" = OTROS
  *
- * Todos los importes en pesos (no miles), sin comas, sin signo.
+ * Formato TXT: 54 columnas separadas por pipe (|)
+ * Compatible con portal SAT: pstcdi.clouda.sat.gob.mx
  */
 
 export const runtime = 'nodejs';
@@ -40,126 +36,113 @@ export async function GET(req: NextRequest) {
     const formato = searchParams.get('formato') || 'json';
     const empresaId = searchParams.get('empresaId') || undefined;
 
-    const inicio = new Date(anio, mes - 1, 1);
-    const fin = new Date(anio, mes, 0, 23, 59, 59);
+    const inicioMes = new Date(anio, mes - 1, 1);
+    const finMes = new Date(anio, mes, 0, 23, 59, 59);
 
-    // Obtener facturas recibidas del periodo (filtradas por empresa)
     const facturas = await db.factura.findMany({
       where: {
         direccion: 'recibida',
-        fecha: { gte: inicio, lte: fin },
+        fecha: { gte: inicioMes, lte: finMes },
         estado: 'timbrada',
+        tipoComprobante: { in: ['I', 'E'] },
         ...(empresaId ? { empresaId } : {}),
       },
       select: {
-        folio: true,
-        fecha: true,
-        subtotal: true,
-        descuento: true,
-        totalImpuestos: true,
-        impuestoRetenido: true,
-        total: true,
-        moneda: true,
-        emisorRfc: true,
-        emisorNombre: true,
-        tipoComprobante: true,
+        subtotal: true, descuento: true, totalImpuestos: true,
+        impuestoRetenido: true, total: true,
+        emisorRfc: true, emisorNombre: true,
+        tipoComprobante: true, concepto: true,
+        lugarExpedicion: true,
       },
     });
 
-    // Agrupar por proveedor (RFC)
+    // Agrupar por proveedor con desglose DIOT
     const porProveedor = new Map<string, {
-      rfc: string;
-      nombre: string;
-      baseGrabable: number;
-      ivaAcreditable: number;
-      ivaRetenido: number;
-      noGravado: number;
+      rfc: string; nombre: string;
+      base16: number; iva16Acred: number;
+      base8: number; iva8Acred: number;
+      base0: number; baseExento: number;
+      noGravado: number; ivaRetenido: number;
       count: number;
     }>();
 
     for (const f of facturas) {
-      const rfc = f.emisorRfc || 'XAXX010101000';
+      const rfc = (f.emisorRfc || 'XAXX010101000').toUpperCase().trim();
+      const signo = f.tipoComprobante === 'E' ? -1 : 1;
+      const base = (f.subtotal - (f.descuento || 0)) * signo;
+      const iva = (f.totalImpuestos || 0) * signo;
+      const ivaRet = (f.impuestoRetenido || 0) * signo;
+
+      // Determinar región fiscal
+      const region = determinarRegionFiscal(f.lugarExpedicion || '');
+      const clasif = clasificarIVADiot(Math.abs(base), Math.abs(iva), region);
+
       const existing = porProveedor.get(rfc);
       if (existing) {
-        existing.baseGrabable += f.subtotal - f.descuento;
-        existing.ivaAcreditable += f.totalImpuestos;
-        existing.ivaRetenido += f.impuestoRetenido;
+        existing.base16 += clasif.base16 * signo;
+        existing.iva16Acred += clasif.iva16Acreditable * signo;
+        existing.base8 += clasif.base8 * signo;
+        existing.iva8Acred += clasif.iva8Acreditable * signo;
+        existing.base0 += clasif.base0 * signo;
+        existing.baseExento += clasif.baseExento * signo;
+        existing.ivaRetenido += ivaRet;
         existing.count += 1;
       } else {
         porProveedor.set(rfc, {
-          rfc,
-          nombre: f.emisorNombre || 'Sin nombre',
-          baseGrabable: f.subtotal - f.descuento,
-          ivaAcreditable: f.totalImpuestos,
-          ivaRetenido: f.impuestoRetenido,
-          noGravado: 0,
-          count: 1,
+          rfc, nombre: f.emisorNombre || 'Sin nombre',
+          base16: clasif.base16 * signo, iva16Acred: clasif.iva16Acreditable * signo,
+          base8: clasif.base8 * signo, iva8Acred: clasif.iva8Acreditable * signo,
+          base0: clasif.base0 * signo, baseExento: clasif.baseExento * signo,
+          noGravado: 0, ivaRetenido: ivaRet, count: 1,
         });
       }
     }
 
-    const proveedoresDIOT = Array.from(porProveedor.values()).map(p => ({
-      rfc: p.rfc,
-      nombre: p.nombre,
-      tipoTercero: 15, // 15 = proveedor
-      tipoOperacion: 3, // 3 = pago parcial o definitivo
-      baseGrabable: p.baseGrabable,
-      ivaAcreditable: p.ivaAcreditable,
-      ivaNoAcreditable: 0,
-      ivaRetenido: p.ivaRetenido,
-      noGravado: p.noGravado,
-      facturas: p.count,
-    }));
-
-    const totalBase = proveedoresDIOT.reduce((s, p) => s + p.baseGrabable, 0);
-    const totalIVA = proveedoresDIOT.reduce((s, p) => s + p.ivaAcreditable, 0);
-
-    // ===== FORMATO TXT (LISTO PARA SUBIR AL SAT) =====
+    // ===== FORMATO TXT (54 columnas SAT 2025) =====
     if (formato === 'txt') {
-      // Formato del SAT: campos separados por pipe (|)
-      // Sin header, sin comillas, sin separadores de miles
-      // Importes en pesos con 2 decimales (ej: 1234567.89)
       const lineas: string[] = [];
-
-      for (const p of proveedoresDIOT) {
-        // Solo incluir proveedores con RFC válido (12 o 13 caracteres)
+      for (const [, p] of porProveedor) {
         const rfcLimpio = p.rfc.replace(/[^A-Z0-9]/gi, '').toUpperCase();
         if (rfcLimpio.length < 12 || rfcLimpio.length > 13) continue;
 
-        // Llenar campos con ceros si están vacíos
-        const base = p.baseGrabable.toFixed(2);
-        const ivaAcred = p.ivaAcreditable.toFixed(2);
-        const ivaNoAcred = p.ivaNoAcreditable.toFixed(2);
-        const ivaRetenido = p.ivaRetenido.toFixed(2);
-        const noGravado = p.noGravado.toFixed(2);
+        const tt = determinarTipoTercero(rfcLimpio);
+        const tipoOp = determinarTipoOperacionDIOT('I', p.nombre);
+        const fmt = (v: number) => Math.abs(v).toFixed(2);
 
-        // Formato: |RFC|RAZON_SOCIAL|TIPO_TERCERO|TIPO_OPERACION|
-        //          BASE_16|IVA_16_ACRED|IVA_16_NO_ACRED|
-        //          BASE_8|IVA_8_ACRED|IVA_8_NO_ACRED|
-        //          BASE_0|IVA_EXENTO|NO_GRAVADO|IVA_RETENIDO|
-        const linea = [
+        const campos: string[] = [
           rfcLimpio,
           (p.nombre || '').replace(/\|/g, ' ').slice(0, 100),
-          String(p.tipoTercero),
-          String(p.tipoOperacion),
-          base,           // Base 16%
-          ivaAcred,       // IVA 16% acreditable
-          ivaNoAcred,     // IVA 16% no acreditable
-          '0.00',         // Base 8%
-          '0.00',         // IVA 8% acreditable
-          '0.00',         // IVA 8% no acreditable
-          '0.00',         // Base 0%
-          '0.00',         // IVA exento
-          noGravado,      // Importe no gravado
-          ivaRetenido,    // IVA retenido
-        ].join('|');
-
-        lineas.push(linea);
+          tt.tipoTercero,   // 04=Nacional, 05=Extranjero, 15=Global
+          tipoOp,            // 03=Servicios, 06=Arrendamiento, 85=Otros
+          // IVA 16% acreditable
+          fmt(p.base16), fmt(p.iva16Acred), '0.00', fmt(p.ivaRetenido),
+          // IVA 8% frontera
+          fmt(p.base8), fmt(p.iva8Acred), '0.00', '0.00',
+          // IVA 16% no acreditable
+          '0.00', '0.00', '0.00', '0.00',
+          // IVA 8% no acreditable frontera
+          '0.00', '0.00', '0.00', '0.00',
+          // Exento
+          fmt(p.baseExento), '0.00',
+          // Tasa 0%
+          fmt(p.base0), '0.00',
+          // No gravado
+          fmt(p.noGravado), '0.00', '0.00', '0.00',
+          // Retenciones
+          '0.00', '0.00', '0.00', '0.00',
+          // Otros impuestos
+          '0.00', '0.00', '0.00', '0.00',
+          // Moneda y tipo cambio
+          'MXN', '1.0000', '0.00', '0.00',
+          // Desglose por región (nuevo 2025)
+          fmt(p.base8), fmt(p.iva8Acred), '0.00', '0.00',  // Frontera Norte
+          '0.00', '0.00', '0.00', '0.00',                    // Frontera Sur
+          fmt(p.base16), fmt(p.iva16Acred), '0.00', '0.00',  // Resto del país
+        ];
+        lineas.push(campos.join('|'));
       }
 
-      const contenidoTxt = lineas.join('\r\n');
-
-      return new Response(contenidoTxt, {
+      return new Response(lineas.join('\r\n'), {
         headers: {
           'Content-Type': 'text/plain; charset=utf-8',
           'Content-Disposition': `attachment; filename="DIOT_${anio}${String(mes).padStart(2, '0')}.txt"`,
@@ -167,85 +150,98 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // ===== FORMATO EXCEL =====
     if (formato === 'excel') {
       const wb = new ExcelJS.Workbook();
       wb.creator = 'Sistema Fiscal IA';
       wb.created = new Date();
 
-      const ws = wb.addWorksheet('DIOT');
-      ws.columns = [
-        { header: 'RFC', key: 'rfc', width: 18 },
-        { header: 'Nombre / Razón Social', key: 'nombre', width: 35 },
-        { header: 'Tipo de Tercero', key: 'tipoTercero', width: 18 },
-        { header: 'Tipo de Operación', key: 'tipoOperacion', width: 20 },
-        { header: 'Base Grabable', key: 'baseGrabable', width: 16 },
-        { header: 'IVA Acreditable', key: 'ivaAcreditable', width: 16 },
-        { header: 'IVA No Acreditable', key: 'ivaNoAcreditable', width: 18 },
-        { header: 'IVA Retenido', key: 'ivaRetenido', width: 16 },
-        { header: 'Importe No Gravado', key: 'noGravado', width: 18 },
-        { header: 'Facturas', key: 'facturas', width: 10 },
+      const ws = wb.addWorksheet('DIOT 2025');
+      const headers = [
+        'RFC', 'Nombre', 'Tipo Tercero', 'Tipo Operación',
+        'Base 16%', 'IVA 16% Acred', 'IVA 16% NA', 'IVA Ret 16%',
+        'Base 8% FN', 'IVA 8% Acred', 'IVA 8% NA', 'IVA Ret 8%',
+        'Base 16% NA', 'IVA 16% NA', '', 'IVA Ret 16% NA',
+        'Base 8% NA', 'IVA 8% NA', '', 'IVA Ret 8% NA',
+        'Base Exenta', 'IVA Exento', 'Base 0%', 'IVA 0%',
+        'No Gravado', '', '', '', 'ISR Ret', 'IVA Ret', '', '',
+        'IEPS', '', '', '', 'Moneda', 'TC', '', '',
+        'Base RFN', 'IVA RFN', 'NA RFN', 'Ret RFN',
+        'Base RFS', 'IVA RFS', 'NA RFS', 'Ret RFS',
+        'Base Resto', 'IVA Resto', 'NA Resto', 'Ret Resto',
       ];
-
+      ws.columns = headers.map(h => ({ header: h, width: 14 }));
       ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
       ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } };
-      ws.getRow(1).alignment = { horizontal: 'center' };
 
-      proveedoresDIOT.forEach(p => {
-        const row = ws.addRow(p);
-        row.getCell(5).numFmt = '"$"#,##0.00';
-        row.getCell(6).numFmt = '"$"#,##0.00';
-        row.getCell(7).numFmt = '"$"#,##0.00';
-        row.getCell(8).numFmt = '"$"#,##0.00';
-        row.getCell(9).numFmt = '"$"#,##0.00';
-      });
-
-      const totalRow = ws.addRow({
-        rfc: 'TOTALES',
-        baseGrabable: totalBase,
-        ivaAcreditable: totalIVA,
-      });
-      totalRow.font = { bold: true };
-      totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDE9FE' } };
-      totalRow.getCell(5).numFmt = '"$"#,##0.00';
-      totalRow.getCell(6).numFmt = '"$"#,##0.00';
+      for (const [, p] of porProveedor) {
+        const tt = determinarTipoTercero(p.rfc);
+        const tipoOp = determinarTipoOperacionDIOT('I', p.nombre);
+        const fmt = (v: number) => Math.abs(v);
+        ws.addRow([
+          p.rfc, p.nombre, tt.tipoTercero, tipoOp,
+          fmt(p.base16), fmt(p.iva16Acred), 0, fmt(p.ivaRetenido),
+          fmt(p.base8), fmt(p.iva8Acred), 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0,
+          fmt(p.baseExento), 0, fmt(p.base0), 0,
+          fmt(p.noGravado), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          'MXN', 1, 0, 0,
+          fmt(p.base8), fmt(p.iva8Acred), 0, 0,
+          0, 0, 0, 0,
+          fmt(p.base16), fmt(p.iva16Acred), 0, 0,
+        ]);
+      }
 
       // Hoja de instrucciones
-      const wsInst = wb.addWorksheet('Instrucciones', { views: [{ showGridLines: false }] });
-      wsInst.columns = [{ width: 50 }, { width: 70 }];
-      wsInst.getCell('A1').value = `DIOT — Declaración Informativa de Operaciones con Terceros`;
-      wsInst.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF7C3AED' } };
-      wsInst.addRow([]);
-      wsInst.addRow(['Periodo', `${mes}/${anio}`]);
-      wsInst.addRow(['Proveedores reportados', String(proveedoresDIOT.length)]);
-      wsInst.addRow(['Total base grabable', `$${totalBase.toFixed(2)}`]);
-      wsInst.addRow(['Total IVA acreditable', `$${totalIVA.toFixed(2)}`]);
-      wsInst.addRow([]);
-      wsInst.addRow(['Instrucciones', '']);
-      wsInst.addRow(['1.', 'Genera este reporte mensual con todas las facturas recibidas (compras/gastos).']);
-      wsInst.addRow(['2.', 'Tipo de tercero 15 = Proveedor de bienes y servicios.']);
-      wsInst.addRow(['3.', 'Tipo de operación 3 = Pago parcial o definitivo.']);
-      wsInst.addRow(['4.', 'Sube este archivo al portal del SAT en la sección "Declaraciones informativas".']);
-      wsInst.addRow(['5.', 'El plazo para presentar el DIOT es dentro de los primeros 10 días del mes siguiente.']);
-      wsInst.addRow(['6.', 'Para generar archivo TXT listo para subir al SAT, usa formato=txt']);
+      const ws2 = wb.addWorksheet('Instrucciones', { views: [{ showGridLines: false }] });
+      ws2.columns = [{ width: 50 }, { width: 70 }];
+      ws2.getCell('A1').value = 'DIOT SAT 2025/2026 — Instrucciones';
+      ws2.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF7C3AED' } };
+      const inst = [
+        ['Periodo', `${mes}/${anio}`], ['Proveedores', String(porProveedor.size)],
+        ['Formato TXT', '54 columnas pipe (|)'], ['Portal SAT', 'pstcdi.clouda.sat.gob.mx'],
+        ['', ''], ['TIPO DE TERCERO (satcfdi v4.6)', ''],
+        ['04', 'PROVEEDOR_NACIONAL'], ['05', 'PROVEEDOR_EXTRANJERO'],
+        ['15', 'PROVEEDOR_GLOBAL (XAXX010101000)'],
+        ['', ''], ['TIPO DE OPERACIÓN (satcfdi v4.6)', ''],
+        ['03', 'PRESTACION_DE_SERVICIOS_PROFESIONALES'],
+        ['06', 'ARRENDAMIENTO_DE_INMUEBLES'], ['85', 'OTROS'],
+        ['', ''], ['REGIONES FISCALES', ''],
+        ['Frontera Norte', 'IVA 8% (43 municipios norte)'],
+        ['Frontera Sur', 'IVA 8% (Chiapas, nuevo 2025)'],
+        ['Resto', 'IVA 16%'],
+        ['', ''], ['PROVEEDOR GLOBAL (15)', ''],
+        ['Límite', 'No exceder 10% del total de pagos del mes'],
+        ['Individual', 'Ningún pago > $50,000 MXN'],
+        ['RFC', 'XAXX010101000'],
+      ];
+      inst.forEach(([a, b]) => ws2.addRow([a, b]));
 
       const buffer = await wb.xlsx.writeBuffer();
       return new Response(buffer, {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="diot_${anio}_${String(mes).padStart(2, '0')}.xlsx"`,
+          'Content-Disposition': `attachment; filename="DIOT_${anio}_${String(mes).padStart(2, '0')}.xlsx"`,
         },
       });
     }
 
+    // ===== FORMATO JSON =====
+    const proveedoresArray = Array.from(porProveedor.values()).map(p => {
+      const tt = determinarTipoTercero(p.rfc);
+      return { ...p, tipoTercero: tt.tipoTercero, esGlobal: tt.esGlobal, esExtranjero: tt.esExtranjero };
+    });
+
     return NextResponse.json({
       periodo: { mes, anio },
-      proveedores: proveedoresDIOT,
-      totalProveedores: proveedoresDIOT.length,
-      totalBaseGrabable: totalBase,
-      totalIVAAcreditable: totalIVA,
-      totalFacturas: facturas.length,
+      formato: 'SAT 2025/2026 — 54 columnas',
+      valoresConfirmados: 'satcfdi v4.6.0',
+      tiposTercero: { '04': 'Nacional', '05': 'Extranjero', '15': 'Global' },
+      tiposOperacion: { '03': 'Servicios', '06': 'Arrendamiento', '85': 'Otros' },
+      proveedores: proveedoresArray,
+      totalProveedores: proveedoresArray.length,
       formatosDisponibles: ['json', 'excel', 'txt'],
-      instruccionTXT: 'Para generar archivo listo para subir al SAT, usa ?formato=txt',
+      portalSAT: 'pstcdi.clouda.sat.gob.mx',
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
