@@ -30,10 +30,10 @@ const REGLAS_INTELIGENTES: ReglaMapeo[] = [
   { keywords: ['COMISION', 'COMISIÓN', 'MEMBRESIA'], categoria: 'Gastos Financieros', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
   { keywords: ['INTERESES EXENTO', 'RENDIMIENTO'], categoria: 'Ingresos Financieros', cuentaContable: '4100', requiereCfdi: false, estado: 'Conciliado Auto' },
 
-  // Servicio de Deuda (no requiere CFDI)
-  { keywords: ['CAPITAL DE CREDITO', 'CARGO CAPITAL', 'CRE_', 'PAGO DE CREDITO'], categoria: 'Servicio de Deuda', cuentaContable: '2000', requiereCfdi: false, estado: 'Conciliado Auto' },
-  { keywords: ['INTERESES DE CREDITO', 'CGO INTERESES', 'INTERES HIPOTECARIO'], categoria: 'Gastos Financieros', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
-  { keywords: ['DISPOSICION', 'DISPOSICION CREDITO'], categoria: 'Inversiones', cuentaContable: '1000', requiereCfdi: false, estado: 'Conciliado Auto' },
+  // Servicio de Deuda (no requiere CFDI) — MEJORA 1: ampliado con más keywords
+  { keywords: ['CAPITAL DE CREDITO', 'CARGO CAPITAL', 'CRE_', 'PAGO DE CREDITO', 'PAGO DE CAPITAL', 'PAGO CAPITAL', '089615962', '91416982'], categoria: 'Servicio de Deuda', cuentaContable: '2200', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['INTERESES DE CREDITO', 'CGO INTERESES', 'INTERES HIPOTECARIO', 'CREDITO SANTANDER TANIA'], categoria: 'Financiamiento / Deuda', cuentaContable: '2200', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['DISPOSICION', 'DISPOSICION CREDITO', 'CREDITO EN LINEA'], categoria: 'Financiamiento / Deuda', cuentaContable: '3100', requiereCfdi: false, estado: 'Conciliado Auto' },
 
   // Seguros (no requieren CFDI)
   { keywords: ['SEGURO', 'PRIMA SEGURO'], categoria: 'Seguros', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
@@ -51,14 +51,15 @@ const REGLAS_INTELIGENTES: ReglaMapeo[] = [
   // Tarjetas de Crédito (no requieren CFDI)
   { keywords: ['PAGO TARJETA', 'TARJETA DE CREDITO'], categoria: 'Pasivos', cuentaContable: '2000', requiereCfdi: false, estado: 'Conciliado Auto' },
 
-  // ===== ANTICIPOS A EMPLEADOS / CAJA CHICA (🟡 Mapeado Auto — No requieren CFDI) =====
-  { keywords: ['TANIA GUADALUPE', 'TANIA ROBLEDO', 'ROET951111', 'SUPERVISION DE CONSTRUCCION TANIA', 'SUPERVISION TANIA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1100', requiereCfdi: false, estado: 'Conciliado Auto' },
-  { keywords: ['JUAN MANUEL POLO', 'POLO VELAZQUEZ'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1100', requiereCfdi: false, estado: 'Conciliado Auto' },
-  { keywords: ['GORDO', 'REEMBOLSO COMBUSTIBLE GORDO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
-  { keywords: ['JUCA', 'REEMBOLSO JUCA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
-  { keywords: ['ROBERTO ACOSTA', 'LUCIANO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1100', requiereCfdi: false, estado: 'Conciliado Auto' },
-  { keywords: ['VIATICO', 'VIÁTICO', 'REEMBOLSO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
-  { keywords: ['COMBUSTIBLE', 'GASOLINA', 'NICMA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
+  // ===== ANTICIPOS / PRÉSTAMOS / CAJA CHICA (🟡 Mapeado Auto — No requieren CFDI) ===== MEJORA 1: ampliado
+  { keywords: ['TANIA GUADALUPE', 'TANIA ROBLEDO', 'ROET951111', 'SUPERVISION DE CONSTRUCCION TANIA', 'SUPERVISION TANIA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1400', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['JUAN MANUEL POLO', 'POLO VELAZQUEZ'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1400', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['GORDO', 'REEMBOLSO COMBUSTIBLE GORDO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1400', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['JUCA', 'REEMBOLSO JUCA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1400', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['ABEL LOREDO'], categoria: 'Préstamo / Cuenta por Cobrar', cuentaContable: '1300', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['ROBERTO ACOSTA', 'LUCIANO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1400', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['VIATICO', 'VIÁTICO', 'REEMBOLSO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1400', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['COMBUSTIBLE', 'GASOLINA', 'NICMA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5200', requiereCfdi: false, estado: 'Conciliado Auto' },
 
   // Gastos personales no deducibles
   { keywords: ['PENSION ALIMENTICIA', 'MISAYRA'], categoria: 'Gastos Personales', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
