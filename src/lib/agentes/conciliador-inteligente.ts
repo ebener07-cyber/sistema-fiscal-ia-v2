@@ -83,6 +83,11 @@ interface ResultadoMovimiento {
 
 /**
  * PASO 1: Aplica el motor de mapeo automático a un movimiento
+ *
+ * CORRECCIÓN v6 (Problema #8): Las reglas de INTERESES ahora son sensibles
+ * al signo del monto. Un CARGO (monto < 0) con concepto "INTERESES" debe
+ * clasificarse como Gasto Financiero (5100), NO como Ingreso Financiero (4100).
+ * Esto afecta directamente el estado de resultados.
  */
 export function mapearMovimiento(concepto: string, monto: number): {
   categoria: string;
@@ -91,7 +96,32 @@ export function mapearMovimiento(concepto: string, monto: number): {
   estado: 'Conciliado Auto' | 'Pendiente Comprobación' | 'Requiere Acción';
 } {
   const upper = concepto.toUpperCase();
+  const esCargo = monto < 0; // Pago → cargo bancario → gasto
+  const esAbono = monto > 0; // Depósito → abono bancario → ingreso
+
+  // CORRECCIÓN #8: Intereses con signo
+  // Cualquier cargo con "INTERES" → Gasto Financiero (5100)
+  // Solo abonos con "INTERESES EXENTO" / "RENDIMIENTO" → Ingreso Financiero (4100)
+  if (esCargo && (upper.includes('INTERES') || upper.includes('INTERESES'))) {
+    return {
+      categoria: 'Gasto Financiero (Intereses)',
+      cuentaContable: '5100',
+      requiereCfdi: false,
+      estado: 'Conciliado Auto',
+    };
+  }
+  if (esAbono && (upper.includes('INTERESES EXENTO') || upper.includes('RENDIMIENTO'))) {
+    return {
+      categoria: 'Ingresos Financieros',
+      cuentaContable: '4100',
+      requiereCfdi: false,
+      estado: 'Conciliado Auto',
+    };
+  }
+
   for (const regla of REGLAS_INTELIGENTES) {
+    // Saltar regla de INTERESES EXENTO genérica porque ya se manejó arriba
+    if (regla.keywords.some(k => k === 'INTERESES EXENTO' || k === 'RENDIMIENTO')) continue;
     for (const keyword of regla.keywords) {
       if (upper.includes(keyword)) {
         return {
