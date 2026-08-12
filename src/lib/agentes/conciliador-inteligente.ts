@@ -51,14 +51,19 @@ const REGLAS_INTELIGENTES: ReglaMapeo[] = [
   // Tarjetas de Crédito (no requieren CFDI)
   { keywords: ['PAGO TARJETA', 'TARJETA DE CREDITO'], categoria: 'Pasivos', cuentaContable: '2000', requiereCfdi: false, estado: 'Conciliado Auto' },
 
-  // ===== ANTICIPOS A EMPLEADOS (🟡 Pendiente Comprobación) =====
-  { keywords: ['TANIA GUADALUPE', 'TANIA ROBLEDO', 'ROET951111'], categoria: 'Caja Chica', cuentaContable: '1100', requiereCfdi: true, estado: 'Pendiente Comprobación' },
-  { keywords: ['JUAN MANUEL POLO', 'POLO VELAZQUEZ'], categoria: 'Caja Chica', cuentaContable: '1100', requiereCfdi: true, estado: 'Pendiente Comprobación' },
-  { keywords: ['VIATICO', 'VIÁTICO', 'REEMBOLSO'], categoria: 'Caja Chica', cuentaContable: '5100', requiereCfdi: true, estado: 'Pendiente Comprobación' },
-  { keywords: ['COMBUSTIBLE', 'GASOLINA', 'NICMA'], categoria: 'Caja Chica', cuentaContable: '5100', requiereCfdi: true, estado: 'Pendiente Comprobación' },
+  // ===== ANTICIPOS A EMPLEADOS / CAJA CHICA (🟡 Mapeado Auto — No requieren CFDI) =====
+  { keywords: ['TANIA GUADALUPE', 'TANIA ROBLEDO', 'ROET951111', 'SUPERVISION DE CONSTRUCCION TANIA', 'SUPERVISION TANIA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1100', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['JUAN MANUEL POLO', 'POLO VELAZQUEZ'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1100', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['GORDO', 'REEMBOLSO COMBUSTIBLE GORDO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['JUCA', 'REEMBOLSO JUCA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['ROBERTO ACOSTA', 'LUCIANO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '1100', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['VIATICO', 'VIÁTICO', 'REEMBOLSO'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['COMBUSTIBLE', 'GASOLINA', 'NICMA'], categoria: 'Anticipo Nómina / Caja Chica', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
 
   // Gastos personales no deducibles
   { keywords: ['PENSION ALIMENTICIA', 'MISAYRA'], categoria: 'Gastos Personales', cuentaContable: '5100', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['TARJETA DE CREDITO FER', 'TARJETA TANIA', 'PAGO DE TARJETAS DE CREDITO'], categoria: 'Pasivos', cuentaContable: '2000', requiereCfdi: false, estado: 'Conciliado Auto' },
+  { keywords: ['RETIRO DEP. ELECTRONICO', 'RETIRO DEPOSITO ELECTRONICO'], categoria: 'Traspaso Interno (No Deducible)', cuentaContable: '1000', requiereCfdi: false, estado: 'Conciliado Auto' },
 ];
 
 interface ResultadoMovimiento {
