@@ -279,6 +279,26 @@ export function SistemaCompleto() {
                   {NAV.flatMap(s => s.items).find(i => i.id === view)?.label || 'Dashboard'}
                 </h1>
               </div>
+
+              {/* BADGE EMPRESA ACTIVA — visible siempre en el topbar */}
+              {empresa && (
+                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-50 to-blue-50 dark:from-violet-950/40 dark:to-blue-950/40 border border-violet-200 dark:border-violet-900">
+                  <div className="w-7 h-7 rounded-md bg-gradient-to-br from-violet-600 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                    {empresa.nombre.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="flex flex-col leading-tight min-w-0">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Empresa activa</span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-sm font-semibold text-foreground truncate max-w-[180px]" title={empresa.nombre}>
+                        {empresa.nombre}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 font-mono text-[10px] flex-shrink-0">
+                        {empresa.rfc}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -322,6 +342,43 @@ export function SistemaCompleto() {
         </header>
 
         {/* CONTENT */}
+        {/* Barra de contexto — muestra empresa activa en todos los módulos */}
+        {empresa && view !== 'empresas' && view !== 'admin' && (
+          <div className="px-4 md:px-6 pt-3 max-w-7xl mx-auto">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-violet-50 to-blue-50 dark:from-violet-950/40 dark:to-blue-950/40 border border-violet-200 dark:border-violet-900 text-xs flex-wrap">
+              <Building2 size={14} className="text-violet-600 dark:text-violet-400 flex-shrink-0" />
+              <span className="text-muted-foreground">Trabajando con:</span>
+              <strong className="text-foreground" title={empresa.nombre}>{empresa.nombre}</strong>
+              <span className="px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 font-mono text-[10px]">
+                {empresa.rfc}
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground">Módulo:</span>
+              <span className="text-foreground font-medium capitalize">
+                {NAV.flatMap(s => s.items).find(i => i.id === view)?.label || view}
+              </span>
+              {empresas.length > 1 && (
+                <>
+                  <span className="text-muted-foreground ml-2">·</span>
+                  <select
+                    value={empresa.id}
+                    onChange={(e) => {
+                      const sel = empresas.find(em => em.id === e.target.value);
+                      if (sel) setEmpresa(sel);
+                    }}
+                    className="h-6 px-2 text-xs border rounded bg-background hover:bg-muted/50 transition cursor-pointer max-w-[180px] truncate"
+                    title="Cambiar empresa"
+                  >
+                    {empresas.map((e) => (
+                      <option key={e.id} value={e.id}>{e.nombre} ({e.rfc})</option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         <main className="p-4 md:p-6 max-w-7xl mx-auto">
           {view === 'dashboard' && <DashboardView stats={stats} setView={setView} />}
           {view === 'empresas' && <EmpresasView />}
@@ -1448,7 +1505,7 @@ function EmpleadosView() {
 }
 
 function FacturacionView() {
-  const { empresa } = useEmpresa();
+  const { empresa, empresas, setEmpresa } = useEmpresa();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [filtroDir, setFiltroDir] = useState<'todas' | 'emitida' | 'recibida'>('todas');
@@ -1474,7 +1531,46 @@ function FacturacionView() {
       <TableSkeletonCard title="Cargando facturas..." cols={6} rows={7} />
     </div>
   );
-  if (!data?.facturas?.length) return <EmptyState icon={FileText} message="Sin facturas cargadas. Sube tus CFDIs desde el módulo SAT." />;
+  if (!data?.facturas?.length) return (
+    <div className="space-y-4 animate-fade-in">
+      {/* Aviso claro de empresa activa sin CFDIs */}
+      <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-4">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" size={20} />
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-amber-900 dark:text-amber-100">
+              No hay CFDIs cargados para esta empresa
+            </h3>
+            <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+              Empresa activa: <strong>{empresa?.nombre}</strong> ({empresa?.rfc}).
+              Si ya subiste CFDIs antes, es probable que pertenezcan a otra empresa.
+              Puedes cambiar la empresa activa en el selector del header, o subir nuevos CFDIs desde el módulo SAT.
+            </p>
+            <div className="flex gap-2 mt-3 flex-wrap">
+              <Button size="sm" onClick={() => window.location.hash = 'sat'}>
+                <Satellite size={14} className="mr-1.5" /> Ir a subir CFDIs
+              </Button>
+              {empresas.length > 1 && (
+                <select
+                  value={empresa?.id || ''}
+                  onChange={(e) => {
+                    const sel = empresas.find(em => em.id === e.target.value);
+                    if (sel) setEmpresa(sel);
+                  }}
+                  className="h-8 px-3 text-xs border rounded bg-background"
+                >
+                  {empresas.map((e) => (
+                    <option key={e.id} value={e.id}>{e.nombre} ({e.rfc})</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+      <EmptyState icon={FileText} message="Sin facturas cargadas para esta empresa activa." />
+    </div>
+  );
 
   const facturas = data.facturas || [];
   const totalCount = data.totalCount || 0;
@@ -2905,7 +3001,7 @@ function ContabilidadView() {
 }
 
 function SatView() {
-  const { empresa } = useEmpresa();
+  const { empresa, empresas, setEmpresa } = useEmpresa();
   const [tab, setTab] = useState<'recibidas' | 'emitidas'>('recibidas');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
@@ -3120,7 +3216,38 @@ function SatView() {
         // Skeleton: 6 columnas (Folio, Fecha, Proveedor/Cliente, RFC, Total, UUID) — 7 filas shimmer
         <TableSkeletonCard title={`Cargando CFDIs ${tab}...`} cols={6} rows={7} />
       ) : (data?.facturas?.length || 0) === 0 ? (
-        <EmptyState icon={Satellite} message={`Sin CFDIs ${tab} en el período seleccionado`} />
+        <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" size={22} />
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-amber-900 dark:text-amber-100">
+                Sin CFDIs {tab} para {empresa?.nombre} ({empresa?.rfc}) en {selMes === 0 ? `el año ${anioSel}` : `${meses[selMes - 1]} ${anioSel}`}
+              </h3>
+              <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                Sube tus archivos XML del SAT usando la zona de carga de arriba.
+                Si ya subiste CFDIs en otra sesión, es probable que estén asignados a otra empresa.
+                Verifica el selector de empresa activa en el header.
+              </p>
+              {empresas.length > 1 && (
+                <div className="mt-3">
+                  <span className="text-xs text-muted-foreground mr-2">¿Pertenecen a otra empresa?</span>
+                  <select
+                    value={empresa?.id || ''}
+                    onChange={(e) => {
+                      const sel = empresas.find(em => em.id === e.target.value);
+                      if (sel) setEmpresa(sel);
+                    }}
+                    className="h-8 px-3 text-xs border rounded bg-background inline-block max-w-[280px]"
+                  >
+                    {empresas.map((e) => (
+                      <option key={e.id} value={e.id}>{e.nombre} ({e.rfc})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       ) : (
         <>
           <DataTableCard
